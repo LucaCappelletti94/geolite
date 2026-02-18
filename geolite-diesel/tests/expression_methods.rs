@@ -203,10 +203,7 @@ fn method_st_equals() {
 
 #[test]
 fn method_st_dwithin() {
-    assert_method_eq_func!(
-        g!().st_dwithin(g!(), d!()),
-        st_dwithin(g!(), g!(), d!())
-    );
+    assert_method_eq_func!(g!().st_dwithin(g!(), d!()), st_dwithin(g!(), g!(), d!()));
 }
 
 #[test]
@@ -228,10 +225,7 @@ fn method_st_azimuth() {
 
 #[test]
 fn method_st_project() {
-    assert_method_eq_func!(
-        g!().st_project(d!(), d!()),
-        st_project(g!(), d!(), d!())
-    );
+    assert_method_eq_func!(g!().st_project(d!(), d!()), st_project(g!(), d!(), d!()));
 }
 
 #[test]

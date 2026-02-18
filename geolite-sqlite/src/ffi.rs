@@ -239,7 +239,12 @@ xfunc_blob_optsrid_blob!(
     "ST_GeomFromWKB",
     geom_from_wkb
 );
-xfunc_blob!(st_geomfromewkb_xfunc, "ST_GeomFromEWKB", geom_from_ewkb, set_blob_owned);
+xfunc_blob!(
+    st_geomfromewkb_xfunc,
+    "ST_GeomFromEWKB",
+    geom_from_ewkb,
+    set_blob_owned
+);
 
 unsafe extern "C" fn st_geomfromgeojson_xfunc(
     ctx: *mut sqlite3_context,
@@ -260,7 +265,12 @@ xfunc_blob!(st_astext_xfunc, "ST_AsText", as_text, set_text_owned);
 xfunc_blob!(st_asewkt_xfunc, "ST_AsEWKT", as_ewkt, set_text_owned);
 xfunc_blob!(st_asbinary_xfunc, "ST_AsBinary", as_binary, set_blob_owned);
 xfunc_blob!(st_asewkb_xfunc, "ST_AsEWKB", as_ewkb, set_blob_owned);
-xfunc_blob!(st_asgeojson_xfunc, "ST_AsGeoJSON", as_geojson, set_text_owned);
+xfunc_blob!(
+    st_asgeojson_xfunc,
+    "ST_AsGeoJSON",
+    as_geojson,
+    set_text_owned
+);
 
 // ── Constructor callbacks ────────────────────────────────────────────────────
 
@@ -304,8 +314,18 @@ unsafe extern "C" fn st_point_3_xfunc(
     }
 }
 
-xfunc_blob2!(st_makeline_xfunc, "ST_MakeLine", st_make_line, set_blob_owned);
-xfunc_blob!(st_makepolygon_xfunc, "ST_MakePolygon", st_make_polygon, set_blob_owned);
+xfunc_blob2!(
+    st_makeline_xfunc,
+    "ST_MakeLine",
+    st_make_line,
+    set_blob_owned
+);
+xfunc_blob!(
+    st_makepolygon_xfunc,
+    "ST_MakePolygon",
+    st_make_polygon,
+    set_blob_owned
+);
 
 unsafe extern "C" fn st_makeenvelope_4_xfunc(
     ctx: *mut sqlite3_context,
@@ -374,7 +394,12 @@ unsafe extern "C" fn st_setsrid_xfunc(
     }
 }
 
-xfunc_blob!(st_geometrytype_xfunc, "ST_GeometryType", st_geometry_type, set_text_owned);
+xfunc_blob!(
+    st_geometrytype_xfunc,
+    "ST_GeometryType",
+    st_geometry_type,
+    set_text_owned
+);
 xfunc_blob!(st_ndims_xfunc, "ST_NDims", st_ndims, set_i32);
 xfunc_blob!(st_coorddim_xfunc, "ST_CoordDim", st_coord_dim, set_i32);
 xfunc_blob!(st_zmflag_xfunc, "ST_Zmflag", st_zmflag, set_i32);
@@ -384,8 +409,18 @@ xfunc_blob!(st_x_xfunc, "ST_X", st_x, set_f64);
 xfunc_blob!(st_y_xfunc, "ST_Y", st_y, set_f64);
 xfunc_blob!(st_numpoints_xfunc, "ST_NumPoints", st_num_points, set_i32);
 xfunc_blob!(st_npoints_xfunc, "ST_NPoints", st_npoints, set_i32);
-xfunc_blob!(st_numgeometries_xfunc, "ST_NumGeometries", st_num_geometries, set_i32);
-xfunc_blob!(st_numinteriorrings_xfunc, "ST_NumInteriorRings", st_num_interior_rings, set_i32);
+xfunc_blob!(
+    st_numgeometries_xfunc,
+    "ST_NumGeometries",
+    st_num_geometries,
+    set_i32
+);
+xfunc_blob!(
+    st_numinteriorrings_xfunc,
+    "ST_NumInteriorRings",
+    st_num_interior_rings,
+    set_i32
+);
 xfunc_blob!(st_numrings_xfunc, "ST_NumRings", st_num_rings, set_i32);
 
 unsafe extern "C" fn st_pointn_xfunc(
@@ -404,9 +439,24 @@ unsafe extern "C" fn st_pointn_xfunc(
     }
 }
 
-xfunc_blob!(st_startpoint_xfunc, "ST_StartPoint", st_start_point, set_blob_owned);
-xfunc_blob!(st_endpoint_xfunc, "ST_EndPoint", st_end_point, set_blob_owned);
-xfunc_blob!(st_exteriorring_xfunc, "ST_ExteriorRing", st_exterior_ring, set_blob_owned);
+xfunc_blob!(
+    st_startpoint_xfunc,
+    "ST_StartPoint",
+    st_start_point,
+    set_blob_owned
+);
+xfunc_blob!(
+    st_endpoint_xfunc,
+    "ST_EndPoint",
+    st_end_point,
+    set_blob_owned
+);
+xfunc_blob!(
+    st_exteriorring_xfunc,
+    "ST_ExteriorRing",
+    st_exterior_ring,
+    set_blob_owned
+);
 
 unsafe extern "C" fn st_interiorringn_xfunc(
     ctx: *mut sqlite3_context,
@@ -441,9 +491,19 @@ unsafe extern "C" fn st_geometryn_xfunc(
 }
 
 xfunc_blob!(st_dimension_xfunc, "ST_Dimension", st_dimension, set_i32);
-xfunc_blob!(st_envelope_xfunc, "ST_Envelope", st_envelope, set_blob_owned);
+xfunc_blob!(
+    st_envelope_xfunc,
+    "ST_Envelope",
+    st_envelope,
+    set_blob_owned
+);
 xfunc_blob!(st_isvalid_xfunc, "ST_IsValid", st_is_valid, set_bool);
-xfunc_blob!(st_isvalidreason_xfunc, "ST_IsValidReason", st_is_valid_reason, set_text_owned);
+xfunc_blob!(
+    st_isvalidreason_xfunc,
+    "ST_IsValidReason",
+    st_is_valid_reason,
+    set_text_owned
+);
 
 // ── Measurement callbacks ────────────────────────────────────────────────────
 
@@ -451,16 +511,46 @@ xfunc_blob!(st_area_xfunc, "ST_Area", st_area, set_f64);
 xfunc_blob!(st_length_xfunc, "ST_Length", st_length, set_f64);
 xfunc_blob!(st_perimeter_xfunc, "ST_Perimeter", st_perimeter, set_f64);
 xfunc_blob2!(st_distance_xfunc, "ST_Distance", st_distance, set_f64);
-xfunc_blob!(st_centroid_xfunc, "ST_Centroid", st_centroid, set_blob_owned);
-xfunc_blob!(st_pointonsurface_xfunc, "ST_PointOnSurface", st_point_on_surface, set_blob_owned);
-xfunc_blob2!(st_hausdorffdistance_xfunc, "ST_HausdorffDistance", st_hausdorff_distance, set_f64);
+xfunc_blob!(
+    st_centroid_xfunc,
+    "ST_Centroid",
+    st_centroid,
+    set_blob_owned
+);
+xfunc_blob!(
+    st_pointonsurface_xfunc,
+    "ST_PointOnSurface",
+    st_point_on_surface,
+    set_blob_owned
+);
+xfunc_blob2!(
+    st_hausdorffdistance_xfunc,
+    "ST_HausdorffDistance",
+    st_hausdorff_distance,
+    set_f64
+);
 xfunc_blob!(st_xmin_xfunc, "ST_XMin", st_xmin, set_f64);
 xfunc_blob!(st_xmax_xfunc, "ST_XMax", st_xmax, set_f64);
 xfunc_blob!(st_ymin_xfunc, "ST_YMin", st_ymin, set_f64);
 xfunc_blob!(st_ymax_xfunc, "ST_YMax", st_ymax, set_f64);
-xfunc_blob2!(st_distancesphere_xfunc, "ST_DistanceSphere", st_distance_sphere, set_f64);
-xfunc_blob2!(st_distancespheroid_xfunc, "ST_DistanceSpheroid", st_distance_spheroid, set_f64);
-xfunc_blob!(st_lengthsphere_xfunc, "ST_LengthSphere", st_length_sphere, set_f64);
+xfunc_blob2!(
+    st_distancesphere_xfunc,
+    "ST_DistanceSphere",
+    st_distance_sphere,
+    set_f64
+);
+xfunc_blob2!(
+    st_distancespheroid_xfunc,
+    "ST_DistanceSpheroid",
+    st_distance_spheroid,
+    set_f64
+);
+xfunc_blob!(
+    st_lengthsphere_xfunc,
+    "ST_LengthSphere",
+    st_length_sphere,
+    set_f64
+);
 xfunc_blob2!(st_azimuth_xfunc, "ST_Azimuth", st_azimuth, set_f64);
 
 unsafe extern "C" fn st_project_xfunc(
@@ -480,11 +570,21 @@ unsafe extern "C" fn st_project_xfunc(
     }
 }
 
-xfunc_blob2!(st_closestpoint_xfunc, "ST_ClosestPoint", st_closest_point, set_blob_owned);
+xfunc_blob2!(
+    st_closestpoint_xfunc,
+    "ST_ClosestPoint",
+    st_closest_point,
+    set_blob_owned
+);
 
 // ── Predicate callbacks ──────────────────────────────────────────────────────
 
-xfunc_blob2!(st_intersects_xfunc, "ST_Intersects", st_intersects, set_bool);
+xfunc_blob2!(
+    st_intersects_xfunc,
+    "ST_Intersects",
+    st_intersects,
+    set_bool
+);
 xfunc_blob2!(st_contains_xfunc, "ST_Contains", st_contains, set_bool);
 xfunc_blob2!(st_within_xfunc, "ST_Within", st_within, set_bool);
 xfunc_blob2!(st_disjoint_xfunc, "ST_Disjoint", st_disjoint, set_bool);

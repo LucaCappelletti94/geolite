@@ -55,10 +55,7 @@ mod sqlite_impls {
             }
 
             impl ToSql<$sql_type, Sqlite> for Vec<u8> {
-                fn to_sql<'b>(
-                    &'b self,
-                    out: &mut Output<'b, '_, Sqlite>,
-                ) -> serialize::Result {
+                fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Sqlite>) -> serialize::Result {
                     out.set_value(self.as_slice());
                     Ok(IsNull::No)
                 }
@@ -139,10 +136,7 @@ mod postgres_impls {
             }
 
             impl ToSql<$sql_type, Pg> for Vec<u8> {
-                fn to_sql<'b>(
-                    &'b self,
-                    out: &mut Output<'b, '_, Pg>,
-                ) -> serialize::Result {
+                fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Pg>) -> serialize::Result {
                     <Vec<u8> as ToSql<Binary, Pg>>::to_sql(self, out)
                 }
             }

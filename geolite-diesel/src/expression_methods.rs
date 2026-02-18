@@ -138,10 +138,7 @@ pub trait GeometryExpressionMethods: Expression<SqlType = Nullable<Geometry>> + 
     }
 
     /// Return the geodesic distance in metres to another geometry (Karney algorithm).
-    fn st_distancespheroid<T>(
-        self,
-        other: T,
-    ) -> functions::st_distancespheroid<Self, T>
+    fn st_distancespheroid<T>(self, other: T) -> functions::st_distancespheroid<Self, T>
     where
         T: AsExpression<Nullable<Geometry>>,
     {
@@ -149,10 +146,7 @@ pub trait GeometryExpressionMethods: Expression<SqlType = Nullable<Geometry>> + 
     }
 
     /// Return the Hausdorff distance to another geometry.
-    fn st_hausdorffdistance<T>(
-        self,
-        other: T,
-    ) -> functions::st_hausdorffdistance<Self, T>
+    fn st_hausdorffdistance<T>(self, other: T) -> functions::st_hausdorffdistance<Self, T>
     where
         T: AsExpression<Nullable<Geometry>>,
     {

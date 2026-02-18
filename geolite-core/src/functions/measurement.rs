@@ -86,27 +86,27 @@ pub fn st_perimeter(blob: &[u8]) -> Result<f64> {
 #[allow(deprecated)]
 fn euclidean_geometry_distance(a: &Geometry<f64>, b: &Geometry<f64>) -> f64 {
     fn multipoint_point_distance(mp: &geo::MultiPoint<f64>, p: &Point<f64>) -> Option<f64> {
-        mp.0.iter().map(|q| q.euclidean_distance(p)).reduce(f64::min)
+        mp.0.iter()
+            .map(|q| q.euclidean_distance(p))
+            .reduce(f64::min)
     }
 
     // Use EuclideanDistance (older trait) which covers most type pairs.
     // Fall back to centroid distance for unsupported combinations.
     match (a, b) {
         (Geometry::Point(pa), Geometry::Point(pb)) => pa.euclidean_distance(pb),
-        (Geometry::MultiPoint(mp), Geometry::Point(p)) => {
-            multipoint_point_distance(mp, p).unwrap_or_else(|| {
+        (Geometry::MultiPoint(mp), Geometry::Point(p)) => multipoint_point_distance(mp, p)
+            .unwrap_or_else(|| {
                 let ca = a.centroid().unwrap_or_else(|| Point::new(0.0, 0.0));
                 let cb = b.centroid().unwrap_or_else(|| Point::new(0.0, 0.0));
                 Euclidean.distance(ca, cb)
-            })
-        }
-        (Geometry::Point(p), Geometry::MultiPoint(mp)) => {
-            multipoint_point_distance(mp, p).unwrap_or_else(|| {
+            }),
+        (Geometry::Point(p), Geometry::MultiPoint(mp)) => multipoint_point_distance(mp, p)
+            .unwrap_or_else(|| {
                 let ca = a.centroid().unwrap_or_else(|| Point::new(0.0, 0.0));
                 let cb = b.centroid().unwrap_or_else(|| Point::new(0.0, 0.0));
                 Euclidean.distance(ca, cb)
-            })
-        }
+            }),
         (Geometry::Point(p), Geometry::LineString(ls)) => p.euclidean_distance(ls),
         (Geometry::LineString(ls), Geometry::Point(p)) => p.euclidean_distance(ls),
         (Geometry::Point(p), Geometry::Polygon(poly)) => p.euclidean_distance(poly),
