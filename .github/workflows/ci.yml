@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -39,6 +43,32 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace
       - run: cargo test -p geolite-diesel --features sqlite
+
+  clippy-wasm:
+    name: Clippy (WASM)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy -p geolite-core -p geolite-sqlite --target wasm32-unknown-unknown -- -D warnings
+
+  wasm-test:
+    name: WASM Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install wasm-bindgen-cli
+      - run: cargo test -p geolite-sqlite --target wasm32-unknown-unknown
+        env:
+          WASM_BINDGEN_TEST_TIMEOUT: 120
 
   coverage:
     name: Coverage
