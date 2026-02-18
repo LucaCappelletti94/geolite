@@ -1,0 +1,435 @@
+//! Spatial predicate functions (§3.6 of plan.md)
+//!
+//! ST_Intersects, ST_Contains, ST_Within, ST_Disjoint, ST_DWithin,
+//! ST_Covers, ST_CoveredBy, ST_Equals, ST_Touches, ST_Crosses,
+//! ST_Overlaps, ST_Relate, ST_RelateMatch
+
+use geo::algorithm::{Contains, Intersects, Relate};
+use geo::coordinate_position::CoordPos;
+use geo::dimensions::Dimensions;
+
+use crate::error::Result;
+use crate::ewkb::parse_ewkb;
+
+/// ST_Intersects — true if the two geometries share at least one point.
+///
+/// # Example
+///
+/// ```
+/// use geolite_core::functions::predicates::st_intersects;
+/// use geolite_core::functions::io::geom_from_text;
+///
+/// let a = geom_from_text("POLYGON((0 0,2 0,2 2,0 2,0 0))", None).unwrap();
+/// let b = geom_from_text("POINT(1 1)", None).unwrap();
+/// assert!(st_intersects(&a, &b).unwrap());
+/// ```
+pub fn st_intersects(a: &[u8], b: &[u8]) -> Result<bool> {
+    let (ga, _) = parse_ewkb(a)?;
+    let (gb, _) = parse_ewkb(b)?;
+    Ok(ga.intersects(&gb))
+}
+
+/// ST_Contains — true if A completely contains B (B's boundary ⊂ A's interior).
+///
+/// # Example
+///
+/// ```
+/// use geolite_core::functions::predicates::st_contains;
+/// use geolite_core::functions::io::geom_from_text;
+///
+/// let poly = geom_from_text("POLYGON((0 0,4 0,4 4,0 4,0 0))", None).unwrap();
+/// let pt = geom_from_text("POINT(2 2)", None).unwrap();
+/// assert!(st_contains(&poly, &pt).unwrap());
+/// ```
+pub fn st_contains(a: &[u8], b: &[u8]) -> Result<bool> {
+    let (ga, _) = parse_ewkb(a)?;
+    let (gb, _) = parse_ewkb(b)?;
+    Ok(ga.contains(&gb))
+}
+
+/// ST_Within — true if A is completely inside B.
+///
+/// # Example
+///
+/// ```
+/// use geolite_core::functions::predicates::st_within;
+/// use geolite_core::functions::io::geom_from_text;
+///
+/// let pt = geom_from_text("POINT(2 2)", None).unwrap();
+/// let poly = geom_from_text("POLYGON((0 0,4 0,4 4,0 4,0 0))", None).unwrap();
+/// assert!(st_within(&pt, &poly).unwrap());
+/// ```
+pub fn st_within(a: &[u8], b: &[u8]) -> Result<bool> {
+    st_contains(b, a)
+}
+
+/// ST_Disjoint — true if the two geometries share no points.
+///
+/// # Example
+///
+/// ```
+/// use geolite_core::functions::predicates::st_disjoint;
+/// use geolite_core::functions::io::geom_from_text;
+///
+/// let a = geom_from_text("POINT(0 0)", None).unwrap();
+/// let b = geom_from_text("POINT(10 10)", None).unwrap();
+/// assert!(st_disjoint(&a, &b).unwrap());
+/// ```
+pub fn st_disjoint(a: &[u8], b: &[u8]) -> Result<bool> {
+    Ok(!st_intersects(a, b)?)
+}
+
+/// ST_DWithin — true if the geometries are within `distance` of each other (Euclidean).
+///
+/// # Example
+///
+/// ```
+/// use geolite_core::functions::predicates::st_dwithin;
+/// use geolite_core::functions::constructors::st_point;
+///
+/// let a = st_point(0.0, 0.0, None).unwrap();
+/// let b = st_point(3.0, 4.0, None).unwrap();
+/// assert!(st_dwithin(&a, &b, 5.0).unwrap());
+/// assert!(!st_dwithin(&a, &b, 4.0).unwrap());
+/// ```
+pub fn st_dwithin(a: &[u8], b: &[u8], distance: f64) -> Result<bool> {
+    use super::measurement::st_distance;
+    Ok(st_distance(a, b)? <= distance)
+}
+
+/// ST_Covers — A covers B (B has no point outside A).
+///
+/// # Example
+///
+/// ```
+/// use geolite_core::functions::predicates::st_covers;
+/// use geolite_core::functions::io::geom_from_text;
+///
+/// let poly = geom_from_text("POLYGON((0 0,4 0,4 4,0 4,0 0))", None).unwrap();
+/// let pt = geom_from_text("POINT(2 2)", None).unwrap();
+/// assert!(st_covers(&poly, &pt).unwrap());
+/// ```
+pub fn st_covers(a: &[u8], b: &[u8]) -> Result<bool> {
+    let (ga, _) = parse_ewkb(a)?;
+    let (gb, _) = parse_ewkb(b)?;
+    Ok(ga.relate(&gb).is_covers())
+}
+
+/// ST_CoveredBy — B covers A.
+///
+/// # Example
+///
+/// ```
+/// use geolite_core::functions::predicates::st_covered_by;
+/// use geolite_core::functions::io::geom_from_text;
+///
+/// let pt = geom_from_text("POINT(2 2)", None).unwrap();
+/// let poly = geom_from_text("POLYGON((0 0,4 0,4 4,0 4,0 0))", None).unwrap();
+/// assert!(st_covered_by(&pt, &poly).unwrap());
+/// ```
+pub fn st_covered_by(a: &[u8], b: &[u8]) -> Result<bool> {
+    st_covers(b, a)
+}
+
+/// ST_Equals — geometrically equal (same point set, ignoring vertex order).
+///
+/// # Example
+///
+/// ```
+/// use geolite_core::functions::predicates::st_equals;
+/// use geolite_core::functions::io::geom_from_text;
+///
+/// let a = geom_from_text("LINESTRING(0 0,1 1)", None).unwrap();
+/// let b = geom_from_text("LINESTRING(1 1,0 0)", None).unwrap();
+/// assert!(st_equals(&a, &b).unwrap());
+/// ```
+pub fn st_equals(a: &[u8], b: &[u8]) -> Result<bool> {
+    let (ga, _) = parse_ewkb(a)?;
+    let (gb, _) = parse_ewkb(b)?;
+    Ok(ga.relate(&gb).is_equal_topo())
+}
+
+/// ST_Touches — geometries share boundary points but not interior points.
+///
+/// # Example
+///
+/// ```
+/// use geolite_core::functions::predicates::st_touches;
+/// use geolite_core::functions::io::geom_from_text;
+///
+/// let a = geom_from_text("POLYGON((0 0,1 0,1 1,0 1,0 0))", None).unwrap();
+/// let b = geom_from_text("POLYGON((1 0,2 0,2 1,1 1,1 0))", None).unwrap();
+/// assert!(st_touches(&a, &b).unwrap());
+/// ```
+pub fn st_touches(a: &[u8], b: &[u8]) -> Result<bool> {
+    let (ga, _) = parse_ewkb(a)?;
+    let (gb, _) = parse_ewkb(b)?;
+    // geo 0.32: is_touches() takes 0 arguments
+    Ok(ga.relate(&gb).is_touches())
+}
+
+/// ST_Crosses — geometries have some interior points in common but not all.
+///
+/// # Example
+///
+/// ```
+/// use geolite_core::functions::predicates::st_crosses;
+/// use geolite_core::functions::io::geom_from_text;
+///
+/// let line = geom_from_text("LINESTRING(-1 0,1 0)", None).unwrap();
+/// let poly = geom_from_text("POLYGON((0 -1,1 -1,1 1,0 1,0 -1))", None).unwrap();
+/// assert!(st_crosses(&line, &poly).unwrap());
+/// ```
+pub fn st_crosses(a: &[u8], b: &[u8]) -> Result<bool> {
+    let (ga, _) = parse_ewkb(a)?;
+    let (gb, _) = parse_ewkb(b)?;
+    Ok(ga.relate(&gb).is_crosses())
+}
+
+/// ST_Overlaps — geometries overlap (same dimension, share interior, neither contains the other).
+///
+/// # Example
+///
+/// ```
+/// use geolite_core::functions::predicates::st_overlaps;
+/// use geolite_core::functions::io::geom_from_text;
+///
+/// let a = geom_from_text("POLYGON((0 0,2 0,2 2,0 2,0 0))", None).unwrap();
+/// let b = geom_from_text("POLYGON((1 1,3 1,3 3,1 3,1 1))", None).unwrap();
+/// assert!(st_overlaps(&a, &b).unwrap());
+/// ```
+pub fn st_overlaps(a: &[u8], b: &[u8]) -> Result<bool> {
+    let (ga, _) = parse_ewkb(a)?;
+    let (gb, _) = parse_ewkb(b)?;
+    Ok(ga.relate(&gb).is_overlaps())
+}
+
+/// Convert a `Dimensions` entry to its DE-9IM character.
+fn dim_char(d: Dimensions) -> char {
+    match d {
+        Dimensions::Empty => 'F',
+        Dimensions::ZeroDimensional => '0',
+        Dimensions::OneDimensional => '1',
+        Dimensions::TwoDimensional => '2',
+    }
+}
+
+/// Build the 9-character DE-9IM matrix string (e.g. `"FF2FF1212"`).
+fn matrix_string(matrix: &geo::algorithm::relate::IntersectionMatrix) -> String {
+    let positions = [CoordPos::Inside, CoordPos::OnBoundary, CoordPos::Outside];
+    let mut s = String::with_capacity(9);
+    for &lhs in &positions {
+        for &rhs in &positions {
+            s.push(dim_char(matrix.get(lhs, rhs)));
+        }
+    }
+    s
+}
+
+/// ST_Relate — return the DE-9IM matrix string (e.g. "FF2FF1212").
+///
+/// # Example
+///
+/// ```
+/// use geolite_core::functions::predicates::st_relate;
+/// use geolite_core::functions::io::geom_from_text;
+///
+/// let a = geom_from_text("POINT(0 0)", None).unwrap();
+/// let b = geom_from_text("POINT(0 0)", None).unwrap();
+/// let matrix = st_relate(&a, &b).unwrap();
+/// assert_eq!(matrix.len(), 9);
+/// assert_eq!(matrix, "0FFFFFFF2");
+/// ```
+pub fn st_relate(a: &[u8], b: &[u8]) -> Result<String> {
+    let (ga, _) = parse_ewkb(a)?;
+    let (gb, _) = parse_ewkb(b)?;
+    Ok(matrix_string(&ga.relate(&gb)))
+}
+
+/// ST_Relate (pattern) — check a DE-9IM pattern string against two geometries.
+///
+/// # Example
+///
+/// ```
+/// use geolite_core::functions::predicates::st_relate_match_geoms;
+/// use geolite_core::functions::io::geom_from_text;
+///
+/// let a = geom_from_text("POLYGON((0 0,2 0,2 2,0 2,0 0))", None).unwrap();
+/// let b = geom_from_text("POINT(1 1)", None).unwrap();
+/// // "T*****FF*" is the Contains pattern
+/// assert!(st_relate_match_geoms(&a, &b, "T*****FF*").unwrap());
+/// ```
+pub fn st_relate_match_geoms(a: &[u8], b: &[u8], pattern: &str) -> Result<bool> {
+    let (ga, _) = parse_ewkb(a)?;
+    let (gb, _) = parse_ewkb(b)?;
+    // Use geo's built-in pattern matching
+    Ok(ga.relate(&gb).matches(pattern).unwrap_or(false))
+}
+
+/// ST_RelateMatch — match a DE-9IM matrix string against a pattern string.
+///
+/// # Example
+///
+/// ```
+/// use geolite_core::functions::predicates::st_relate_match;
+///
+/// assert!(st_relate_match("0FFFFFFF2", "0FFF*FFF2"));
+/// assert!(!st_relate_match("0FFFFFFF2", "1********"));
+/// ```
+pub fn st_relate_match(matrix: &str, pattern: &str) -> bool {
+    de9im_pattern_match(matrix, pattern)
+}
+
+/// Pure DE-9IM pattern matcher.
+/// Pattern chars: T=non-empty, F=empty, *=any, 0/1/2=exact dimension.
+fn de9im_pattern_match(matrix: &str, pattern: &str) -> bool {
+    if matrix.len() != 9 || pattern.len() != 9 {
+        return false;
+    }
+    matrix.chars().zip(pattern.chars()).all(|(m, p)| match p {
+        '*' => true,
+        'T' => matches!(m, '0' | '1' | '2'),
+        'F' => m == 'F',
+        '0' => m == '0',
+        '1' => m == '1',
+        '2' => m == '2',
+        _ => false,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::functions::constructors::st_point;
+    use crate::functions::io::geom_from_text;
+
+    // ── de9im_pattern_match (private) ──────────────────────────────
+
+    #[test]
+    fn pattern_match_wrong_length() {
+        assert!(!de9im_pattern_match("0FFF", "T*****"));
+        assert!(!de9im_pattern_match("0FFFFFFF2", "T*"));
+    }
+
+    #[test]
+    fn pattern_match_wildcard() {
+        assert!(de9im_pattern_match("012FF0102", "*********"));
+    }
+
+    #[test]
+    fn pattern_match_t_matches_012() {
+        assert!(de9im_pattern_match("0FFFFFFF2", "T*******T"));
+    }
+
+    #[test]
+    fn pattern_match_t_does_not_match_f() {
+        assert!(!de9im_pattern_match("FFFFFFFFF", "T********"));
+    }
+
+    #[test]
+    fn pattern_match_f_matches_f() {
+        assert!(de9im_pattern_match("FFFFFFFFF", "FFFFFFFFF"));
+    }
+
+    #[test]
+    fn pattern_match_exact_digits() {
+        assert!(de9im_pattern_match("0FFFFFFF2", "0FFFFFFF2"));
+        assert!(!de9im_pattern_match("0FFFFFFF2", "1FFFFFFF2"));
+    }
+
+    #[test]
+    fn pattern_match_unknown_char_fails() {
+        assert!(!de9im_pattern_match("0FFFFFFF2", "XFFFFFFFF"));
+    }
+
+    // ── Predicate consistency ──────────────────────────────────────
+
+    #[test]
+    fn within_is_reverse_contains() {
+        let poly = geom_from_text("POLYGON((0 0,4 0,4 4,0 4,0 0))", None).unwrap();
+        let pt = st_point(2.0, 2.0, None).unwrap();
+        assert_eq!(
+            st_within(&pt, &poly).unwrap(),
+            st_contains(&poly, &pt).unwrap()
+        );
+    }
+
+    #[test]
+    fn disjoint_is_not_intersects() {
+        let a = st_point(0.0, 0.0, None).unwrap();
+        let b = st_point(10.0, 10.0, None).unwrap();
+        assert_eq!(
+            st_disjoint(&a, &b).unwrap(),
+            !st_intersects(&a, &b).unwrap()
+        );
+    }
+
+    #[test]
+    fn covered_by_is_reverse_covers() {
+        let poly = geom_from_text("POLYGON((0 0,4 0,4 4,0 4,0 0))", None).unwrap();
+        let pt = st_point(2.0, 2.0, None).unwrap();
+        assert_eq!(
+            st_covered_by(&pt, &poly).unwrap(),
+            st_covers(&poly, &pt).unwrap()
+        );
+    }
+
+    // ── Specific predicates ────────────────────────────────────────
+
+    #[test]
+    fn touches_adjacent_squares() {
+        let a = geom_from_text("POLYGON((0 0,1 0,1 1,0 1,0 0))", None).unwrap();
+        let b = geom_from_text("POLYGON((1 0,2 0,2 1,1 1,1 0))", None).unwrap();
+        assert!(st_touches(&a, &b).unwrap());
+        assert!(!st_overlaps(&a, &b).unwrap());
+    }
+
+    #[test]
+    fn crosses_line_through_polygon() {
+        let line = geom_from_text("LINESTRING(-1 0.5,2 0.5)", None).unwrap();
+        let poly = geom_from_text("POLYGON((0 0,1 0,1 1,0 1,0 0))", None).unwrap();
+        assert!(st_crosses(&line, &poly).unwrap());
+    }
+
+    #[test]
+    fn overlaps_partial() {
+        let a = geom_from_text("POLYGON((0 0,2 0,2 2,0 2,0 0))", None).unwrap();
+        let b = geom_from_text("POLYGON((1 1,3 1,3 3,1 3,1 1))", None).unwrap();
+        assert!(st_overlaps(&a, &b).unwrap());
+        assert!(!st_contains(&a, &b).unwrap());
+        assert!(!st_within(&a, &b).unwrap());
+    }
+
+    #[test]
+    fn st_relate_known_matrix() {
+        let a = geom_from_text("POINT(0 0)", None).unwrap();
+        let b = geom_from_text("POINT(1 1)", None).unwrap();
+        let matrix = st_relate(&a, &b).unwrap();
+        assert_eq!(matrix.len(), 9);
+        // Two disjoint points: FF0FFF0F2
+        assert_eq!(matrix, "FF0FFF0F2");
+    }
+
+    #[test]
+    fn st_relate_match_string() {
+        assert!(st_relate_match("FF0FFF0F2", "FF0FFF0F2"));
+        assert!(st_relate_match("FF0FFF0F2", "FF*FFF*F*"));
+        assert!(!st_relate_match("FF0FFF0F2", "T********"));
+    }
+
+    #[test]
+    fn st_equals_same_geometry() {
+        let a = geom_from_text("POLYGON((0 0,1 0,1 1,0 1,0 0))", None).unwrap();
+        let b = geom_from_text("POLYGON((0 0,1 0,1 1,0 1,0 0))", None).unwrap();
+        assert!(st_equals(&a, &b).unwrap());
+    }
+
+    #[test]
+    fn st_dwithin_boundary() {
+        let a = st_point(0.0, 0.0, None).unwrap();
+        let b = st_point(3.0, 4.0, None).unwrap();
+        // distance = 5.0 exactly
+        assert!(st_dwithin(&a, &b, 5.0).unwrap());
+        assert!(!st_dwithin(&a, &b, 4.99).unwrap());
+    }
+}

@@ -1,0 +1,26 @@
+[package]
+name    = "geolite-diesel"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "geolite_diesel"
+
+[dependencies]
+geolite-core = { path = "../geolite-core" }
+geo           = { version = "0.32", default-features = false }
+# Diesel base (no backend enabled) — backends are opt-in via features.
+# NOTE: diesel/sqlite requires libsqlite3-sys <0.36 which conflicts with
+# rusqlite 0.38 used by geolite-sqlite. Do NOT enable both in the same binary.
+diesel = { version = "2", default-features = false }
+
+[dev-dependencies]
+geolite-core = { path = "../geolite-core" }
+
+[features]
+default = []
+# Enable SQLite backend support (conflicts with geolite-sqlite / rusqlite 0.38
+# in the same binary — use one or the other, not both).
+sqlite  = ["diesel/sqlite"]
+# Enable PostgreSQL backend support (future).
+postgres = ["diesel/postgres"]
