@@ -68,6 +68,7 @@ jobs:
       - run: cargo install wasm-bindgen-cli
       - run: cargo test -p geolite-sqlite --target wasm32-unknown-unknown --test wasm
         env:
+          CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner
           WASM_BINDGEN_TEST_TIMEOUT: 120
 
   coverage:
