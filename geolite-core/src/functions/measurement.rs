@@ -85,10 +85,28 @@ pub fn st_perimeter(blob: &[u8]) -> Result<f64> {
 /// Dispatch euclidean distance between any two geo geometry types.
 #[allow(deprecated)]
 fn euclidean_geometry_distance(a: &Geometry<f64>, b: &Geometry<f64>) -> f64 {
+    fn multipoint_point_distance(mp: &geo::MultiPoint<f64>, p: &Point<f64>) -> Option<f64> {
+        mp.0.iter().map(|q| q.euclidean_distance(p)).reduce(f64::min)
+    }
+
     // Use EuclideanDistance (older trait) which covers most type pairs.
     // Fall back to centroid distance for unsupported combinations.
     match (a, b) {
         (Geometry::Point(pa), Geometry::Point(pb)) => pa.euclidean_distance(pb),
+        (Geometry::MultiPoint(mp), Geometry::Point(p)) => {
+            multipoint_point_distance(mp, p).unwrap_or_else(|| {
+                let ca = a.centroid().unwrap_or_else(|| Point::new(0.0, 0.0));
+                let cb = b.centroid().unwrap_or_else(|| Point::new(0.0, 0.0));
+                Euclidean.distance(ca, cb)
+            })
+        }
+        (Geometry::Point(p), Geometry::MultiPoint(mp)) => {
+            multipoint_point_distance(mp, p).unwrap_or_else(|| {
+                let ca = a.centroid().unwrap_or_else(|| Point::new(0.0, 0.0));
+                let cb = b.centroid().unwrap_or_else(|| Point::new(0.0, 0.0));
+                Euclidean.distance(ca, cb)
+            })
+        }
         (Geometry::Point(p), Geometry::LineString(ls)) => p.euclidean_distance(ls),
         (Geometry::LineString(ls), Geometry::Point(p)) => p.euclidean_distance(ls),
         (Geometry::Point(p), Geometry::Polygon(poly)) => p.euclidean_distance(poly),
@@ -468,6 +486,14 @@ mod tests {
     fn distance_to_self_is_zero() {
         let pt = st_point(1.0, 2.0, None).unwrap();
         assert!(st_distance(&pt, &pt).unwrap().abs() < 1e-10);
+    }
+
+    #[test]
+    fn st_distance_multipoint_point_uses_min_distance() {
+        let mp = geom_from_text("MULTIPOINT((0 0),(10 0))", None).unwrap();
+        let pt = geom_from_text("POINT(0 0)", None).unwrap();
+        let d = st_distance(&mp, &pt).unwrap();
+        assert!((d - 0.0).abs() < 1e-10, "distance = {d}");
     }
 
     #[test]

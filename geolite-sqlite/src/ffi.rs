@@ -269,6 +269,12 @@ unsafe extern "C" fn st_point_2_xfunc(
     _n: c_int,
     argv: *mut *mut sqlite3_value,
 ) {
+    if sqlite3_value_type(*argv.add(0)) == SQLITE_NULL
+        || sqlite3_value_type(*argv.add(1)) == SQLITE_NULL
+    {
+        set_null(ctx);
+        return;
+    }
     let x = get_f64(argv, 0);
     let y = get_f64(argv, 1);
     match st_point(x, y, None) {
@@ -282,6 +288,13 @@ unsafe extern "C" fn st_point_3_xfunc(
     _n: c_int,
     argv: *mut *mut sqlite3_value,
 ) {
+    if sqlite3_value_type(*argv.add(0)) == SQLITE_NULL
+        || sqlite3_value_type(*argv.add(1)) == SQLITE_NULL
+        || sqlite3_value_type(*argv.add(2)) == SQLITE_NULL
+    {
+        set_null(ctx);
+        return;
+    }
     let x = get_f64(argv, 0);
     let y = get_f64(argv, 1);
     let srid = get_i32(argv, 2);

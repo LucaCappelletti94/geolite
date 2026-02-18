@@ -199,6 +199,13 @@ fn st_point_with_srid() {
 }
 
 #[test]
+fn null_numeric_arg_st_point_returns_null() {
+    let db = TestDb::open();
+    let is_null = db.query_i64("SELECT ST_Point(1,2,NULL) IS NULL");
+    assert_eq!(is_null, 1);
+}
+
+#[test]
 fn st_make_line() {
     let db = TestDb::open();
     let n = db.query_i64("SELECT ST_NumPoints(ST_MakeLine(ST_Point(0,0), ST_Point(1,1)))");
