@@ -3,7 +3,7 @@ members  = ["geolite-core", "geolite-sqlite", "geolite-diesel", "xtask"]
 resolver = "2"
 
 [workspace.package]
-rust-version = "1.75"
+rust-version = "1.86"
 
 [profile.release]
 opt-level = "z"

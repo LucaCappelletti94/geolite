@@ -82,6 +82,8 @@ let nearby = features::table
 
 ## Building
 
+Requires Rust 1.86+.
+
 ```sh
 # Native loadable extension
 cargo build --release -p geolite-sqlite
