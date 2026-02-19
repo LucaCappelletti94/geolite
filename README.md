@@ -93,6 +93,35 @@ cargo build --release -p geolite-sqlite --target wasm32-unknown-unknown
 cargo test --workspace
 ```
 
+## Contributor workflow
+
+Install the Rust-powered pre-commit hook:
+
+```sh
+cargo run -p xtask -- install-hooks
+```
+
+Run the same local pre-commit checks manually:
+
+```sh
+# Fast default checks
+cargo run -p xtask -- precommit
+
+# Full checks (includes PostGIS + wasm tests)
+cargo run -p xtask -- precommit --full
+```
+
+`--full` requires Docker plus the `wasm32-unknown-unknown` target and `wasm-bindgen-test-runner` installed.
+
+CI executes the same hook checks plus an extended matrix:
+
+- formatting and clippy checks
+- native tests
+- PostGIS testcontainer integration tests
+- wasm tests
+- MSRV checks
+- cross-platform compile checks (Linux/macOS/Windows)
+
 ## Storage format
 
 Geometries are stored as EWKB (Extended Well-Known Binary) BLOBs, the same wire format used by PostGIS. This means existing tools that read EWKB can interoperate with geolite databases directly.

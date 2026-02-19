@@ -25,9 +25,7 @@ unsafe extern "C" fn geolite_init(
 
 fn conn() -> SqliteConnection {
     INIT.call_once(|| unsafe {
-        libsqlite3_sys::sqlite3_auto_extension(Some(std::mem::transmute(
-            geolite_init as unsafe extern "C" fn(_, _, _) -> _,
-        )));
+        libsqlite3_sys::sqlite3_auto_extension(Some(geolite_init));
     });
     SqliteConnection::establish(":memory:").unwrap()
 }
