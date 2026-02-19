@@ -10,7 +10,7 @@
 //! Enable the appropriate Cargo feature for your backend:
 //!
 //! ```toml
-//! # SQLite (note: conflicts with rusqlite ≥ 0.38 in the same binary)
+//! # SQLite
 //! geolite-diesel = { version = "0.1", features = ["sqlite"] }
 //!
 //! # PostgreSQL (future)

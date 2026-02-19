@@ -5,6 +5,7 @@ edition      = "2021"
 rust-version.workspace = true
 license      = "MIT OR Apache-2.0"
 description  = "Diesel ORM integration for geolite spatial types (Geometry, Geography)"
+autotests    = false
 
 [lib]
 name = "geolite_diesel"
@@ -13,17 +14,43 @@ name = "geolite_diesel"
 geolite-core = { path = "../geolite-core" }
 geo           = { version = "0.32", default-features = false }
 # Diesel base (no backend enabled) — backends are opt-in via features.
-# NOTE: diesel/sqlite requires libsqlite3-sys <0.36 which conflicts with
-# rusqlite 0.38 used by geolite-sqlite. Do NOT enable both in the same binary.
 diesel = { version = "2", default-features = false }
 
 [dev-dependencies]
 geolite-core = { path = "../geolite-core" }
+geolite-sqlite = { path = "../geolite-sqlite" }
+testcontainers-modules = { version = "0.14", features = ["postgres"] }
+tokio = { version = "1", features = ["rt", "macros"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+libsqlite3-sys = { version = ">=0.17.2, <0.36.0" }
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+sqlite-wasm-rs = "0.5"
+wasm-bindgen-test = "0.3"
+
+[[test]]
+name = "sqlite_types"
+path = "tests/sqlite_types.rs"
+
+[[test]]
+name = "expression_methods"
+path = "tests/expression_methods.rs"
+
+[[test]]
+name = "postgres_integration"
+path = "tests/postgres_integration.rs"
+
+[[test]]
+name = "sqlite_integration"
+path = "tests/sqlite_integration.rs"
+
+[[test]]
+name = "wasm_integration"
+path = "tests/wasm_integration.rs"
 
 [features]
 default = []
-# Enable SQLite backend support (conflicts with geolite-sqlite / rusqlite 0.38
-# in the same binary — use one or the other, not both).
 sqlite  = ["diesel/sqlite"]
 # Enable PostgreSQL backend support (future).
 postgres = ["diesel/postgres"]

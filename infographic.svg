@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
-     width="1200" height="3400" viewBox="0 0 1200 3400">
+     width="1200" height="3040" viewBox="0 0 1200 3040">
   <defs>
     <!-- Styles -->
     <style>
@@ -198,7 +198,7 @@
   <!-- ============================================= -->
   <!-- BACKGROUND                                    -->
   <!-- ============================================= -->
-  <rect width="1200" height="3400" fill="#F7F9FC"/>
+  <rect width="1200" height="3040" fill="#F7F9FC"/>
 
   <!-- ============================================= -->
   <!-- SECTION 1: HEADER BANNER (0–260)              -->
@@ -260,8 +260,8 @@
           WebAssembly support, it enables spatial queries in environments ranging from edge devices to web browsers.
         </p>
         <p style="font-size: 15px; margin: 0 0 14px 0; color: #636E72; text-align: justify;">
-          The library implements a comprehensive set of <strong>spatial SQL functions</strong> — including geometry I/O,
-          constructors, spatial predicates, measurements, and accessor operations — all following PostGIS naming
+          The library implements a comprehensive set of <strong>spatial SQL functions</strong>,including geometry I/O,
+          constructors, spatial predicates, measurements, and accessor operations,all following PostGIS naming
           conventions and semantics. A full <strong>Diesel ORM integration</strong> provides compile-time checked
           spatial queries for Rust applications.
         </p>
@@ -275,9 +275,68 @@
   </g>
 
   <!-- ============================================= -->
-  <!-- SECTION 3: ARCHITECTURE DIAGRAM (540–1020)    -->
+  <!-- WHY GEOLITE                                   -->
   <!-- ============================================= -->
-  <g id="section-architecture" transform="translate(0, 540)">
+  <g id="section-motivation" transform="translate(0, 540)">
+    <!-- Section heading -->
+    <g transform="translate(40, 0)">
+      <g color="#6B9FBF">
+        <use href="#icon-pin" width="28" height="28" y="-2"/>
+      </g>
+      <text x="38" y="20" class="heading" font-size="26">Why GeoLite?</text>
+      <line x1="0" y1="38" x2="1120" y2="38" stroke="#E2E8F0" stroke-width="1.5"/>
+    </g>
+
+    <!-- SpatiaLite -->
+    <g transform="translate(40, 60)">
+      <rect x="0" y="0" width="353" height="180" class="card card-shadow" rx="12"/>
+      <rect x="0" y="0" width="353" height="6" rx="3" fill="#FFB7B2"/>
+
+      <text x="20" y="32" class="heading" font-size="17" fill="#636E72">SpatiaLite</text>
+      <text x="20" y="52" class="label" font-size="12">The incumbent spatial extension for SQLite</text>
+
+      <foreignObject x="20" y="62" width="313" height="110">
+        <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; font-size: 13px; color: #636E72; line-height: 1.6;">
+          Wraps GEOS, PROJ, and liblwgeom,a heavy C/C++ dependency chain that prevents WebAssembly compilation and makes cross-compilation difficult.
+        </div>
+      </foreignObject>
+    </g>
+
+    <!-- GeoLite -->
+    <g transform="translate(423, 60)">
+      <rect x="0" y="0" width="353" height="180" rx="12" fill="#FFFFFF" stroke="#6B9FBF" stroke-width="2" filter="url(#shadow)"/>
+      <rect x="0" y="0" width="353" height="6" rx="3" fill="#6B9FBF"/>
+
+      <text x="20" y="32" class="heading" font-size="17">GeoLite</text>
+      <text x="20" y="52" class="label" font-size="12">A pure-Rust drop-in replacement</text>
+
+      <foreignObject x="20" y="62" width="313" height="110">
+        <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; font-size: 13px; color: #636E72; line-height: 1.6;">
+          Zero C dependencies, compiles to both native and WebAssembly targets. Same spatial SQL capabilities as SpatiaLite without the build complexity.
+        </div>
+      </foreignObject>
+    </g>
+
+    <!-- PostGIS Interop -->
+    <g transform="translate(807, 60)">
+      <rect x="0" y="0" width="353" height="180" class="card card-shadow" rx="12"/>
+      <rect x="0" y="0" width="353" height="6" rx="3" fill="#B5EAD7"/>
+
+      <text x="20" y="32" class="heading" font-size="17">PostGIS Interoperability</text>
+      <text x="20" y="52" class="label" font-size="12">Same ST_* API across databases</text>
+
+      <foreignObject x="20" y="62" width="313" height="110">
+        <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; font-size: 13px; color: #636E72; line-height: 1.6;">
+          Uses PostGIS function names and semantics. Spatial queries are portable between SQLite (via GeoLite) and PostgreSQL (via PostGIS) with no changes needed.
+        </div>
+      </foreignObject>
+    </g>
+  </g>
+
+  <!-- ============================================= -->
+  <!-- ARCHITECTURE                                  -->
+  <!-- ============================================= -->
+  <g id="section-architecture" transform="translate(0, 830)">
     <!-- Section heading -->
     <g transform="translate(40, 0)">
       <g color="#6B9FBF">
@@ -300,7 +359,7 @@
       <text x="46" y="27" class="heading text-light" font-size="17">geolite-core</text>
 
       <!-- Body -->
-      <text x="24" y="68" class="body" font-size="14" fill="#2D3436">Pure Rust geometry library — zero C dependencies, no FFI</text>
+      <text x="24" y="68" class="body" font-size="14" fill="#2D3436">Pure Rust geometry library,zero C dependencies, no FFI</text>
       <text x="24" y="90" class="label" font-size="12">Key modules:</text>
 
       <!-- Module badges -->
@@ -376,9 +435,9 @@
       <rect x="93" y="126" width="75" height="22" rx="6" fill="#B5EAD7" opacity="0.3"/>
       <text x="130" y="141" class="body" font-size="11" text-anchor="middle" fill="#2D3436">SQLite</text>
       <rect x="176" y="126" width="100" height="22" rx="6" fill="#B5EAD7" opacity="0.3"/>
-      <text x="226" y="141" class="body" font-size="11" text-anchor="middle" fill="#636E72">PostgreSQL*</text>
+      <text x="226" y="141" class="body" font-size="11" text-anchor="middle" fill="#2D3436">PostgreSQL</text>
 
-      <text x="24" y="168" class="label" font-size="10" fill="#636E72">* PostgreSQL backend via feature flag (future)</text>
+      <text x="24" y="168" class="label" font-size="10" fill="#636E72">PostgreSQL backend via feature flag</text>
     </g>
   </g>
 
@@ -386,7 +445,7 @@
   <!-- SECTION 4: SPATIAL FUNCTION CATEGORIES        -->
   <!-- (1040–1680)                                   -->
   <!-- ============================================= -->
-  <g id="section-functions" transform="translate(0, 1040)">
+  <g id="section-functions" transform="translate(0, 1330)">
     <!-- Section heading -->
     <g transform="translate(40, 0)">
       <g color="#6B9FBF">
@@ -475,11 +534,11 @@
       <text x="20" y="238" class="label" font-size="11" fill="#636E72">+ ST_IsValid, ST_IsEmpty, ST_Envelope, ...</text>
     </g>
 
-    <!-- Row 2: 2 cards (centered) -->
+    <!-- Row 2: 3 cards -->
     <!-- Card 4: Predicates -->
-    <g transform="translate(135, 345)">
-      <rect x="0" y="0" width="440" height="260" class="card card-shadow" rx="12"/>
-      <rect x="0" y="0" width="440" height="6" rx="3" fill="#C7CEEA"/>
+    <g transform="translate(40, 345)">
+      <rect x="0" y="0" width="353" height="260" class="card card-shadow" rx="12"/>
+      <rect x="0" y="0" width="353" height="6" rx="3" fill="#C7CEEA"/>
 
       <g color="#7B84C7" transform="translate(20, 22)">
         <use href="#icon-check-circle" width="28" height="28"/>
@@ -487,45 +546,21 @@
       <text x="58" y="42" class="heading" font-size="18">Spatial Predicates</text>
 
       <text x="20" y="72" class="label" font-size="12">Topological tests (DE-9IM):</text>
+      <text x="20" y="92" class="code" font-size="12" fill="#636E72">ST_Intersects  ST_Contains</text>
+      <text x="20" y="110" class="code" font-size="12" fill="#636E72">ST_Within      ST_Disjoint</text>
+      <text x="20" y="128" class="code" font-size="12" fill="#636E72">ST_Covers      ST_CoveredBy</text>
+      <text x="20" y="146" class="code" font-size="12" fill="#636E72">ST_Touches     ST_Crosses</text>
+      <text x="20" y="164" class="code" font-size="12" fill="#636E72">ST_Overlaps    ST_Equals</text>
 
-      <!-- Predicate grid -->
-      <g transform="translate(20, 84)">
-        <rect x="0" y="0" width="120" height="28" rx="6" fill="#C7CEEA" opacity="0.2"/>
-        <text x="60" y="19" class="code" font-size="12" text-anchor="middle" fill="#2D3436">ST_Intersects</text>
-
-        <rect x="128" y="0" width="110" height="28" rx="6" fill="#C7CEEA" opacity="0.2"/>
-        <text x="183" y="19" class="code" font-size="12" text-anchor="middle" fill="#2D3436">ST_Contains</text>
-
-        <rect x="246" y="0" width="95" height="28" rx="6" fill="#C7CEEA" opacity="0.2"/>
-        <text x="293" y="19" class="code" font-size="12" text-anchor="middle" fill="#2D3436">ST_Within</text>
-
-        <rect x="0" y="36" width="105" height="28" rx="6" fill="#C7CEEA" opacity="0.2"/>
-        <text x="52" y="55" class="code" font-size="12" text-anchor="middle" fill="#2D3436">ST_Disjoint</text>
-
-        <rect x="113" y="36" width="100" height="28" rx="6" fill="#C7CEEA" opacity="0.2"/>
-        <text x="163" y="55" class="code" font-size="12" text-anchor="middle" fill="#2D3436">ST_Covers</text>
-
-        <rect x="221" y="36" width="120" height="28" rx="6" fill="#C7CEEA" opacity="0.2"/>
-        <text x="281" y="55" class="code" font-size="12" text-anchor="middle" fill="#2D3436">ST_CoveredBy</text>
-
-        <rect x="0" y="72" width="105" height="28" rx="6" fill="#C7CEEA" opacity="0.2"/>
-        <text x="52" y="91" class="code" font-size="12" text-anchor="middle" fill="#2D3436">ST_Touches</text>
-
-        <rect x="113" y="72" width="105" height="28" rx="6" fill="#C7CEEA" opacity="0.2"/>
-        <text x="165" y="91" class="code" font-size="12" text-anchor="middle" fill="#2D3436">ST_Crosses</text>
-
-        <rect x="226" y="72" width="110" height="28" rx="6" fill="#C7CEEA" opacity="0.2"/>
-        <text x="281" y="91" class="code" font-size="12" text-anchor="middle" fill="#2D3436">ST_Overlaps</text>
-      </g>
-
-      <text x="20" y="218" class="label" font-size="12">Advanced:</text>
-      <text x="20" y="238" class="code" font-size="12" fill="#636E72">ST_Equals · ST_Relate · ST_RelateMatch · ST_DWithin</text>
+      <text x="20" y="194" class="label" font-size="12">Distance &amp; matrix:</text>
+      <text x="20" y="214" class="code" font-size="12" fill="#636E72">ST_DWithin</text>
+      <text x="20" y="232" class="code" font-size="12" fill="#636E72">ST_Relate  ST_RelateMatch</text>
     </g>
 
     <!-- Card 5: Measurement -->
-    <g transform="translate(605, 345)">
-      <rect x="0" y="0" width="440" height="260" class="card card-shadow" rx="12"/>
-      <rect x="0" y="0" width="440" height="6" rx="3" fill="#FFDAC1"/>
+    <g transform="translate(423, 345)">
+      <rect x="0" y="0" width="353" height="260" class="card card-shadow" rx="12"/>
+      <rect x="0" y="0" width="353" height="6" rx="3" fill="#FFDAC1"/>
 
       <g color="#D4874D" transform="translate(20, 22)">
         <use href="#icon-ruler" width="28" height="28"/>
@@ -533,23 +568,47 @@
       <text x="58" y="42" class="heading" font-size="18">Measurement</text>
 
       <text x="20" y="72" class="label" font-size="12">Planar metrics:</text>
-      <text x="20" y="92" class="code" font-size="12" fill="#636E72">ST_Area  ST_Length  ST_Perimeter</text>
-      <text x="20" y="110" class="code" font-size="12" fill="#636E72">ST_Distance  ST_HausdorffDistance</text>
+      <text x="20" y="90" class="code" font-size="12" fill="#636E72">ST_Area  ST_Length  ST_Perimeter</text>
+      <text x="20" y="106" class="code" font-size="12" fill="#636E72">ST_Distance  ST_HausdorffDistance</text>
 
-      <text x="20" y="138" class="label" font-size="12">Spherical metrics:</text>
-      <text x="20" y="158" class="code" font-size="12" fill="#636E72">ST_DistanceSphere  ST_DistanceSpheroid</text>
-      <text x="20" y="176" class="code" font-size="12" fill="#636E72">ST_LengthSphere</text>
+      <text x="20" y="130" class="label" font-size="12">Spherical / geodetic:</text>
+      <text x="20" y="148" class="code" font-size="12" fill="#636E72">ST_DistanceSphere  ST_DistanceSpheroid</text>
+      <text x="20" y="164" class="code" font-size="12" fill="#636E72">ST_LengthSphere  ST_Azimuth  ST_Project</text>
 
-      <text x="20" y="204" class="label" font-size="12">Derived geometry &amp; analysis:</text>
-      <text x="20" y="224" class="code" font-size="12" fill="#636E72">ST_Centroid  ST_PointOnSurface</text>
-      <text x="20" y="242" class="code" font-size="12" fill="#636E72">ST_Azimuth  ST_Project  ST_ClosestPoint</text>
+      <text x="20" y="190" class="label" font-size="12">Derived geometry &amp; bounds:</text>
+      <text x="20" y="208" class="code" font-size="12" fill="#636E72">ST_Centroid  ST_PointOnSurface</text>
+      <text x="20" y="224" class="code" font-size="12" fill="#636E72">ST_ClosestPoint</text>
+      <text x="20" y="242" class="code" font-size="12" fill="#636E72">ST_XMin  ST_XMax  ST_YMin  ST_YMax</text>
+    </g>
+
+    <!-- Card 6: Operations & Indexing -->
+    <g transform="translate(807, 345)">
+      <rect x="0" y="0" width="353" height="260" class="card card-shadow" rx="12"/>
+      <rect x="0" y="0" width="353" height="6" rx="3" fill="#A8D8EA"/>
+
+      <g color="#5B8FAF" transform="translate(20, 22)">
+        <use href="#icon-puzzle" width="28" height="28"/>
+      </g>
+      <text x="58" y="42" class="heading" font-size="18">Operations &amp; Indexing</text>
+
+      <text x="20" y="72" class="label" font-size="12">Boolean operations:</text>
+      <text x="20" y="92" class="code" font-size="12" fill="#636E72">ST_Union        ST_Intersection</text>
+      <text x="20" y="110" class="code" font-size="12" fill="#636E72">ST_Difference   ST_SymDifference</text>
+      <text x="20" y="128" class="code" font-size="12" fill="#636E72">ST_Buffer</text>
+
+      <text x="20" y="158" class="label" font-size="12">R-tree spatial index:</text>
+      <text x="20" y="178" class="code" font-size="12" fill="#636E72">CreateSpatialIndex(table, col)</text>
+      <text x="20" y="196" class="code" font-size="12" fill="#636E72">DropSpatialIndex(table, col)</text>
+
+      <text x="20" y="224" class="label" font-size="11" fill="#636E72">Auto-maintained via INSERT / UPDATE / DELETE</text>
+      <text x="20" y="240" class="label" font-size="11" fill="#636E72">triggers on the underlying R-tree table.</text>
     </g>
   </g>
 
   <!-- ============================================= -->
   <!-- SECTION 5: KEY FEATURES (1700–2060)           -->
   <!-- ============================================= -->
-  <g id="section-features" transform="translate(0, 1700)">
+  <g id="section-features" transform="translate(0, 1990)">
     <!-- Section heading -->
     <g transform="translate(40, 0)">
       <g color="#6B9FBF">
@@ -624,7 +683,7 @@
   <!-- ============================================= -->
   <!-- SECTION 6: WIRE FORMAT & USAGE (2080–2560)    -->
   <!-- ============================================= -->
-  <g id="section-wire-usage" transform="translate(0, 2080)">
+  <g id="section-wire-usage" transform="translate(0, 2370)">
     <!-- Section heading -->
     <g transform="translate(40, 0)">
       <g color="#6B9FBF">
@@ -639,7 +698,7 @@
       <rect x="0" y="0" width="530" height="390" class="card card-shadow" rx="12"/>
 
       <text x="24" y="32" class="heading" font-size="18">EWKB Wire Format</text>
-      <text x="24" y="52" class="label" font-size="12">Extended Well-Known Binary — PostGIS storage format with SRID</text>
+      <text x="24" y="52" class="label" font-size="12">Extended Well-Known Binary,PostGIS storage format with SRID</text>
 
       <!-- Byte diagram -->
       <g transform="translate(24, 72)">
@@ -717,7 +776,7 @@
       <text x="24" y="32" class="heading" font-size="18">Usage Examples</text>
 
       <!-- SQL Example -->
-      <text x="24" y="60" class="label" font-size="12">SQL — Spatial query with GeoLite:</text>
+      <text x="24" y="60" class="label" font-size="12">SQL,Spatial query with GeoLite:</text>
       <rect x="16" y="68" width="528" height="130" rx="8" fill="#2D3436"/>
       <foreignObject x="24" y="74" width="512" height="120">
         <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: 'JetBrains Mono', 'SF Mono', 'Consolas', monospace; font-size: 12px; color: #E8E8E8; line-height: 1.65; white-space: pre; overflow: hidden;">
@@ -732,20 +791,18 @@
       </foreignObject>
 
       <!-- Rust/Diesel Example -->
-      <text x="24" y="222" class="label" font-size="12">Rust — Diesel ORM integration:</text>
+      <text x="24" y="222" class="label" font-size="12">Rust,Diesel ORM integration:</text>
       <rect x="16" y="230" width="528" height="145" rx="8" fill="#2D3436"/>
       <foreignObject x="24" y="236" width="512" height="135">
         <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: 'JetBrains Mono', 'SF Mono', 'Consolas', monospace; font-size: 12px; color: #E8E8E8; line-height: 1.65; white-space: pre; overflow: hidden;">
-<span style="color: #C7CEEA;">use</span> geolite_diesel::functions::*;
+<span style="color: #C7CEEA;">use</span> geolite_diesel::prelude::*;
 
 <span style="color: #C7CEEA;">let</span> nearby = places::table
-    .<span style="color: #8BB8D4;">filter</span>(<span style="color: #B5EAD7;">st_dwithin</span>(
-        places::location,
+    .<span style="color: #8BB8D4;">filter</span>(places::location.<span style="color: #B5EAD7;">st_dwithin</span>(
         <span style="color: #B5EAD7;">st_point</span>(<span style="color: #FFDAC1;">-73.9857</span>, <span style="color: #FFDAC1;">40.7484</span>),
         <span style="color: #FFDAC1;">1000.0</span>,
     ))
-    .<span style="color: #8BB8D4;">select</span>((places::name, <span style="color: #B5EAD7;">st_distance</span>(
-        places::location,
+    .<span style="color: #8BB8D4;">select</span>((places::name, places::location.<span style="color: #B5EAD7;">st_distance</span>(
         <span style="color: #B5EAD7;">st_point</span>(<span style="color: #FFDAC1;">-73.9857</span>, <span style="color: #FFDAC1;">40.7484</span>),
     )))
     .<span style="color: #8BB8D4;">load</span>::&lt;(String, f64)&gt;(&amp;<span style="color: #C7CEEA;">mut</span> conn)?;</div>
@@ -754,156 +811,9 @@
   </g>
 
   <!-- ============================================= -->
-  <!-- SECTION 7: ECOSYSTEM & PLATFORMS (2580–2900)  -->
+  <!-- FOOTER                                        -->
   <!-- ============================================= -->
-  <g id="section-ecosystem" transform="translate(0, 2580)">
-    <!-- Section heading -->
-    <g transform="translate(40, 0)">
-      <g color="#6B9FBF">
-        <use href="#icon-cubes" width="28" height="28" y="-2"/>
-      </g>
-      <text x="38" y="20" class="heading" font-size="26">Ecosystem &amp; Platform Targets</text>
-      <line x1="0" y1="38" x2="1120" y2="38" stroke="#E2E8F0" stroke-width="1.5"/>
-    </g>
-
-    <!-- Left: Dependencies -->
-    <g transform="translate(40, 60)">
-      <rect x="0" y="0" width="640" height="230" class="card card-shadow" rx="12"/>
-      <text x="24" y="32" class="heading" font-size="18">Rust Crate Dependencies</text>
-      <text x="24" y="52" class="label" font-size="12">Built on battle-tested Rust geospatial ecosystem</text>
-
-      <!-- Dependency cards -->
-      <g transform="translate(24, 70)">
-        <!-- geo -->
-        <rect x="0" y="0" width="140" height="62" rx="8" fill="#A8D8EA" opacity="0.15" stroke="#A8D8EA" stroke-width="1"/>
-        <text x="70" y="22" class="heading" font-size="14" text-anchor="middle">geo</text>
-        <text x="70" y="40" class="label" font-size="10" text-anchor="middle">Geometry engine</text>
-        <text x="70" y="54" class="code" font-size="9" text-anchor="middle" fill="#636E72">v0.32</text>
-
-        <!-- geozero -->
-        <rect x="150" y="0" width="140" height="62" rx="8" fill="#B5EAD7" opacity="0.15" stroke="#B5EAD7" stroke-width="1"/>
-        <text x="220" y="22" class="heading" font-size="14" text-anchor="middle">geozero</text>
-        <text x="220" y="40" class="label" font-size="10" text-anchor="middle">I/O processing</text>
-        <text x="220" y="54" class="code" font-size="9" text-anchor="middle" fill="#636E72">v0.15</text>
-
-        <!-- diesel -->
-        <rect x="300" y="0" width="140" height="62" rx="8" fill="#FFB7B2" opacity="0.15" stroke="#FFB7B2" stroke-width="1"/>
-        <text x="370" y="22" class="heading" font-size="14" text-anchor="middle">diesel</text>
-        <text x="370" y="40" class="label" font-size="10" text-anchor="middle">ORM framework</text>
-        <text x="370" y="54" class="code" font-size="9" text-anchor="middle" fill="#636E72">v2.x</text>
-
-        <!-- libsqlite3-sys -->
-        <rect x="450" y="0" width="140" height="62" rx="8" fill="#C7CEEA" opacity="0.15" stroke="#C7CEEA" stroke-width="1"/>
-        <text x="520" y="22" class="heading" font-size="13" text-anchor="middle">libsqlite3-sys</text>
-        <text x="520" y="40" class="label" font-size="10" text-anchor="middle">SQLite bindings</text>
-        <text x="520" y="54" class="code" font-size="9" text-anchor="middle" fill="#636E72">&lt;0.36</text>
-      </g>
-
-      <g transform="translate(24, 146)">
-        <!-- thiserror -->
-        <rect x="0" y="0" width="140" height="62" rx="8" fill="#FFDAC1" opacity="0.2" stroke="#FFDAC1" stroke-width="1"/>
-        <text x="70" y="22" class="heading" font-size="14" text-anchor="middle">thiserror</text>
-        <text x="70" y="40" class="label" font-size="10" text-anchor="middle">Error handling</text>
-        <text x="70" y="54" class="code" font-size="9" text-anchor="middle" fill="#636E72">v2</text>
-
-        <!-- sqlite-wasm-rs -->
-        <rect x="150" y="0" width="140" height="62" rx="8" fill="#A8D8EA" opacity="0.15" stroke="#A8D8EA" stroke-width="1"/>
-        <text x="220" y="22" class="heading" font-size="13" text-anchor="middle">sqlite-wasm-rs</text>
-        <text x="220" y="40" class="label" font-size="10" text-anchor="middle">WASM SQLite</text>
-        <text x="220" y="54" class="code" font-size="9" text-anchor="middle" fill="#636E72">v0.5</text>
-      </g>
-    </g>
-
-    <!-- Right: Platform Targets -->
-    <g transform="translate(710, 60)">
-      <rect x="0" y="0" width="450" height="230" class="card card-shadow" rx="12"/>
-      <text x="24" y="32" class="heading" font-size="18">Platform Targets</text>
-
-      <!-- Native -->
-      <g transform="translate(24, 56)">
-        <g color="#6B9FBF">
-          <use href="#icon-server" width="36" height="36"/>
-        </g>
-        <text x="48" y="15" class="heading" font-size="15">Native (cdylib)</text>
-        <text x="48" y="33" class="label" font-size="12">Loadable SQLite extension</text>
-
-        <g transform="translate(48, 46)">
-          <rect x="0" y="0" width="80" height="26" rx="6" fill="#A8D8EA" opacity="0.2" stroke="#A8D8EA" stroke-width="1"/>
-          <text x="40" y="17" class="body" font-size="12" text-anchor="middle" fill="#2D3436">Linux</text>
-
-          <rect x="90" y="0" width="86" height="26" rx="6" fill="#B5EAD7" opacity="0.2" stroke="#B5EAD7" stroke-width="1"/>
-          <text x="133" y="17" class="body" font-size="12" text-anchor="middle" fill="#2D3436">macOS</text>
-
-          <rect x="186" y="0" width="96" height="26" rx="6" fill="#C7CEEA" opacity="0.2" stroke="#C7CEEA" stroke-width="1"/>
-          <text x="234" y="17" class="body" font-size="12" text-anchor="middle" fill="#2D3436">Windows</text>
-        </g>
-      </g>
-
-      <!-- WASM -->
-      <g transform="translate(24, 156)">
-        <g color="#7B84C7">
-          <use href="#icon-chip" width="36" height="36"/>
-        </g>
-        <text x="48" y="15" class="heading" font-size="15">WebAssembly</text>
-        <text x="48" y="33" class="label" font-size="12">Browser-native spatial queries</text>
-
-        <g transform="translate(48, 46)">
-          <rect x="0" y="0" width="120" height="26" rx="6" fill="#FFDAC1" opacity="0.3" stroke="#FFDAC1" stroke-width="1"/>
-          <text x="60" y="17" class="code" font-size="11" text-anchor="middle" fill="#2D3436">wasm32-unknown</text>
-
-          <rect x="130" y="0" width="145" height="26" rx="6" fill="#FFB7B2" opacity="0.2" stroke="#FFB7B2" stroke-width="1"/>
-          <text x="202" y="17" class="body" font-size="12" text-anchor="middle" fill="#2D3436">via sqlite-wasm-rs</text>
-        </g>
-      </g>
-    </g>
-  </g>
-
-  <!-- ============================================= -->
-  <!-- SECTION 8: STATS AT A GLANCE (2920–3200)      -->
-  <!-- ============================================= -->
-  <g id="section-stats" transform="translate(0, 2920)">
-    <!-- Section heading -->
-    <g transform="translate(40, 0)">
-      <g color="#6B9FBF">
-        <use href="#icon-diagram" width="28" height="28" y="-2"/>
-      </g>
-      <text x="38" y="20" class="heading" font-size="26">At a Glance</text>
-      <line x1="0" y1="38" x2="1120" y2="38" stroke="#E2E8F0" stroke-width="1.5"/>
-    </g>
-
-    <!-- 3 stat badges centered -->
-    <!-- Stat 1: Geometry Types -->
-    <g transform="translate(275, 75)">
-      <circle cx="65" cy="65" r="62" fill="#FFFFFF" stroke="#FFB7B2" stroke-width="3" filter="url(#shadow-sm)"/>
-      <circle cx="65" cy="65" r="50" fill="#FFB7B2" opacity="0.15"/>
-      <text x="65" y="58" class="heading" font-size="28" text-anchor="middle" fill="#2D3436">7</text>
-      <text x="65" y="80" class="label" font-size="11" text-anchor="middle">Geometry</text>
-      <text x="65" y="94" class="label" font-size="11" text-anchor="middle">Types</text>
-    </g>
-
-    <!-- Stat 2: Dimensions -->
-    <g transform="translate(535, 75)">
-      <circle cx="65" cy="65" r="62" fill="#FFFFFF" stroke="#C7CEEA" stroke-width="3" filter="url(#shadow-sm)"/>
-      <circle cx="65" cy="65" r="50" fill="#C7CEEA" opacity="0.15"/>
-      <text x="65" y="58" class="heading" font-size="28" text-anchor="middle" fill="#2D3436">4</text>
-      <text x="65" y="80" class="label" font-size="11" text-anchor="middle">Dimensions</text>
-      <text x="65" y="94" class="label" font-size="11" text-anchor="middle">2D/Z/M/ZM</text>
-    </g>
-
-    <!-- Stat 3: I/O Formats -->
-    <g transform="translate(795, 75)">
-      <circle cx="65" cy="65" r="62" fill="#FFFFFF" stroke="#FFDAC1" stroke-width="3" filter="url(#shadow-sm)"/>
-      <circle cx="65" cy="65" r="50" fill="#FFDAC1" opacity="0.15"/>
-      <text x="65" y="58" class="heading" font-size="28" text-anchor="middle" fill="#2D3436">5</text>
-      <text x="65" y="80" class="label" font-size="11" text-anchor="middle">I/O</text>
-      <text x="65" y="94" class="label" font-size="11" text-anchor="middle">Formats</text>
-    </g>
-  </g>
-
-  <!-- ============================================= -->
-  <!-- SECTION 9: FOOTER (3220–3400)                 -->
-  <!-- ============================================= -->
-  <g id="section-footer" transform="translate(0, 3220)">
+  <g id="section-footer" transform="translate(0, 2850)">
     <path d="M0,30 Q0,0 30,0 H1170 Q1200,0 1200,30 V180 H0 Z" fill="url(#footerGrad)"/>
 
     <!-- Decorative circles -->

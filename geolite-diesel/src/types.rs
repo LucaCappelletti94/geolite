@@ -1,7 +1,8 @@
 //! Diesel SQL type definitions and `FromSql` / `ToSql` implementations.
 //!
 //! Both `Geometry` and `Geography` map to `Binary` (BLOB) in SQLite and
-//! `bytea` in PostgreSQL, storing EWKB-encoded geometry.
+//! to PostGIS's native `geometry` / `geography` types in PostgreSQL,
+//! storing EWKB-encoded geometry.
 
 // ── SQL types ─────────────────────────────────────────────────────────────────
 
@@ -17,7 +18,7 @@
 /// ```
 #[derive(diesel::sql_types::SqlType, diesel::query_builder::QueryId, Debug, Clone, Copy)]
 #[diesel(sqlite_type(name = "Binary"))]
-#[diesel(postgres_type(name = "bytea"))]
+#[diesel(postgres_type(name = "geometry"))]
 pub struct Geometry;
 
 /// Diesel SQL type for a geography column (stored as EWKB BLOB, SRID = 4326).
@@ -25,7 +26,7 @@ pub struct Geometry;
 /// Same wire format as [`Geometry`]; spatial functions use spherical algorithms.
 #[derive(diesel::sql_types::SqlType, diesel::query_builder::QueryId, Debug, Clone, Copy)]
 #[diesel(sqlite_type(name = "Binary"))]
-#[diesel(postgres_type(name = "bytea"))]
+#[diesel(postgres_type(name = "geography"))]
 pub struct Geography;
 
 // ── SQLite FromSql / ToSql ────────────────────────────────────────────────────
@@ -114,7 +115,7 @@ mod sqlite_impls {
     }
 }
 
-// ── PostgreSQL FromSql / ToSql (future) ───────────────────────────────────────
+// ── PostgreSQL FromSql / ToSql ────────────────────────────────────────────────
 
 #[cfg(feature = "postgres")]
 mod postgres_impls {
@@ -122,8 +123,12 @@ mod postgres_impls {
     use diesel::deserialize::{self, FromSql};
     use diesel::pg::Pg;
     use diesel::serialize::{self, IsNull, Output, ToSql};
-    use diesel::sql_types::Binary;
     use std::io::Write as IoWrite;
+
+    // PostgreSQL Output implements std::io::Write, so binary data is written
+    // via `IoWrite::write_all(out, &bytes)`.
+
+    // --- Vec<u8> (raw EWKB bytes) ---
 
     macro_rules! impl_raw_bytes_pg {
         ($sql_type:ty) => {
@@ -131,26 +136,37 @@ mod postgres_impls {
                 fn from_sql(
                     bytes: <Pg as diesel::backend::Backend>::RawValue<'_>,
                 ) -> deserialize::Result<Self> {
-                    <Vec<u8> as FromSql<Binary, Pg>>::from_sql(bytes)
+                    Ok(bytes.as_bytes().to_vec())
                 }
             }
 
             impl ToSql<$sql_type, Pg> for Vec<u8> {
                 fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Pg>) -> serialize::Result {
-                    <Vec<u8> as ToSql<Binary, Pg>>::to_sql(self, out)
+                    IoWrite::write_all(out, self)?;
+                    Ok(IsNull::No)
                 }
             }
         };
     }
 
     impl_raw_bytes_pg!(Geometry);
+    impl_raw_bytes_pg!(Geography);
+
+    impl ToSql<Geometry, Pg> for [u8] {
+        fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Pg>) -> serialize::Result {
+            IoWrite::write_all(out, self)?;
+            Ok(IsNull::No)
+        }
+    }
+
+    // --- geo::Geometry<f64> ---
 
     impl FromSql<Geometry, Pg> for geo::Geometry<f64> {
         fn from_sql(
             bytes: <Pg as diesel::backend::Backend>::RawValue<'_>,
         ) -> deserialize::Result<Self> {
-            let blob = <Vec<u8> as FromSql<Binary, Pg>>::from_sql(bytes)?;
-            let (geom, _srid) = geolite_core::ewkb::parse_ewkb(&blob)
+            let blob = bytes.as_bytes();
+            let (geom, _srid) = geolite_core::ewkb::parse_ewkb(blob)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
             Ok(geom)
         }
@@ -159,6 +175,23 @@ mod postgres_impls {
     impl ToSql<Geometry, Pg> for geo::Geometry<f64> {
         fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Pg>) -> serialize::Result {
             let blob = geolite_core::ewkb::write_ewkb(self, None)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+            IoWrite::write_all(out, &blob)?;
+            Ok(IsNull::No)
+        }
+    }
+
+    impl FromSql<Geography, Pg> for geo::Geometry<f64> {
+        fn from_sql(
+            bytes: <Pg as diesel::backend::Backend>::RawValue<'_>,
+        ) -> deserialize::Result<Self> {
+            <geo::Geometry<f64> as FromSql<Geometry, Pg>>::from_sql(bytes)
+        }
+    }
+
+    impl ToSql<Geography, Pg> for geo::Geometry<f64> {
+        fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Pg>) -> serialize::Result {
+            let blob = geolite_core::ewkb::write_ewkb(self, Some(4326))
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
             IoWrite::write_all(out, &blob)?;
             Ok(IsNull::No)
