@@ -19,11 +19,11 @@ diesel = { version = "2", default-features = false }
 [dev-dependencies]
 geolite-core = { path = "../geolite-core" }
 geolite-sqlite = { path = "../geolite-sqlite" }
-testcontainers-modules = { version = "0.14", features = ["postgres"] }
-tokio = { version = "1", features = ["rt", "macros"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 libsqlite3-sys = { version = ">=0.17.2, <0.36.0" }
+testcontainers-modules = { version = "0.14", features = ["postgres"] }
+tokio = { version = "1", features = ["rt", "macros"] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 sqlite-wasm-rs = "0.5"
