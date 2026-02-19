@@ -1,5 +1,10 @@
 # geolite
 
+[![CI](https://github.com/LucaCappelletti94/geolite/actions/workflows/ci.yml/badge.svg)](https://github.com/LucaCappelletti94/geolite/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/LucaCappelletti94/geolite/graph/badge.svg)](https://codecov.io/gh/LucaCappelletti94/geolite)
+[![MSRV](https://img.shields.io/badge/MSRV-1.86-blue)](https://github.com/LucaCappelletti94/geolite)
+[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](LICENSE)
+
 PostGIS-compatible spatial functions for SQLite, written in pure Rust.
 
 Load geolite as a SQLite extension to get `ST_*` spatial functions — the same API used by PostGIS — in any SQLite database. Works as a native loadable extension and in WebAssembly browsers.
