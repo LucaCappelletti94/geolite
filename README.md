@@ -116,6 +116,7 @@ cargo run -p xtask -- precommit --full
 CI executes the same hook checks plus an extended matrix:
 
 - formatting and clippy checks
+- workspace-wide clippy (`--workspace` and `--workspace --all-features`)
 - native tests
 - PostGIS testcontainer integration tests
 - wasm tests
