@@ -1,7 +1,10 @@
 [package]
-name    = "geolite-diesel"
-version = "0.1.0"
-edition = "2021"
+name         = "geolite-diesel"
+version      = "0.1.0"
+edition      = "2021"
+rust-version.workspace = true
+license      = "MIT OR Apache-2.0"
+description  = "Diesel ORM integration for geolite spatial types (Geometry, Geography)"
 
 [lib]
 name = "geolite_diesel"

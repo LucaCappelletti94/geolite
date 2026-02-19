@@ -1,4 +1,4 @@
-//! Geometry accessor functions (§3.4 of plan.md)
+//! Geometry accessor functions.
 //!
 //! ST_SRID, ST_SetSRID, ST_GeometryType, GeometryType, ST_IsEmpty,
 //! ST_X, ST_Y, ST_Z, ST_NDims, ST_CoordDim, ST_Dimension,
@@ -476,22 +476,34 @@ pub fn st_geometry_n(blob: &[u8], n: i32) -> Result<Vec<u8>> {
     } else {
         return Err(GeoLiteError::OutOfBounds { index: n, len: 0 });
     };
-    let sub = match geom {
-        Geometry::MultiPoint(mp) => mp.0.into_iter().nth(idx).map(Geometry::Point),
-        Geometry::MultiLineString(mls) => mls.0.into_iter().nth(idx).map(Geometry::LineString),
-        Geometry::MultiPolygon(mp) => mp.0.into_iter().nth(idx).map(Geometry::Polygon),
-        Geometry::GeometryCollection(gc) => gc.0.into_iter().nth(idx),
+    let (sub, len) = match geom {
+        Geometry::MultiPoint(mp) => {
+            let len = mp.0.len();
+            (mp.0.into_iter().nth(idx).map(Geometry::Point), len)
+        }
+        Geometry::MultiLineString(mls) => {
+            let len = mls.0.len();
+            (mls.0.into_iter().nth(idx).map(Geometry::LineString), len)
+        }
+        Geometry::MultiPolygon(mp) => {
+            let len = mp.0.len();
+            (mp.0.into_iter().nth(idx).map(Geometry::Polygon), len)
+        }
+        Geometry::GeometryCollection(gc) => {
+            let len = gc.0.len();
+            (gc.0.into_iter().nth(idx), len)
+        }
         single => {
             if idx == 0 {
-                Some(single)
+                return write_ewkb(&single, srid);
             } else {
-                None
+                return Err(GeoLiteError::OutOfBounds { index: n, len: 1 });
             }
         }
     };
     match sub {
         Some(g) => write_ewkb(&g, srid),
-        None => Err(GeoLiteError::OutOfBounds { index: n, len: 0 }),
+        None => Err(GeoLiteError::OutOfBounds { index: n, len }),
     }
 }
 
@@ -578,7 +590,7 @@ pub fn st_is_valid_reason(blob: &[u8]) -> Result<String> {
         // geo's Validation trait gives typed errors; collect them
         let mut reasons = Vec::new();
         if let Err(e) = geom.check_validation() {
-            reasons.push(format!("{e:?}"));
+            reasons.push(format!("{e}"));
         }
         Ok(if reasons.is_empty() {
             "Invalid geometry".to_string()

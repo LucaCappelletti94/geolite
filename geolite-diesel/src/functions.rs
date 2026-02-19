@@ -176,6 +176,33 @@ diesel::define_sql_function! {
     fn st_hausdorffdistance(a: Nullable<Geometry>, b: Nullable<Geometry>) -> Nullable<Double>;
 }
 
+// ── Operations ────────────────────────────────────────────────────────────────
+
+diesel::define_sql_function! {
+    /// Compute the geometric union of two polygon geometries.
+    fn st_union(a: Nullable<Geometry>, b: Nullable<Geometry>) -> Nullable<Geometry>;
+}
+
+diesel::define_sql_function! {
+    /// Compute the geometric intersection of two polygon geometries.
+    fn st_intersection(a: Nullable<Geometry>, b: Nullable<Geometry>) -> Nullable<Geometry>;
+}
+
+diesel::define_sql_function! {
+    /// Compute the geometric difference (A minus B) of two polygon geometries.
+    fn st_difference(a: Nullable<Geometry>, b: Nullable<Geometry>) -> Nullable<Geometry>;
+}
+
+diesel::define_sql_function! {
+    /// Compute the symmetric difference (XOR) of two polygon geometries.
+    fn st_symdifference(a: Nullable<Geometry>, b: Nullable<Geometry>) -> Nullable<Geometry>;
+}
+
+diesel::define_sql_function! {
+    /// Expand or shrink a geometry by a given distance.
+    fn st_buffer(geom: Nullable<Geometry>, distance: Double) -> Nullable<Geometry>;
+}
+
 // ── Predicates ────────────────────────────────────────────────────────────────
 
 diesel::define_sql_function! {
@@ -216,6 +243,21 @@ diesel::define_sql_function! {
 diesel::define_sql_function! {
     /// Return 1 if A and B are within the given Euclidean distance.
     fn st_dwithin(a: Nullable<Geometry>, b: Nullable<Geometry>, distance: Double) -> Nullable<Integer>;
+}
+
+diesel::define_sql_function! {
+    /// Return 1 if geometries share boundary points but no interior points.
+    fn st_touches(a: Nullable<Geometry>, b: Nullable<Geometry>) -> Nullable<Integer>;
+}
+
+diesel::define_sql_function! {
+    /// Return 1 if geometries cross each other (intersect with a lower-dimensional result).
+    fn st_crosses(a: Nullable<Geometry>, b: Nullable<Geometry>) -> Nullable<Integer>;
+}
+
+diesel::define_sql_function! {
+    /// Return 1 if geometries overlap (same dimension, intersect but neither contains the other).
+    fn st_overlaps(a: Nullable<Geometry>, b: Nullable<Geometry>) -> Nullable<Integer>;
 }
 
 diesel::define_sql_function! {

@@ -13,6 +13,7 @@ use geolite_core::functions::accessors::*;
 use geolite_core::functions::constructors::*;
 use geolite_core::functions::io::*;
 use geolite_core::functions::measurement::*;
+use geolite_core::functions::operations::*;
 use geolite_core::functions::predicates::*;
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -577,6 +578,44 @@ xfunc_blob2!(
     set_blob_owned
 );
 
+// ── Operation callbacks ──────────────────────────────────────────────────────
+
+xfunc_blob2!(st_union_xfunc, "ST_Union", st_union, set_blob_owned);
+xfunc_blob2!(
+    st_intersection_xfunc,
+    "ST_Intersection",
+    st_intersection,
+    set_blob_owned
+);
+xfunc_blob2!(
+    st_difference_xfunc,
+    "ST_Difference",
+    st_difference,
+    set_blob_owned
+);
+xfunc_blob2!(
+    st_symdifference_xfunc,
+    "ST_SymDifference",
+    st_sym_difference,
+    set_blob_owned
+);
+
+unsafe extern "C" fn st_buffer_xfunc(
+    ctx: *mut sqlite3_context,
+    _n: c_int,
+    argv: *mut *mut sqlite3_value,
+) {
+    let Some(b) = get_blob(argv, 0) else {
+        set_null(ctx);
+        return;
+    };
+    let distance = get_f64(argv, 1);
+    match st_buffer(b, distance) {
+        Ok(v) => set_blob(ctx, &v),
+        Err(e) => set_error(ctx, &format!("ST_Buffer: {e}")),
+    }
+}
+
 // ── Predicate callbacks ──────────────────────────────────────────────────────
 
 xfunc_blob2!(
@@ -674,7 +713,7 @@ fn validate_identifier(s: &str) -> Option<&str> {
 /// On failure, sets `sqlite3_result_error` on `ctx` with the error message
 /// from SQLite and frees it via `sqlite3_free`.
 unsafe fn exec_sql(db: *mut sqlite3, ctx: *mut sqlite3_context, sql: &str) -> c_int {
-    let c_sql = CString::new(sql).unwrap();
+    let c_sql = CString::new(sql).expect("SQL string contains NUL byte");
     let mut err_msg: *mut std::ffi::c_char = std::ptr::null_mut();
     let rc = sqlite3_exec(db, c_sql.as_ptr(), None, std::ptr::null_mut(), &mut err_msg);
     if rc != SQLITE_OK {
@@ -988,6 +1027,13 @@ pub unsafe fn register_functions(db: *mut sqlite3) -> c_int {
     r!("ST_Azimuth", 2, st_azimuth_xfunc);
     r!("ST_Project", 3, st_project_xfunc);
     r!("ST_ClosestPoint", 2, st_closestpoint_xfunc);
+
+    // ── Operations ──────────────────────────────────────────────────────
+    r!("ST_Union", 2, st_union_xfunc);
+    r!("ST_Intersection", 2, st_intersection_xfunc);
+    r!("ST_Difference", 2, st_difference_xfunc);
+    r!("ST_SymDifference", 2, st_symdifference_xfunc);
+    r!("ST_Buffer", 2, st_buffer_xfunc);
 
     // ── Predicates ───────────────────────────────────────────────────────
     r!("ST_Intersects", 2, st_intersects_xfunc);

@@ -1,4 +1,4 @@
-//! Spatial predicate functions (§3.6 of plan.md)
+//! Spatial predicate functions.
 //!
 //! ST_Intersects, ST_Contains, ST_Within, ST_Disjoint, ST_DWithin,
 //! ST_Covers, ST_CoveredBy, ST_Equals, ST_Touches, ST_Crosses,

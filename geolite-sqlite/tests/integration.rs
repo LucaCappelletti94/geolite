@@ -2,118 +2,13 @@
 //! Integration tests for geolite-sqlite.
 //!
 //! Each test opens an in-memory SQLite database, registers all geolite
-//! functions via FFI, and executes SQL queries that mirror the verification
-//! queries in §6.2 of plan.md.
+//! functions via FFI, and executes SQL queries to verify behaviour.
 
 use libsqlite3_sys::*;
 use std::ffi::{CStr, CString};
 
-struct TestDb(*mut sqlite3);
-
-impl TestDb {
-    fn open() -> Self {
-        let mut db = std::ptr::null_mut();
-        let path = CString::new(":memory:").unwrap();
-        unsafe {
-            assert_eq!(SQLITE_OK, sqlite3_open(path.as_ptr(), &mut db));
-            assert_eq!(SQLITE_OK, geolite_sqlite::register_functions(db));
-        }
-        TestDb(db)
-    }
-
-    unsafe fn query_row<T, F: Fn(*mut sqlite3_stmt) -> T>(&self, sql: &str, extract: F) -> T {
-        let sql_c = CString::new(sql).unwrap();
-        let mut stmt = std::ptr::null_mut();
-        let rc = sqlite3_prepare_v2(self.0, sql_c.as_ptr(), -1, &mut stmt, std::ptr::null_mut());
-        assert_eq!(SQLITE_OK, rc, "prepare failed for: {sql}");
-        let step = sqlite3_step(stmt);
-        assert_eq!(SQLITE_ROW, step, "step failed for: {sql}");
-        let val = extract(stmt);
-        sqlite3_finalize(stmt);
-        val
-    }
-
-    fn query_text(&self, sql: &str) -> String {
-        unsafe {
-            self.query_row(sql, |stmt| {
-                let ptr = sqlite3_column_text(stmt, 0);
-                CStr::from_ptr(ptr as _).to_string_lossy().into_owned()
-            })
-        }
-    }
-
-    fn query_f64(&self, sql: &str) -> f64 {
-        unsafe { self.query_row(sql, |stmt| sqlite3_column_double(stmt, 0)) }
-    }
-
-    fn query_i64(&self, sql: &str) -> i64 {
-        unsafe { self.query_row(sql, |stmt| sqlite3_column_int64(stmt, 0)) }
-    }
-
-    fn query_is_null(&self, sql: &str) -> bool {
-        unsafe { self.query_row(sql, |stmt| sqlite3_column_type(stmt, 0) == SQLITE_NULL) }
-    }
-
-    fn exec(&self, sql: &str) {
-        let sql_c = CString::new(sql).unwrap();
-        unsafe {
-            let rc = sqlite3_exec(
-                self.0,
-                sql_c.as_ptr(),
-                None,
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-            );
-            assert_eq!(SQLITE_OK, rc, "exec failed for: {sql}");
-        }
-    }
-
-    fn query_all_i64(&self, sql: &str) -> Vec<i64> {
-        let sql_c = CString::new(sql).unwrap();
-        unsafe {
-            let mut stmt = std::ptr::null_mut();
-            let rc =
-                sqlite3_prepare_v2(self.0, sql_c.as_ptr(), -1, &mut stmt, std::ptr::null_mut());
-            assert_eq!(SQLITE_OK, rc, "prepare failed for: {sql}");
-            let mut vals = Vec::new();
-            while sqlite3_step(stmt) == SQLITE_ROW {
-                vals.push(sqlite3_column_int64(stmt, 0));
-            }
-            sqlite3_finalize(stmt);
-            vals
-        }
-    }
-
-    fn try_query_i64(&self, sql: &str) -> Result<i64, String> {
-        let sql_c = CString::new(sql).unwrap();
-        unsafe {
-            let mut stmt = std::ptr::null_mut();
-            let rc =
-                sqlite3_prepare_v2(self.0, sql_c.as_ptr(), -1, &mut stmt, std::ptr::null_mut());
-            if rc != SQLITE_OK {
-                let err = sqlite3_errmsg(self.0);
-                return Err(CStr::from_ptr(err).to_string_lossy().into_owned());
-            }
-            let step = sqlite3_step(stmt);
-            if step != SQLITE_ROW {
-                sqlite3_finalize(stmt);
-                let err = sqlite3_errmsg(self.0);
-                return Err(CStr::from_ptr(err).to_string_lossy().into_owned());
-            }
-            let val = sqlite3_column_int64(stmt, 0);
-            sqlite3_finalize(stmt);
-            Ok(val)
-        }
-    }
-}
-
-impl Drop for TestDb {
-    fn drop(&mut self) {
-        unsafe {
-            sqlite3_close(self.0);
-        }
-    }
-}
+include!("test_db_macro.rs");
+define_test_db!(TestDb);
 
 // ── I/O round-trips ───────────────────────────────────────────────────────────
 

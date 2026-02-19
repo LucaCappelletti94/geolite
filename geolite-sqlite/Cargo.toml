@@ -1,9 +1,10 @@
 [package]
-name    = "geolite-sqlite"
-version = "0.1.0"
-edition = "2021"
-license = "MIT OR Apache-2.0"
-description = "SQLite loadable extension exposing geolite-core spatial functions (native + WASM)"
+name         = "geolite-sqlite"
+version      = "0.1.0"
+edition      = "2021"
+rust-version.workspace = true
+license      = "MIT OR Apache-2.0"
+description  = "SQLite loadable extension exposing geolite-core spatial functions (native + WASM)"
 
 [lib]
 name       = "geolite_sqlite"

@@ -1,12 +1,10 @@
-//! Measurement functions (§3.7 of plan.md)
+//! Measurement functions.
 //!
 //! ST_Area, ST_Perimeter, ST_Length, ST_Length2D, ST_Distance,
 //! ST_Centroid, ST_PointOnSurface, ST_XMin/XMax/YMin/YMax,
 //! ST_DistanceSphere, ST_DistanceSpheroid, ST_Azimuth, ST_Project,
 //! ST_ClosestPoint, ST_HausdorffDistance
 
-#[allow(deprecated)]
-use geo::algorithm::euclidean_distance::EuclideanDistance;
 use geo::algorithm::line_measures::metric_spaces::{Euclidean, Geodesic, Haversine};
 use geo::algorithm::line_measures::{Bearing, Destination, Distance, Length};
 use geo::algorithm::InteriorPoint;
@@ -83,45 +81,8 @@ pub fn st_perimeter(blob: &[u8]) -> Result<f64> {
 }
 
 /// Dispatch euclidean distance between any two geo geometry types.
-#[allow(deprecated)]
 fn euclidean_geometry_distance(a: &Geometry<f64>, b: &Geometry<f64>) -> f64 {
-    fn multipoint_point_distance(mp: &geo::MultiPoint<f64>, p: &Point<f64>) -> Option<f64> {
-        mp.0.iter()
-            .map(|q| q.euclidean_distance(p))
-            .reduce(f64::min)
-    }
-
-    // Use EuclideanDistance (older trait) which covers most type pairs.
-    // Fall back to centroid distance for unsupported combinations.
-    match (a, b) {
-        (Geometry::Point(pa), Geometry::Point(pb)) => pa.euclidean_distance(pb),
-        (Geometry::MultiPoint(mp), Geometry::Point(p)) => multipoint_point_distance(mp, p)
-            .unwrap_or_else(|| {
-                let ca = a.centroid().unwrap_or_else(|| Point::new(0.0, 0.0));
-                let cb = b.centroid().unwrap_or_else(|| Point::new(0.0, 0.0));
-                Euclidean.distance(ca, cb)
-            }),
-        (Geometry::Point(p), Geometry::MultiPoint(mp)) => multipoint_point_distance(mp, p)
-            .unwrap_or_else(|| {
-                let ca = a.centroid().unwrap_or_else(|| Point::new(0.0, 0.0));
-                let cb = b.centroid().unwrap_or_else(|| Point::new(0.0, 0.0));
-                Euclidean.distance(ca, cb)
-            }),
-        (Geometry::Point(p), Geometry::LineString(ls)) => p.euclidean_distance(ls),
-        (Geometry::LineString(ls), Geometry::Point(p)) => p.euclidean_distance(ls),
-        (Geometry::Point(p), Geometry::Polygon(poly)) => p.euclidean_distance(poly),
-        (Geometry::Polygon(poly), Geometry::Point(p)) => p.euclidean_distance(poly),
-        (Geometry::LineString(la), Geometry::LineString(lb)) => la.euclidean_distance(lb),
-        (Geometry::LineString(ls), Geometry::Polygon(poly)) => ls.euclidean_distance(poly),
-        (Geometry::Polygon(poly), Geometry::LineString(ls)) => ls.euclidean_distance(poly),
-        (Geometry::Polygon(pa), Geometry::Polygon(pb)) => pa.euclidean_distance(pb),
-        _ => {
-            // Centroid approximation for unsupported combinations
-            let ca = a.centroid().unwrap_or_else(|| Point::new(0.0, 0.0));
-            let cb = b.centroid().unwrap_or_else(|| Point::new(0.0, 0.0));
-            Euclidean.distance(ca, cb)
-        }
-    }
+    Euclidean.distance(a, b)
 }
 
 /// ST_Distance — minimum Euclidean distance between two geometries.

@@ -163,6 +163,48 @@ pub trait GeometryExpressionMethods: Expression<SqlType = Nullable<Geometry>> + 
         functions::st_pointonsurface(self)
     }
 
+    // ── Operations ──────────────────────────────────────────────────────
+
+    /// Compute the geometric union of this geometry with another.
+    fn st_union<T>(self, other: T) -> functions::st_union<Self, T>
+    where
+        T: AsExpression<Nullable<Geometry>>,
+    {
+        functions::st_union(self, other)
+    }
+
+    /// Compute the geometric intersection of this geometry with another.
+    fn st_intersection<T>(self, other: T) -> functions::st_intersection<Self, T>
+    where
+        T: AsExpression<Nullable<Geometry>>,
+    {
+        functions::st_intersection(self, other)
+    }
+
+    /// Compute the geometric difference of this geometry minus another.
+    fn st_difference<T>(self, other: T) -> functions::st_difference<Self, T>
+    where
+        T: AsExpression<Nullable<Geometry>>,
+    {
+        functions::st_difference(self, other)
+    }
+
+    /// Compute the symmetric difference of this geometry and another.
+    fn st_symdifference<T>(self, other: T) -> functions::st_symdifference<Self, T>
+    where
+        T: AsExpression<Nullable<Geometry>>,
+    {
+        functions::st_symdifference(self, other)
+    }
+
+    /// Expand or shrink this geometry by a given distance.
+    fn st_buffer<D>(self, distance: D) -> functions::st_buffer<Self, D>
+    where
+        D: AsExpression<Double>,
+    {
+        functions::st_buffer(self, distance)
+    }
+
     // ── Predicates ──────────────────────────────────────────────────────
 
     /// Return 1 if this geometry shares any interior or boundary points with another.
@@ -228,6 +270,30 @@ pub trait GeometryExpressionMethods: Expression<SqlType = Nullable<Geometry>> + 
         D: AsExpression<Double>,
     {
         functions::st_dwithin(self, other, distance)
+    }
+
+    /// Return 1 if this geometry shares boundary points but no interior points with another.
+    fn st_touches<T>(self, other: T) -> functions::st_touches<Self, T>
+    where
+        T: AsExpression<Nullable<Geometry>>,
+    {
+        functions::st_touches(self, other)
+    }
+
+    /// Return 1 if this geometry crosses another.
+    fn st_crosses<T>(self, other: T) -> functions::st_crosses<Self, T>
+    where
+        T: AsExpression<Nullable<Geometry>>,
+    {
+        functions::st_crosses(self, other)
+    }
+
+    /// Return 1 if this geometry overlaps another.
+    fn st_overlaps<T>(self, other: T) -> functions::st_overlaps<Self, T>
+    where
+        T: AsExpression<Nullable<Geometry>>,
+    {
+        functions::st_overlaps(self, other)
     }
 
     /// Return the DE-9IM relationship matrix string between this and another geometry.

@@ -1,6 +1,6 @@
-//! I/O / Serialization functions (§3.2 of plan.md)
+//! I/O and serialization functions.
 //!
-//! ST_AsText, ST_AsEWKT, ST_AsBinary, ST_AsEWKB, ST_AsGeoJSON
+//! ST_AsText, ST_AsEWKT, ST_AsBinary, ST_AsEWKB, ST_AsGeoJSON,
 //! ST_GeomFromText, ST_GeomFromWKB, ST_GeomFromEWKB, ST_GeomFromGeoJSON
 
 use geo::Geometry;
@@ -23,8 +23,7 @@ use crate::ewkb::{extract_srid, parse_ewkb, write_ewkb};
 /// assert!(!blob.is_empty());
 /// ```
 pub fn geom_from_text(wkt: &str, srid: Option<i32>) -> Result<Vec<u8>> {
-    #[allow(deprecated)]
-    let geom: Geometry<f64> = geozero::wkt::WktStr(wkt).to_geo()?;
+    let geom: Geometry<f64> = geozero::wkt::Wkt(wkt.as_bytes()).to_geo()?;
     write_ewkb(&geom, srid)
 }
 

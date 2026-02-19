@@ -4,8 +4,8 @@
 //!   [0x01]        — byte order marker
 //!   [u32 LE]      — geometry type with flags
 //!                   Bit 29 (0x20000000): SRID present
-//!                   Bit 30 (0x80000000): Z dimension
-//!                   Bit 31 (0x40000000): M dimension
+//!                   Bit 31 (0x80000000): Z dimension
+//!                   Bit 30 (0x40000000): M dimension
 //!                   Bits 0–28: geometry type (1=Point, 2=LineString, …)
 //!   [i32 LE]      — SRID (only when SRID flag set)
 //!   …             — ISO WKB geometry payload
@@ -33,13 +33,15 @@ pub const WKB_GEOMETRYCOLLECTION: u32 = 7;
 /// Parsed EWKB header metadata.
 #[derive(Debug, Clone)]
 pub struct EwkbHeader {
-    /// Base geometry type (without flags)
+    /// Base geometry type code (1=Point, 2=LineString, ..., 7=GeometryCollection).
     pub geom_type: u32,
-    /// SRID embedded in the EWKB, if present
+    /// SRID embedded in the EWKB, if the SRID flag is set.
     pub srid: Option<i32>,
+    /// Whether the geometry has Z coordinates.
     pub has_z: bool,
+    /// Whether the geometry has M coordinates.
     pub has_m: bool,
-    /// Byte offset where the geometry payload starts
+    /// Byte offset where the geometry payload starts (after header + optional SRID).
     pub data_offset: usize,
 }
 
@@ -209,7 +211,7 @@ pub fn set_srid(blob: &[u8], new_srid: i32) -> Result<Vec<u8>> {
 /// assert_eq!(geom_type_name(999), "ST_Unknown");
 /// ```
 pub fn geom_type_name(raw_type: u32) -> &'static str {
-    match raw_type & 0x0FFF_FFFF {
+    match raw_type & 0x1FFF_FFFF {
         WKB_POINT => "ST_Point",
         WKB_LINESTRING => "ST_LineString",
         WKB_POLYGON => "ST_Polygon",
@@ -218,30 +220,6 @@ pub fn geom_type_name(raw_type: u32) -> &'static str {
         WKB_MULTIPOLYGON => "ST_MultiPolygon",
         WKB_GEOMETRYCOLLECTION => "ST_GeometryCollection",
         _ => "ST_Unknown",
-    }
-}
-
-/// Return the geometry type dimension code:
-/// 0 = 2D, 1 = Z, 2 = M, 3 = ZM
-///
-/// # Example
-///
-/// ```
-/// use geolite_core::ewkb::{coord_dim_flag, EWKB_Z_FLAG, EWKB_M_FLAG, WKB_POINT};
-///
-/// assert_eq!(coord_dim_flag(WKB_POINT), 0);                          // 2D
-/// assert_eq!(coord_dim_flag(WKB_POINT | EWKB_Z_FLAG), 2);            // Z
-/// assert_eq!(coord_dim_flag(WKB_POINT | EWKB_M_FLAG), 1);            // M
-/// assert_eq!(coord_dim_flag(WKB_POINT | EWKB_Z_FLAG | EWKB_M_FLAG), 3); // ZM
-/// ```
-pub fn coord_dim_flag(raw_type: u32) -> u8 {
-    let has_z = (raw_type & EWKB_Z_FLAG) != 0;
-    let has_m = (raw_type & EWKB_M_FLAG) != 0;
-    match (has_z, has_m) {
-        (false, false) => 0,
-        (true, false) => 2,
-        (false, true) => 1,
-        (true, true) => 3,
     }
 }
 
@@ -349,14 +327,6 @@ mod tests {
             "ST_GeometryCollection"
         );
         assert_eq!(geom_type_name(42), "ST_Unknown");
-    }
-
-    #[test]
-    fn coord_dim_flag_all_combos() {
-        assert_eq!(coord_dim_flag(WKB_POINT), 0);
-        assert_eq!(coord_dim_flag(WKB_POINT | EWKB_Z_FLAG), 2);
-        assert_eq!(coord_dim_flag(WKB_POINT | EWKB_M_FLAG), 1);
-        assert_eq!(coord_dim_flag(WKB_POINT | EWKB_Z_FLAG | EWKB_M_FLAG), 3);
     }
 
     #[test]

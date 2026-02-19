@@ -1,9 +1,10 @@
 [package]
-name    = "geolite-core"
-version = "0.1.0"
-edition = "2021"
-license = "MIT OR Apache-2.0"
-description = "Pure-Rust PostGIS-compatible spatial functions (no SQLite dependency)"
+name         = "geolite-core"
+version      = "0.1.0"
+edition      = "2021"
+rust-version.workspace = true
+license      = "MIT OR Apache-2.0"
+description  = "Pure-Rust PostGIS-compatible spatial functions (no SQLite dependency)"
 
 [lib]
 name = "geolite_core"

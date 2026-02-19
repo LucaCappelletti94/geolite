@@ -1,4 +1,4 @@
-//! Geometry constructor functions (§3.3 of plan.md)
+//! Geometry constructor functions.
 //!
 //! ST_Point, ST_MakePoint, ST_MakeLine, ST_MakePolygon,
 //! ST_MakeEnvelope, ST_Collect
@@ -135,6 +135,11 @@ const WEB_MERCATOR_HALF_SIZE: f64 = 20037508.3427892;
 /// assert_eq!(st_srid(&tile).unwrap(), 3857);
 /// ```
 pub fn st_tile_envelope(zoom: u32, tile_x: u32, tile_y: u32) -> Result<Vec<u8>> {
+    if zoom > 31 {
+        return Err(GeoLiteError::InvalidInput(format!(
+            "zoom level {zoom} exceeds maximum of 31"
+        )));
+    }
     let n = 2u32.pow(zoom);
     if tile_x >= n || tile_y >= n {
         return Err(GeoLiteError::InvalidInput(format!(
