@@ -10,7 +10,7 @@ use geo::algorithm::line_measures::{Bearing, Destination, Distance, Length};
 use geo::algorithm::InteriorPoint;
 use geo::algorithm::{Area, BoundingRect, Centroid, ClosestPoint, HausdorffDistance};
 use geo::Closest;
-use geo::{Geometry, Point};
+use geo::{Geometry, Point, Rect};
 
 use crate::error::{GeoLiteError, Result};
 use crate::ewkb::{ensure_matching_srid, parse_ewkb, parse_ewkb_pair, write_ewkb};
@@ -177,10 +177,7 @@ pub fn st_hausdorff_distance(a: &[u8], b: &[u8]) -> Result<f64> {
 /// assert!((st_xmin(&blob).unwrap() - 1.0).abs() < 1e-10);
 /// ```
 pub fn st_xmin(blob: &[u8]) -> Result<f64> {
-    let (geom, _) = parse_ewkb(blob)?;
-    let r = geom
-        .bounding_rect()
-        .ok_or(GeoLiteError::WrongType("non-empty geometry"))?;
+    let r = bbox(blob)?;
     Ok(r.min().x)
 }
 
@@ -196,10 +193,7 @@ pub fn st_xmin(blob: &[u8]) -> Result<f64> {
 /// assert!((st_xmax(&blob).unwrap() - 3.0).abs() < 1e-10);
 /// ```
 pub fn st_xmax(blob: &[u8]) -> Result<f64> {
-    let (geom, _) = parse_ewkb(blob)?;
-    let r = geom
-        .bounding_rect()
-        .ok_or(GeoLiteError::WrongType("non-empty geometry"))?;
+    let r = bbox(blob)?;
     Ok(r.max().x)
 }
 
@@ -215,10 +209,7 @@ pub fn st_xmax(blob: &[u8]) -> Result<f64> {
 /// assert!((st_ymin(&blob).unwrap() - 2.0).abs() < 1e-10);
 /// ```
 pub fn st_ymin(blob: &[u8]) -> Result<f64> {
-    let (geom, _) = parse_ewkb(blob)?;
-    let r = geom
-        .bounding_rect()
-        .ok_or(GeoLiteError::WrongType("non-empty geometry"))?;
+    let r = bbox(blob)?;
     Ok(r.min().y)
 }
 
@@ -234,11 +225,14 @@ pub fn st_ymin(blob: &[u8]) -> Result<f64> {
 /// assert!((st_ymax(&blob).unwrap() - 4.0).abs() < 1e-10);
 /// ```
 pub fn st_ymax(blob: &[u8]) -> Result<f64> {
-    let (geom, _) = parse_ewkb(blob)?;
-    let r = geom
-        .bounding_rect()
-        .ok_or(GeoLiteError::WrongType("non-empty geometry"))?;
+    let r = bbox(blob)?;
     Ok(r.max().y)
+}
+
+fn bbox(blob: &[u8]) -> Result<Rect<f64>> {
+    let (geom, _) = parse_ewkb(blob)?;
+    geom.bounding_rect()
+        .ok_or(GeoLiteError::WrongType("non-empty geometry"))
 }
 
 // ── Spherical / geodetic variants ─────────────────────────────────────────────
@@ -251,14 +245,15 @@ fn require_point(g: Geometry<f64>) -> Result<Point<f64>> {
 }
 
 fn ensure_geographic_srid(srid: Option<i32>, fn_name: &str) -> Result<()> {
-    if let Some(srid) = srid {
-        if srid != 4326 {
-            return Err(GeoLiteError::InvalidInput(format!(
-                "{fn_name} requires SRID 4326 (got {srid})"
-            )));
-        }
+    match srid {
+        Some(4326) => Ok(()),
+        Some(srid) => Err(GeoLiteError::InvalidInput(format!(
+            "{fn_name} requires SRID 4326 (got {srid})"
+        ))),
+        None => Err(GeoLiteError::InvalidInput(format!(
+            "{fn_name} requires SRID 4326 (got unknown/unspecified SRID)"
+        ))),
     }
-    Ok(())
 }
 
 fn ensure_matching_geographic_srid(
@@ -284,7 +279,7 @@ fn parse_two_geographic_points(
     Ok((pa, pb, srid))
 }
 
-/// ST_DistanceSphere — Haversine distance in metres (requires Point inputs).
+/// ST_DistanceSphere — Haversine distance in metres (requires Point inputs, SRID 4326).
 ///
 /// # Example
 ///
@@ -302,7 +297,7 @@ pub fn st_distance_sphere(a: &[u8], b: &[u8]) -> Result<f64> {
     Ok(Haversine.distance(pa, pb))
 }
 
-/// ST_DistanceSpheroid — Geodesic distance in metres (Karney algorithm).
+/// ST_DistanceSpheroid — Geodesic distance in metres (Karney algorithm, SRID 4326).
 ///
 /// # Example
 ///
@@ -320,7 +315,7 @@ pub fn st_distance_spheroid(a: &[u8], b: &[u8]) -> Result<f64> {
     Ok(Geodesic.distance(pa, pb))
 }
 
-/// ST_LengthSphere — Haversine arc length of a line in metres.
+/// ST_LengthSphere — Haversine arc length of a line in metres (SRID 4326).
 ///
 /// # Example
 ///
@@ -342,7 +337,7 @@ pub fn st_length_sphere(blob: &[u8]) -> Result<f64> {
     }
 }
 
-/// ST_Azimuth — bearing from origin to target in radians (0 = north, clockwise).
+/// ST_Azimuth — bearing from origin to target in radians (0 = north, clockwise, SRID 4326).
 ///
 /// # Example
 ///
@@ -361,7 +356,7 @@ pub fn st_azimuth(origin: &[u8], target: &[u8]) -> Result<f64> {
     Ok(Geodesic.bearing(po, pt).to_radians())
 }
 
-/// ST_Project — destination point given a start, bearing (radians), and distance (metres).
+/// ST_Project — destination point given a start, bearing (radians), and distance (metres, SRID 4326).
 ///
 /// # Example
 ///
@@ -503,9 +498,23 @@ mod tests {
     }
 
     #[test]
+    fn st_distance_sphere_missing_srid_errors() {
+        let a = st_point(0.0, 0.0, None).unwrap();
+        let b = st_point(1.0, 1.0, None).unwrap();
+        assert!(st_distance_sphere(&a, &b).is_err());
+    }
+
+    #[test]
     fn st_distance_spheroid_non_geographic_srid_errors() {
         let a = st_point(0.0, 0.0, Some(3857)).unwrap();
         let b = st_point(1.0, 1.0, Some(3857)).unwrap();
+        assert!(st_distance_spheroid(&a, &b).is_err());
+    }
+
+    #[test]
+    fn st_distance_spheroid_missing_srid_errors() {
+        let a = st_point(0.0, 0.0, None).unwrap();
+        let b = st_point(1.0, 1.0, None).unwrap();
         assert!(st_distance_spheroid(&a, &b).is_err());
     }
 
@@ -516,9 +525,28 @@ mod tests {
     }
 
     #[test]
+    fn st_length_sphere_missing_srid_errors() {
+        let line = geom_from_text("LINESTRING(0 0,1 1)", None).unwrap();
+        assert!(st_length_sphere(&line).is_err());
+    }
+
+    #[test]
     fn st_project_non_geographic_srid_errors() {
         let origin = st_point(0.0, 0.0, Some(3857)).unwrap();
         assert!(st_project(&origin, 111_000.0, 0.0).is_err());
+    }
+
+    #[test]
+    fn st_project_missing_srid_errors() {
+        let origin = st_point(0.0, 0.0, None).unwrap();
+        assert!(st_project(&origin, 111_000.0, 0.0).is_err());
+    }
+
+    #[test]
+    fn st_azimuth_missing_srid_errors() {
+        let a = st_point(0.0, 0.0, None).unwrap();
+        let b = st_point(0.0, 1.0, None).unwrap();
+        assert!(st_azimuth(&a, &b).is_err());
     }
 
     #[test]

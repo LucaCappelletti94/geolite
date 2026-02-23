@@ -148,6 +148,52 @@ fn geo_geography_roundtrip_has_srid() {
 }
 
 #[test]
+fn geography_fromsql_rejects_missing_srid() {
+    let mut c = conn();
+    let ewkb =
+        geolite_core::ewkb::write_ewkb(&geo::Geometry::Point(geo::Point::new(13.4, 52.5)), None)
+            .unwrap();
+
+    sql_query("INSERT INTO t (id, geom) VALUES (1, ?)")
+        .bind::<Geometry, _>(&ewkb)
+        .execute(&mut c)
+        .unwrap();
+
+    let err = sql_query("SELECT id, geom FROM t WHERE id = 1")
+        .get_result::<GeoGeogRow>(&mut c)
+        .expect_err("geography deserialization should reject missing SRID");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("must include SRID 4326"),
+        "unexpected error message: {msg}"
+    );
+}
+
+#[test]
+fn geography_fromsql_rejects_non_4326_srid() {
+    let mut c = conn();
+    let ewkb = geolite_core::ewkb::write_ewkb(
+        &geo::Geometry::Point(geo::Point::new(13.4, 52.5)),
+        Some(3857),
+    )
+    .unwrap();
+
+    sql_query("INSERT INTO t (id, geom) VALUES (1, ?)")
+        .bind::<Geometry, _>(&ewkb)
+        .execute(&mut c)
+        .unwrap();
+
+    let err = sql_query("SELECT id, geom FROM t WHERE id = 1")
+        .get_result::<GeoGeogRow>(&mut c)
+        .expect_err("geography deserialization should reject non-4326 SRID");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("must use SRID 4326"),
+        "unexpected error message: {msg}"
+    );
+}
+
+#[test]
 fn geometry_tosql_no_srid() {
     let mut c = conn();
 

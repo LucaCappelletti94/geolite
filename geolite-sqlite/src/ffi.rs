@@ -43,34 +43,49 @@ unsafe fn get_blob<'a>(argv: *mut *mut sqlite3_value, i: usize) -> Option<&'a [u
     Some(std::slice::from_raw_parts(ptr, len))
 }
 
-unsafe fn get_text<'a>(argv: *mut *mut sqlite3_value, i: usize) -> Option<&'a str> {
+enum SqlTextArg<'a> {
+    Null,
+    Value(&'a str),
+    InvalidUtf8,
+}
+
+unsafe fn get_text<'a>(argv: *mut *mut sqlite3_value, i: usize) -> SqlTextArg<'a> {
     let v = *argv.add(i);
     if sqlite3_value_type(v) == SQLITE_NULL {
-        return None;
+        return SqlTextArg::Null;
     }
     let ptr = sqlite3_value_text(v);
     let len = sqlite3_value_bytes(v) as usize;
     if ptr.is_null() {
-        return None;
+        return SqlTextArg::InvalidUtf8;
     }
-    std::str::from_utf8(std::slice::from_raw_parts(ptr as _, len)).ok()
-}
-
-unsafe fn get_f64_opt(argv: *mut *mut sqlite3_value, i: usize) -> Option<f64> {
-    let v = *argv.add(i);
-    if sqlite3_value_type(v) == SQLITE_NULL {
-        None
-    } else {
-        Some(sqlite3_value_double(v))
+    match std::str::from_utf8(std::slice::from_raw_parts(ptr as _, len)) {
+        Ok(s) => SqlTextArg::Value(s),
+        Err(_) => SqlTextArg::InvalidUtf8,
     }
 }
 
-unsafe fn get_i32_opt(argv: *mut *mut sqlite3_value, i: usize) -> Option<i32> {
+enum SqlArg<T> {
+    Null,
+    Value(T),
+    InvalidType,
+}
+
+unsafe fn get_f64_arg(argv: *mut *mut sqlite3_value, i: usize) -> SqlArg<f64> {
     let v = *argv.add(i);
-    if sqlite3_value_type(v) == SQLITE_NULL {
-        None
-    } else {
-        Some(sqlite3_value_int(v))
+    match sqlite3_value_type(v) {
+        SQLITE_NULL => SqlArg::Null,
+        SQLITE_INTEGER | SQLITE_FLOAT => SqlArg::Value(sqlite3_value_double(v)),
+        _ => SqlArg::InvalidType,
+    }
+}
+
+unsafe fn get_i32_arg(argv: *mut *mut sqlite3_value, i: usize) -> SqlArg<i32> {
+    let v = *argv.add(i);
+    match sqlite3_value_type(v) {
+        SQLITE_NULL => SqlArg::Null,
+        SQLITE_INTEGER => SqlArg::Value(sqlite3_value_int(v)),
+        _ => SqlArg::InvalidType,
     }
 }
 
@@ -105,6 +120,78 @@ unsafe fn set_null(ctx: *mut sqlite3_context) {
 unsafe fn set_error(ctx: *mut sqlite3_context, msg: &str) {
     let c = CString::new(msg).unwrap_or_else(|_| CString::new("geolite error").unwrap());
     sqlite3_result_error(ctx, c.as_ptr(), -1);
+}
+
+unsafe fn require_f64_arg(
+    ctx: *mut sqlite3_context,
+    argv: *mut *mut sqlite3_value,
+    i: usize,
+    fn_name: &str,
+    arg_name: &str,
+) -> Option<f64> {
+    match get_f64_arg(argv, i) {
+        SqlArg::Value(v) => Some(v),
+        SqlArg::Null => {
+            set_null(ctx);
+            None
+        }
+        SqlArg::InvalidType => {
+            set_error(ctx, &format!("{fn_name}: {arg_name} must be numeric"));
+            None
+        }
+    }
+}
+
+unsafe fn require_i32_arg(
+    ctx: *mut sqlite3_context,
+    argv: *mut *mut sqlite3_value,
+    i: usize,
+    fn_name: &str,
+    arg_name: &str,
+) -> Option<i32> {
+    match get_i32_arg(argv, i) {
+        SqlArg::Value(v) => Some(v),
+        SqlArg::Null => {
+            set_null(ctx);
+            None
+        }
+        SqlArg::InvalidType => {
+            set_error(ctx, &format!("{fn_name}: {arg_name} must be integer"));
+            None
+        }
+    }
+}
+
+unsafe fn require_text_arg<'a>(
+    ctx: *mut sqlite3_context,
+    argv: *mut *mut sqlite3_value,
+    i: usize,
+    fn_name: &str,
+    arg_name: &str,
+) -> Option<&'a str> {
+    match get_text(argv, i) {
+        SqlTextArg::Value(v) => Some(v),
+        SqlTextArg::Null => {
+            set_null(ctx);
+            None
+        }
+        SqlTextArg::InvalidUtf8 => {
+            set_error(
+                ctx,
+                &format!("{fn_name}: {arg_name} must be valid UTF-8 text"),
+            );
+            None
+        }
+    }
+}
+
+unsafe fn any_arg_is_null(argv: *mut *mut sqlite3_value, arg_count: usize) -> bool {
+    for i in 0..arg_count {
+        if sqlite3_value_type(*argv.add(i)) == SQLITE_NULL {
+            return true;
+        }
+    }
+    false
 }
 
 // ── Convenience setter wrappers ──────────────────────────────────────────────
@@ -169,6 +256,50 @@ macro_rules! xfunc_blob2 {
     };
 }
 
+/// 1 blob → Result<f64>, where NaN is mapped to SQL NULL.
+macro_rules! xfunc_blob_nan_null_f64 {
+    ($name:ident, $label:expr, $func:expr) => {
+        unsafe extern "C" fn $name(
+            ctx: *mut sqlite3_context,
+            _n: c_int,
+            argv: *mut *mut sqlite3_value,
+        ) {
+            let Some(blob) = get_blob(argv, 0) else {
+                set_null(ctx);
+                return;
+            };
+            match $func(blob) {
+                Ok(v) if v.is_nan() => set_null(ctx),
+                Ok(v) => set_f64(ctx, v),
+                Err(e) => set_error(ctx, &format!(concat!($label, ": {}"), e)),
+            }
+        }
+    };
+}
+
+/// blob + integer arg → Result<Vec<u8>>.
+macro_rules! xfunc_blob_i32_blob {
+    ($name:ident, $label:expr, $arg_name:expr, $func:expr) => {
+        unsafe extern "C" fn $name(
+            ctx: *mut sqlite3_context,
+            _n: c_int,
+            argv: *mut *mut sqlite3_value,
+        ) {
+            let Some(b) = get_blob(argv, 0) else {
+                set_null(ctx);
+                return;
+            };
+            let Some(n) = require_i32_arg(ctx, argv, 1, $label, $arg_name) else {
+                return;
+            };
+            match ($func)(b, n) {
+                Ok(v) => set_blob(ctx, &v),
+                Err(e) => set_error(ctx, &format!(concat!($label, ": {}"), e)),
+            }
+        }
+    };
+}
+
 // ── I/O callbacks ────────────────────────────────────────────────────────────
 
 /// text + optional SRID → blob
@@ -179,8 +310,7 @@ macro_rules! xfunc_text_optsrid_blob {
             _n: c_int,
             argv: *mut *mut sqlite3_value,
         ) {
-            let Some(t) = get_text(argv, 0) else {
-                set_null(ctx);
+            let Some(t) = require_text_arg(ctx, argv, 0, $label, "wkt") else {
                 return;
             };
             match $func(t, None) {
@@ -193,12 +323,10 @@ macro_rules! xfunc_text_optsrid_blob {
             _n: c_int,
             argv: *mut *mut sqlite3_value,
         ) {
-            let Some(t) = get_text(argv, 0) else {
-                set_null(ctx);
+            let Some(t) = require_text_arg(ctx, argv, 0, $label, "wkt") else {
                 return;
             };
-            let Some(srid) = get_i32_opt(argv, 1) else {
-                set_null(ctx);
+            let Some(srid) = require_i32_arg(ctx, argv, 1, $label, "srid") else {
                 return;
             };
             match $func(t, Some(srid)) {
@@ -235,8 +363,7 @@ macro_rules! xfunc_blob_optsrid_blob {
                 set_null(ctx);
                 return;
             };
-            let Some(srid) = get_i32_opt(argv, 1) else {
-                set_null(ctx);
+            let Some(srid) = require_i32_arg(ctx, argv, 1, $label, "srid") else {
                 return;
             };
             match $func(b, Some(srid)) {
@@ -271,8 +398,7 @@ unsafe extern "C" fn st_geomfromgeojson_xfunc(
     _n: c_int,
     argv: *mut *mut sqlite3_value,
 ) {
-    let Some(json) = get_text(argv, 0) else {
-        set_null(ctx);
+    let Some(json) = require_text_arg(ctx, argv, 0, "ST_GeomFromGeoJSON", "json") else {
         return;
     };
     match geom_from_geojson(json, None) {
@@ -294,29 +420,40 @@ xfunc_blob!(
 
 // ── Constructor callbacks ────────────────────────────────────────────────────
 
+unsafe fn st_point_impl(ctx: *mut sqlite3_context, argv: *mut *mut sqlite3_value, with_srid: bool) {
+    let arg_count = if with_srid { 3 } else { 2 };
+    if any_arg_is_null(argv, arg_count) {
+        set_null(ctx);
+        return;
+    }
+
+    let Some(x) = require_f64_arg(ctx, argv, 0, "ST_Point", "x") else {
+        return;
+    };
+    let Some(y) = require_f64_arg(ctx, argv, 1, "ST_Point", "y") else {
+        return;
+    };
+    let srid = if with_srid {
+        let Some(srid) = require_i32_arg(ctx, argv, 2, "ST_Point", "srid") else {
+            return;
+        };
+        Some(srid)
+    } else {
+        None
+    };
+
+    match st_point(x, y, srid) {
+        Ok(v) => set_blob(ctx, &v),
+        Err(e) => set_error(ctx, &format!("ST_Point: {e}")),
+    }
+}
+
 unsafe extern "C" fn st_point_2_xfunc(
     ctx: *mut sqlite3_context,
     _n: c_int,
     argv: *mut *mut sqlite3_value,
 ) {
-    if sqlite3_value_type(*argv.add(0)) == SQLITE_NULL
-        || sqlite3_value_type(*argv.add(1)) == SQLITE_NULL
-    {
-        set_null(ctx);
-        return;
-    }
-    let Some(x) = get_f64_opt(argv, 0) else {
-        set_null(ctx);
-        return;
-    };
-    let Some(y) = get_f64_opt(argv, 1) else {
-        set_null(ctx);
-        return;
-    };
-    match st_point(x, y, None) {
-        Ok(v) => set_blob(ctx, &v),
-        Err(e) => set_error(ctx, &format!("ST_Point: {e}")),
-    }
+    st_point_impl(ctx, argv, false);
 }
 
 unsafe extern "C" fn st_point_3_xfunc(
@@ -324,29 +461,7 @@ unsafe extern "C" fn st_point_3_xfunc(
     _n: c_int,
     argv: *mut *mut sqlite3_value,
 ) {
-    if sqlite3_value_type(*argv.add(0)) == SQLITE_NULL
-        || sqlite3_value_type(*argv.add(1)) == SQLITE_NULL
-        || sqlite3_value_type(*argv.add(2)) == SQLITE_NULL
-    {
-        set_null(ctx);
-        return;
-    }
-    let Some(x) = get_f64_opt(argv, 0) else {
-        set_null(ctx);
-        return;
-    };
-    let Some(y) = get_f64_opt(argv, 1) else {
-        set_null(ctx);
-        return;
-    };
-    let Some(srid) = get_i32_opt(argv, 2) else {
-        set_null(ctx);
-        return;
-    };
-    match st_point(x, y, Some(srid)) {
-        Ok(v) => set_blob(ctx, &v),
-        Err(e) => set_error(ctx, &format!("ST_Point: {e}")),
-    }
+    st_point_impl(ctx, argv, true);
 }
 
 xfunc_blob2!(
@@ -362,31 +477,50 @@ xfunc_blob!(
     set_blob_owned
 );
 
+unsafe fn st_makeenvelope_impl(
+    ctx: *mut sqlite3_context,
+    argv: *mut *mut sqlite3_value,
+    with_srid: bool,
+) {
+    let arg_count = if with_srid { 5 } else { 4 };
+    if any_arg_is_null(argv, arg_count) {
+        set_null(ctx);
+        return;
+    }
+
+    let Some(xmin) = require_f64_arg(ctx, argv, 0, "ST_MakeEnvelope", "xmin") else {
+        return;
+    };
+    let Some(ymin) = require_f64_arg(ctx, argv, 1, "ST_MakeEnvelope", "ymin") else {
+        return;
+    };
+    let Some(xmax) = require_f64_arg(ctx, argv, 2, "ST_MakeEnvelope", "xmax") else {
+        return;
+    };
+    let Some(ymax) = require_f64_arg(ctx, argv, 3, "ST_MakeEnvelope", "ymax") else {
+        return;
+    };
+    let srid = if with_srid {
+        let Some(srid) = require_i32_arg(ctx, argv, 4, "ST_MakeEnvelope", "srid") else {
+            return;
+        };
+        Some(srid)
+    } else {
+        None
+    };
+
+    match st_make_envelope(xmin, ymin, xmax, ymax, srid) {
+        Ok(v) => set_blob(ctx, &v),
+        Err(e) => set_error(ctx, &format!("ST_MakeEnvelope: {e}")),
+    }
+}
+
 unsafe extern "C" fn st_makeenvelope_4_xfunc(
     ctx: *mut sqlite3_context,
     _n: c_int,
     argv: *mut *mut sqlite3_value,
 ) {
-    let Some(xmin) = get_f64_opt(argv, 0) else {
-        set_null(ctx);
-        return;
-    };
-    let Some(ymin) = get_f64_opt(argv, 1) else {
-        set_null(ctx);
-        return;
-    };
-    let Some(xmax) = get_f64_opt(argv, 2) else {
-        set_null(ctx);
-        return;
-    };
-    let Some(ymax) = get_f64_opt(argv, 3) else {
-        set_null(ctx);
-        return;
-    };
-    match st_make_envelope(xmin, ymin, xmax, ymax, None) {
-        Ok(v) => set_blob(ctx, &v),
-        Err(e) => set_error(ctx, &format!("ST_MakeEnvelope: {e}")),
-    }
+    st_makeenvelope_impl(ctx, argv, false);
 }
 
 unsafe extern "C" fn st_makeenvelope_5_xfunc(
@@ -394,30 +528,7 @@ unsafe extern "C" fn st_makeenvelope_5_xfunc(
     _n: c_int,
     argv: *mut *mut sqlite3_value,
 ) {
-    let Some(xmin) = get_f64_opt(argv, 0) else {
-        set_null(ctx);
-        return;
-    };
-    let Some(ymin) = get_f64_opt(argv, 1) else {
-        set_null(ctx);
-        return;
-    };
-    let Some(xmax) = get_f64_opt(argv, 2) else {
-        set_null(ctx);
-        return;
-    };
-    let Some(ymax) = get_f64_opt(argv, 3) else {
-        set_null(ctx);
-        return;
-    };
-    let Some(srid) = get_i32_opt(argv, 4) else {
-        set_null(ctx);
-        return;
-    };
-    match st_make_envelope(xmin, ymin, xmax, ymax, Some(srid)) {
-        Ok(v) => set_blob(ctx, &v),
-        Err(e) => set_error(ctx, &format!("ST_MakeEnvelope: {e}")),
-    }
+    st_makeenvelope_impl(ctx, argv, true);
 }
 
 xfunc_blob2!(st_collect_xfunc, "ST_Collect", st_collect, set_blob_owned);
@@ -427,16 +538,13 @@ unsafe extern "C" fn st_tileenvelope_xfunc(
     _n: c_int,
     argv: *mut *mut sqlite3_value,
 ) {
-    let Some(zoom_i32) = get_i32_opt(argv, 0) else {
-        set_null(ctx);
+    let Some(zoom_i32) = require_i32_arg(ctx, argv, 0, "ST_TileEnvelope", "zoom") else {
         return;
     };
-    let Some(tile_x_i32) = get_i32_opt(argv, 1) else {
-        set_null(ctx);
+    let Some(tile_x_i32) = require_i32_arg(ctx, argv, 1, "ST_TileEnvelope", "tile x") else {
         return;
     };
-    let Some(tile_y_i32) = get_i32_opt(argv, 2) else {
-        set_null(ctx);
+    let Some(tile_y_i32) = require_i32_arg(ctx, argv, 2, "ST_TileEnvelope", "tile y") else {
         return;
     };
 
@@ -475,8 +583,7 @@ unsafe extern "C" fn st_setsrid_xfunc(
         set_null(ctx);
         return;
     };
-    let Some(srid) = get_i32_opt(argv, 1) else {
-        set_null(ctx);
+    let Some(srid) = require_i32_arg(ctx, argv, 1, "ST_SetSRID", "srid") else {
         return;
     };
     match st_set_srid(b, srid) {
@@ -496,38 +603,8 @@ xfunc_blob!(st_coorddim_xfunc, "ST_CoordDim", st_coord_dim, set_i32);
 xfunc_blob!(st_zmflag_xfunc, "ST_Zmflag", st_zmflag, set_i32);
 xfunc_blob!(st_isempty_xfunc, "ST_IsEmpty", st_is_empty, set_bool);
 xfunc_blob!(st_memsize_xfunc, "ST_MemSize", st_mem_size, set_i64);
-
-unsafe extern "C" fn st_x_xfunc(
-    ctx: *mut sqlite3_context,
-    _n: c_int,
-    argv: *mut *mut sqlite3_value,
-) {
-    let Some(blob) = get_blob(argv, 0) else {
-        set_null(ctx);
-        return;
-    };
-    match st_x(blob) {
-        Ok(v) if v.is_nan() => set_null(ctx),
-        Ok(v) => set_f64(ctx, v),
-        Err(e) => set_error(ctx, &format!("ST_X: {e}")),
-    }
-}
-
-unsafe extern "C" fn st_y_xfunc(
-    ctx: *mut sqlite3_context,
-    _n: c_int,
-    argv: *mut *mut sqlite3_value,
-) {
-    let Some(blob) = get_blob(argv, 0) else {
-        set_null(ctx);
-        return;
-    };
-    match st_y(blob) {
-        Ok(v) if v.is_nan() => set_null(ctx),
-        Ok(v) => set_f64(ctx, v),
-        Err(e) => set_error(ctx, &format!("ST_Y: {e}")),
-    }
-}
+xfunc_blob_nan_null_f64!(st_x_xfunc, "ST_X", st_x);
+xfunc_blob_nan_null_f64!(st_y_xfunc, "ST_Y", st_y);
 
 xfunc_blob!(st_numpoints_xfunc, "ST_NumPoints", st_num_points, set_i32);
 xfunc_blob!(st_npoints_xfunc, "ST_NPoints", st_npoints, set_i32);
@@ -544,25 +621,9 @@ xfunc_blob!(
     set_i32
 );
 xfunc_blob!(st_numrings_xfunc, "ST_NumRings", st_num_rings, set_i32);
-
-unsafe extern "C" fn st_pointn_xfunc(
-    ctx: *mut sqlite3_context,
-    _n: c_int,
-    argv: *mut *mut sqlite3_value,
-) {
-    let Some(b) = get_blob(argv, 0) else {
-        set_null(ctx);
-        return;
-    };
-    let Some(n) = get_i32_opt(argv, 1) else {
-        set_null(ctx);
-        return;
-    };
-    match st_point_n(b, n, None) {
-        Ok(v) => set_blob(ctx, &v),
-        Err(e) => set_error(ctx, &format!("ST_PointN: {e}")),
-    }
-}
+xfunc_blob_i32_blob!(st_pointn_xfunc, "ST_PointN", "n", |b, n| st_point_n(
+    b, n, None
+));
 
 xfunc_blob!(
     st_startpoint_xfunc,
@@ -582,44 +643,13 @@ xfunc_blob!(
     st_exterior_ring,
     set_blob_owned
 );
-
-unsafe extern "C" fn st_interiorringn_xfunc(
-    ctx: *mut sqlite3_context,
-    _n: c_int,
-    argv: *mut *mut sqlite3_value,
-) {
-    let Some(b) = get_blob(argv, 0) else {
-        set_null(ctx);
-        return;
-    };
-    let Some(n) = get_i32_opt(argv, 1) else {
-        set_null(ctx);
-        return;
-    };
-    match st_interior_ring_n(b, n) {
-        Ok(v) => set_blob(ctx, &v),
-        Err(e) => set_error(ctx, &format!("ST_InteriorRingN: {e}")),
-    }
-}
-
-unsafe extern "C" fn st_geometryn_xfunc(
-    ctx: *mut sqlite3_context,
-    _n: c_int,
-    argv: *mut *mut sqlite3_value,
-) {
-    let Some(b) = get_blob(argv, 0) else {
-        set_null(ctx);
-        return;
-    };
-    let Some(n) = get_i32_opt(argv, 1) else {
-        set_null(ctx);
-        return;
-    };
-    match st_geometry_n(b, n) {
-        Ok(v) => set_blob(ctx, &v),
-        Err(e) => set_error(ctx, &format!("ST_GeometryN: {e}")),
-    }
-}
+xfunc_blob_i32_blob!(
+    st_interiorringn_xfunc,
+    "ST_InteriorRingN",
+    "n",
+    st_interior_ring_n
+);
+xfunc_blob_i32_blob!(st_geometryn_xfunc, "ST_GeometryN", "n", st_geometry_n);
 
 xfunc_blob!(st_dimension_xfunc, "ST_Dimension", st_dimension, set_i32);
 xfunc_blob!(
@@ -693,12 +723,10 @@ unsafe extern "C" fn st_project_xfunc(
         set_null(ctx);
         return;
     };
-    let Some(distance) = get_f64_opt(argv, 1) else {
-        set_null(ctx);
+    let Some(distance) = require_f64_arg(ctx, argv, 1, "ST_Project", "distance") else {
         return;
     };
-    let Some(azimuth) = get_f64_opt(argv, 2) else {
-        set_null(ctx);
+    let Some(azimuth) = require_f64_arg(ctx, argv, 2, "ST_Project", "azimuth") else {
         return;
     };
     match st_project(origin, distance, azimuth) {
@@ -745,8 +773,7 @@ unsafe extern "C" fn st_buffer_xfunc(
         set_null(ctx);
         return;
     };
-    let Some(distance) = get_f64_opt(argv, 1) else {
-        set_null(ctx);
+    let Some(distance) = require_f64_arg(ctx, argv, 1, "ST_Buffer", "distance") else {
         return;
     };
     match st_buffer(b, distance) {
@@ -780,8 +807,7 @@ unsafe extern "C" fn st_dwithin_xfunc(
         set_null(ctx);
         return;
     };
-    let Some(d) = get_f64_opt(argv, 2) else {
-        set_null(ctx);
+    let Some(d) = require_f64_arg(ctx, argv, 2, "ST_DWithin", "distance") else {
         return;
     };
     match st_dwithin(a, b, d) {
@@ -812,8 +838,7 @@ unsafe extern "C" fn st_relate_3_xfunc(
         set_null(ctx);
         return;
     };
-    let Some(pattern) = get_text(argv, 2) else {
-        set_null(ctx);
+    let Some(pattern) = require_text_arg(ctx, argv, 2, "ST_Relate", "pattern") else {
         return;
     };
     match st_relate_match_geoms(a, b, pattern) {
@@ -827,12 +852,10 @@ unsafe extern "C" fn st_relatematch_xfunc(
     _n: c_int,
     argv: *mut *mut sqlite3_value,
 ) {
-    let Some(matrix) = get_text(argv, 0) else {
-        set_null(ctx);
+    let Some(matrix) = require_text_arg(ctx, argv, 0, "ST_RelateMatch", "matrix") else {
         return;
     };
-    let Some(pattern) = get_text(argv, 1) else {
-        set_null(ctx);
+    let Some(pattern) = require_text_arg(ctx, argv, 1, "ST_RelateMatch", "pattern") else {
         return;
     };
     match st_relate_match(matrix, pattern) {
@@ -882,13 +905,33 @@ unsafe fn get_table_column<'a>(
     argv: *mut *mut sqlite3_value,
     label: &str,
 ) -> Option<(&'a str, &'a str)> {
-    let Some(table) = get_text(argv, 0) else {
-        set_error(ctx, &format!("{label}: table name must not be NULL"));
-        return None;
+    let table = match get_text(argv, 0) {
+        SqlTextArg::Value(v) => v,
+        SqlTextArg::Null => {
+            set_error(ctx, &format!("{label}: table name must not be NULL"));
+            return None;
+        }
+        SqlTextArg::InvalidUtf8 => {
+            set_error(
+                ctx,
+                &format!("{label}: table name must be valid UTF-8 text"),
+            );
+            return None;
+        }
     };
-    let Some(column) = get_text(argv, 1) else {
-        set_error(ctx, &format!("{label}: column name must not be NULL"));
-        return None;
+    let column = match get_text(argv, 1) {
+        SqlTextArg::Value(v) => v,
+        SqlTextArg::Null => {
+            set_error(ctx, &format!("{label}: column name must not be NULL"));
+            return None;
+        }
+        SqlTextArg::InvalidUtf8 => {
+            set_error(
+                ctx,
+                &format!("{label}: column name must be valid UTF-8 text"),
+            );
+            return None;
+        }
     };
     let Some(table) = validate_identifier(table) else {
         set_error(
@@ -930,7 +973,7 @@ unsafe extern "C" fn create_spatial_index_xfunc(
         "INSERT INTO [{rtree}] \
          SELECT rowid, ST_XMin([{column}]), ST_XMax([{column}]), \
          ST_YMin([{column}]), ST_YMax([{column}]) \
-         FROM [{table}] WHERE [{column}] IS NOT NULL"
+         FROM [{table}] WHERE [{column}] IS NOT NULL AND ST_IsEmpty([{column}]) = 0"
     );
     if exec_sql(db, ctx, &sql) != SQLITE_OK {
         // Cleanup: drop the R-tree we just created
@@ -942,7 +985,7 @@ unsafe extern "C" fn create_spatial_index_xfunc(
     let trigger_insert = format!("{table}_{column}_insert");
     let sql = format!(
         "CREATE TRIGGER [{trigger_insert}] AFTER INSERT ON [{table}] \
-         WHEN NEW.[{column}] IS NOT NULL \
+         WHEN NEW.[{column}] IS NOT NULL AND ST_IsEmpty(NEW.[{column}]) = 0 \
          BEGIN \
            INSERT INTO [{rtree}] VALUES ( \
              NEW.rowid, \
@@ -966,7 +1009,7 @@ unsafe extern "C" fn create_spatial_index_xfunc(
              SELECT NEW.rowid, \
                ST_XMin(NEW.[{column}]), ST_XMax(NEW.[{column}]), \
                ST_YMin(NEW.[{column}]), ST_YMax(NEW.[{column}]) \
-             WHERE NEW.[{column}] IS NOT NULL; \
+             WHERE NEW.[{column}] IS NOT NULL AND ST_IsEmpty(NEW.[{column}]) = 0; \
          END"
     );
     if exec_sql(db, ctx, &sql) != SQLITE_OK {
@@ -1081,124 +1124,120 @@ unsafe fn reg_direct(
 /// # Safety
 /// `db` must be a valid, open SQLite database handle for the lifetime of the call.
 pub unsafe fn register_functions(db: *mut sqlite3) -> c_int {
-    macro_rules! r {
-        ($name:expr, $n:expr, $f:expr) => {
-            let rc = reg(db, $name, $n, $f);
-            if rc != SQLITE_OK {
-                return rc;
-            }
-        };
+    type XFunc = unsafe extern "C" fn(*mut sqlite3_context, c_int, *mut *mut sqlite3_value);
+
+    let deterministic: &[(&str, c_int, XFunc)] = &[
+        // I/O
+        ("ST_GeomFromText", 1, st_geomfromtext_1_xfunc),
+        ("ST_GeomFromText", 2, st_geomfromtext_2_xfunc),
+        ("ST_GeomFromWKB", 1, st_geomfromwkb_1_xfunc),
+        ("ST_GeomFromWKB", 2, st_geomfromwkb_2_xfunc),
+        ("ST_GeomFromEWKB", 1, st_geomfromewkb_xfunc),
+        ("ST_GeomFromGeoJSON", 1, st_geomfromgeojson_xfunc),
+        ("ST_AsText", 1, st_astext_xfunc),
+        ("ST_AsEWKT", 1, st_asewkt_xfunc),
+        ("ST_AsBinary", 1, st_asbinary_xfunc),
+        ("ST_AsEWKB", 1, st_asewkb_xfunc),
+        ("ST_AsGeoJSON", 1, st_asgeojson_xfunc),
+        // Constructors
+        ("ST_Point", 2, st_point_2_xfunc),
+        ("ST_Point", 3, st_point_3_xfunc),
+        ("ST_MakePoint", 2, st_point_2_xfunc),
+        ("ST_MakeLine", 2, st_makeline_xfunc),
+        ("ST_MakePolygon", 1, st_makepolygon_xfunc),
+        ("ST_MakeEnvelope", 4, st_makeenvelope_4_xfunc),
+        ("ST_MakeEnvelope", 5, st_makeenvelope_5_xfunc),
+        ("ST_Collect", 2, st_collect_xfunc),
+        ("ST_TileEnvelope", 3, st_tileenvelope_xfunc),
+        // Accessors
+        ("ST_SRID", 1, st_srid_xfunc),
+        ("ST_SetSRID", 2, st_setsrid_xfunc),
+        ("ST_GeometryType", 1, st_geometrytype_xfunc),
+        ("GeometryType", 1, st_geometrytype_xfunc),
+        ("ST_NDims", 1, st_ndims_xfunc),
+        ("ST_CoordDim", 1, st_coorddim_xfunc),
+        ("ST_Zmflag", 1, st_zmflag_xfunc),
+        ("ST_IsEmpty", 1, st_isempty_xfunc),
+        ("ST_MemSize", 1, st_memsize_xfunc),
+        ("ST_X", 1, st_x_xfunc),
+        ("ST_Y", 1, st_y_xfunc),
+        ("ST_NumPoints", 1, st_numpoints_xfunc),
+        ("ST_NPoints", 1, st_npoints_xfunc),
+        ("ST_NumGeometries", 1, st_numgeometries_xfunc),
+        ("ST_NumInteriorRings", 1, st_numinteriorrings_xfunc),
+        ("ST_NumInteriorRing", 1, st_numinteriorrings_xfunc),
+        ("ST_NumRings", 1, st_numrings_xfunc),
+        ("ST_PointN", 2, st_pointn_xfunc),
+        ("ST_StartPoint", 1, st_startpoint_xfunc),
+        ("ST_EndPoint", 1, st_endpoint_xfunc),
+        ("ST_ExteriorRing", 1, st_exteriorring_xfunc),
+        ("ST_InteriorRingN", 2, st_interiorringn_xfunc),
+        ("ST_GeometryN", 2, st_geometryn_xfunc),
+        ("ST_Dimension", 1, st_dimension_xfunc),
+        ("ST_Envelope", 1, st_envelope_xfunc),
+        ("ST_IsValid", 1, st_isvalid_xfunc),
+        ("ST_IsValidReason", 1, st_isvalidreason_xfunc),
+        // Measurement
+        ("ST_Area", 1, st_area_xfunc),
+        ("ST_Length", 1, st_length_xfunc),
+        ("ST_Length2D", 1, st_length_xfunc),
+        ("ST_Perimeter", 1, st_perimeter_xfunc),
+        ("ST_Perimeter2D", 1, st_perimeter_xfunc),
+        ("ST_Distance", 2, st_distance_xfunc),
+        ("ST_Centroid", 1, st_centroid_xfunc),
+        ("ST_PointOnSurface", 1, st_pointonsurface_xfunc),
+        ("ST_HausdorffDistance", 2, st_hausdorffdistance_xfunc),
+        ("ST_XMin", 1, st_xmin_xfunc),
+        ("ST_XMax", 1, st_xmax_xfunc),
+        ("ST_YMin", 1, st_ymin_xfunc),
+        ("ST_YMax", 1, st_ymax_xfunc),
+        ("ST_DistanceSphere", 2, st_distancesphere_xfunc),
+        ("ST_DistanceSpheroid", 2, st_distancespheroid_xfunc),
+        ("ST_LengthSphere", 1, st_lengthsphere_xfunc),
+        ("ST_Azimuth", 2, st_azimuth_xfunc),
+        ("ST_Project", 3, st_project_xfunc),
+        ("ST_ClosestPoint", 2, st_closestpoint_xfunc),
+        // Operations
+        ("ST_Union", 2, st_union_xfunc),
+        ("ST_Intersection", 2, st_intersection_xfunc),
+        ("ST_Difference", 2, st_difference_xfunc),
+        ("ST_SymDifference", 2, st_symdifference_xfunc),
+        ("ST_Buffer", 2, st_buffer_xfunc),
+        // Predicates
+        ("ST_Intersects", 2, st_intersects_xfunc),
+        ("ST_Contains", 2, st_contains_xfunc),
+        ("ST_Within", 2, st_within_xfunc),
+        ("ST_Disjoint", 2, st_disjoint_xfunc),
+        ("ST_DWithin", 3, st_dwithin_xfunc),
+        ("ST_Covers", 2, st_covers_xfunc),
+        ("ST_CoveredBy", 2, st_coveredby_xfunc),
+        ("ST_Equals", 2, st_equals_xfunc),
+        ("ST_Touches", 2, st_touches_xfunc),
+        ("ST_Crosses", 2, st_crosses_xfunc),
+        ("ST_Overlaps", 2, st_overlaps_xfunc),
+        ("ST_Relate", 2, st_relate_2_xfunc),
+        ("ST_Relate", 3, st_relate_3_xfunc),
+        ("ST_RelateMatch", 2, st_relatematch_xfunc),
+    ];
+
+    for (name, n_arg, xfunc) in deterministic {
+        let rc = reg(db, name, *n_arg, *xfunc);
+        if rc != SQLITE_OK {
+            return rc;
+        }
     }
 
-    macro_rules! rd {
-        ($name:expr, $n:expr, $f:expr) => {
-            let rc = reg_direct(db, $name, $n, $f);
-            if rc != SQLITE_OK {
-                return rc;
-            }
-        };
+    let direct_only: &[(&str, c_int, XFunc)] = &[
+        ("CreateSpatialIndex", 2, create_spatial_index_xfunc),
+        ("DropSpatialIndex", 2, drop_spatial_index_xfunc),
+    ];
+
+    for (name, n_arg, xfunc) in direct_only {
+        let rc = reg_direct(db, name, *n_arg, *xfunc);
+        if rc != SQLITE_OK {
+            return rc;
+        }
     }
-
-    // ── I/O ──────────────────────────────────────────────────────────────
-    r!("ST_GeomFromText", 1, st_geomfromtext_1_xfunc);
-    r!("ST_GeomFromText", 2, st_geomfromtext_2_xfunc);
-    r!("ST_GeomFromWKB", 1, st_geomfromwkb_1_xfunc);
-    r!("ST_GeomFromWKB", 2, st_geomfromwkb_2_xfunc);
-    r!("ST_GeomFromEWKB", 1, st_geomfromewkb_xfunc);
-    r!("ST_GeomFromGeoJSON", 1, st_geomfromgeojson_xfunc);
-    r!("ST_AsText", 1, st_astext_xfunc);
-    r!("ST_AsEWKT", 1, st_asewkt_xfunc);
-    r!("ST_AsBinary", 1, st_asbinary_xfunc);
-    r!("ST_AsEWKB", 1, st_asewkb_xfunc);
-    r!("ST_AsGeoJSON", 1, st_asgeojson_xfunc);
-
-    // ── Constructors ─────────────────────────────────────────────────────
-    r!("ST_Point", 2, st_point_2_xfunc);
-    r!("ST_Point", 3, st_point_3_xfunc);
-    r!("ST_MakePoint", 2, st_point_2_xfunc);
-    r!("ST_MakeLine", 2, st_makeline_xfunc);
-    r!("ST_MakePolygon", 1, st_makepolygon_xfunc);
-    r!("ST_MakeEnvelope", 4, st_makeenvelope_4_xfunc);
-    r!("ST_MakeEnvelope", 5, st_makeenvelope_5_xfunc);
-    r!("ST_Collect", 2, st_collect_xfunc);
-    r!("ST_TileEnvelope", 3, st_tileenvelope_xfunc);
-
-    // ── Accessors ────────────────────────────────────────────────────────
-    r!("ST_SRID", 1, st_srid_xfunc);
-    r!("ST_SetSRID", 2, st_setsrid_xfunc);
-    r!("ST_GeometryType", 1, st_geometrytype_xfunc);
-    r!("GeometryType", 1, st_geometrytype_xfunc);
-    r!("ST_NDims", 1, st_ndims_xfunc);
-    r!("ST_CoordDim", 1, st_coorddim_xfunc);
-    r!("ST_Zmflag", 1, st_zmflag_xfunc);
-    r!("ST_IsEmpty", 1, st_isempty_xfunc);
-    r!("ST_MemSize", 1, st_memsize_xfunc);
-    r!("ST_X", 1, st_x_xfunc);
-    r!("ST_Y", 1, st_y_xfunc);
-    r!("ST_NumPoints", 1, st_numpoints_xfunc);
-    r!("ST_NPoints", 1, st_npoints_xfunc);
-    r!("ST_NumGeometries", 1, st_numgeometries_xfunc);
-    r!("ST_NumInteriorRings", 1, st_numinteriorrings_xfunc);
-    r!("ST_NumInteriorRing", 1, st_numinteriorrings_xfunc);
-    r!("ST_NumRings", 1, st_numrings_xfunc);
-    r!("ST_PointN", 2, st_pointn_xfunc);
-    r!("ST_StartPoint", 1, st_startpoint_xfunc);
-    r!("ST_EndPoint", 1, st_endpoint_xfunc);
-    r!("ST_ExteriorRing", 1, st_exteriorring_xfunc);
-    r!("ST_InteriorRingN", 2, st_interiorringn_xfunc);
-    r!("ST_GeometryN", 2, st_geometryn_xfunc);
-    r!("ST_Dimension", 1, st_dimension_xfunc);
-    r!("ST_Envelope", 1, st_envelope_xfunc);
-    r!("ST_IsValid", 1, st_isvalid_xfunc);
-    r!("ST_IsValidReason", 1, st_isvalidreason_xfunc);
-
-    // ── Measurement ──────────────────────────────────────────────────────
-    r!("ST_Area", 1, st_area_xfunc);
-    r!("ST_Length", 1, st_length_xfunc);
-    r!("ST_Length2D", 1, st_length_xfunc);
-    r!("ST_Perimeter", 1, st_perimeter_xfunc);
-    r!("ST_Perimeter2D", 1, st_perimeter_xfunc);
-    r!("ST_Distance", 2, st_distance_xfunc);
-    r!("ST_Centroid", 1, st_centroid_xfunc);
-    r!("ST_PointOnSurface", 1, st_pointonsurface_xfunc);
-    r!("ST_HausdorffDistance", 2, st_hausdorffdistance_xfunc);
-    r!("ST_XMin", 1, st_xmin_xfunc);
-    r!("ST_XMax", 1, st_xmax_xfunc);
-    r!("ST_YMin", 1, st_ymin_xfunc);
-    r!("ST_YMax", 1, st_ymax_xfunc);
-    r!("ST_DistanceSphere", 2, st_distancesphere_xfunc);
-    r!("ST_DistanceSpheroid", 2, st_distancespheroid_xfunc);
-    r!("ST_LengthSphere", 1, st_lengthsphere_xfunc);
-    r!("ST_Azimuth", 2, st_azimuth_xfunc);
-    r!("ST_Project", 3, st_project_xfunc);
-    r!("ST_ClosestPoint", 2, st_closestpoint_xfunc);
-
-    // ── Operations ──────────────────────────────────────────────────────
-    r!("ST_Union", 2, st_union_xfunc);
-    r!("ST_Intersection", 2, st_intersection_xfunc);
-    r!("ST_Difference", 2, st_difference_xfunc);
-    r!("ST_SymDifference", 2, st_symdifference_xfunc);
-    r!("ST_Buffer", 2, st_buffer_xfunc);
-
-    // ── Predicates ───────────────────────────────────────────────────────
-    r!("ST_Intersects", 2, st_intersects_xfunc);
-    r!("ST_Contains", 2, st_contains_xfunc);
-    r!("ST_Within", 2, st_within_xfunc);
-    r!("ST_Disjoint", 2, st_disjoint_xfunc);
-    r!("ST_DWithin", 3, st_dwithin_xfunc);
-    r!("ST_Covers", 2, st_covers_xfunc);
-    r!("ST_CoveredBy", 2, st_coveredby_xfunc);
-    r!("ST_Equals", 2, st_equals_xfunc);
-    r!("ST_Touches", 2, st_touches_xfunc);
-    r!("ST_Crosses", 2, st_crosses_xfunc);
-    r!("ST_Overlaps", 2, st_overlaps_xfunc);
-    r!("ST_Relate", 2, st_relate_2_xfunc);
-    r!("ST_Relate", 3, st_relate_3_xfunc);
-    r!("ST_RelateMatch", 2, st_relatematch_xfunc);
-
-    // ── Spatial Index ─────────────────────────────────────────────────────
-    rd!("CreateSpatialIndex", 2, create_spatial_index_xfunc);
-    rd!("DropSpatialIndex", 2, drop_spatial_index_xfunc);
 
     SQLITE_OK
 }

@@ -19,6 +19,17 @@ fn require_multi_polygon(geom: Geometry<f64>) -> Result<MultiPolygon<f64>> {
     }
 }
 
+fn binary_polygon_op<F>(a: &[u8], b: &[u8], op: F) -> Result<Vec<u8>>
+where
+    F: FnOnce(&MultiPolygon<f64>, &MultiPolygon<f64>) -> MultiPolygon<f64>,
+{
+    let (ga, gb, srid) = parse_ewkb_pair(a, b)?;
+    let ma = require_multi_polygon(ga)?;
+    let mb = require_multi_polygon(gb)?;
+    let result = op(&ma, &mb);
+    write_ewkb(&Geometry::MultiPolygon(result), srid)
+}
+
 /// ST_Union — compute the geometric union of two polygon geometries.
 ///
 /// # Example
@@ -34,11 +45,7 @@ fn require_multi_polygon(geom: Geometry<f64>) -> Result<MultiPolygon<f64>> {
 /// assert!((st_area(&u).unwrap() - 6.0).abs() < 1e-10);
 /// ```
 pub fn st_union(a: &[u8], b: &[u8]) -> Result<Vec<u8>> {
-    let (ga, gb, srid) = parse_ewkb_pair(a, b)?;
-    let ma = require_multi_polygon(ga)?;
-    let mb = require_multi_polygon(gb)?;
-    let result = ma.union(&mb);
-    write_ewkb(&Geometry::MultiPolygon(result), srid)
+    binary_polygon_op(a, b, |ma, mb| ma.union(mb))
 }
 
 /// ST_Intersection — compute the geometric intersection of two polygon geometries.
@@ -56,11 +63,7 @@ pub fn st_union(a: &[u8], b: &[u8]) -> Result<Vec<u8>> {
 /// assert!((st_area(&i).unwrap() - 2.0).abs() < 1e-10);
 /// ```
 pub fn st_intersection(a: &[u8], b: &[u8]) -> Result<Vec<u8>> {
-    let (ga, gb, srid) = parse_ewkb_pair(a, b)?;
-    let ma = require_multi_polygon(ga)?;
-    let mb = require_multi_polygon(gb)?;
-    let result = ma.intersection(&mb);
-    write_ewkb(&Geometry::MultiPolygon(result), srid)
+    binary_polygon_op(a, b, |ma, mb| ma.intersection(mb))
 }
 
 /// ST_Difference — compute the geometric difference (A minus B) of two polygon geometries.
@@ -78,11 +81,7 @@ pub fn st_intersection(a: &[u8], b: &[u8]) -> Result<Vec<u8>> {
 /// assert!((st_area(&d).unwrap() - 2.0).abs() < 1e-10);
 /// ```
 pub fn st_difference(a: &[u8], b: &[u8]) -> Result<Vec<u8>> {
-    let (ga, gb, srid) = parse_ewkb_pair(a, b)?;
-    let ma = require_multi_polygon(ga)?;
-    let mb = require_multi_polygon(gb)?;
-    let result = ma.difference(&mb);
-    write_ewkb(&Geometry::MultiPolygon(result), srid)
+    binary_polygon_op(a, b, |ma, mb| ma.difference(mb))
 }
 
 /// ST_SymDifference — compute the symmetric difference (XOR) of two polygon geometries.
@@ -100,11 +99,7 @@ pub fn st_difference(a: &[u8], b: &[u8]) -> Result<Vec<u8>> {
 /// assert!((st_area(&sd).unwrap() - 4.0).abs() < 1e-10);
 /// ```
 pub fn st_sym_difference(a: &[u8], b: &[u8]) -> Result<Vec<u8>> {
-    let (ga, gb, srid) = parse_ewkb_pair(a, b)?;
-    let ma = require_multi_polygon(ga)?;
-    let mb = require_multi_polygon(gb)?;
-    let result = ma.xor(&mb);
-    write_ewkb(&Geometry::MultiPolygon(result), srid)
+    binary_polygon_op(a, b, |ma, mb| ma.xor(mb))
 }
 
 /// ST_Buffer — expand or shrink a geometry by a given distance.
@@ -124,13 +119,24 @@ pub fn st_sym_difference(a: &[u8], b: &[u8]) -> Result<Vec<u8>> {
 /// ```
 pub fn st_buffer(blob: &[u8], distance: f64) -> Result<Vec<u8>> {
     let (geom, srid) = parse_ewkb(blob)?;
+    if crate::functions::accessors::st_is_empty(blob)? {
+        let empty = Geometry::Polygon(geo::Polygon::new(geo::LineString::new(vec![]), vec![]));
+        return write_ewkb(&empty, srid);
+    }
     let result = geom.buffer(distance);
-    write_ewkb(&Geometry::MultiPolygon(result), srid)
+    let mut polygons = result.0;
+    let out_geom = match polygons.len() {
+        0 => Geometry::Polygon(geo::Polygon::new(geo::LineString::new(vec![]), vec![])),
+        1 => Geometry::Polygon(polygons.pop().expect("single polygon expected")),
+        _ => Geometry::MultiPolygon(MultiPolygon::new(polygons)),
+    };
+    write_ewkb(&out_geom, srid)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::functions::accessors::{st_geometry_type, st_is_empty};
     use crate::functions::constructors::st_point;
     use crate::functions::io::geom_from_text;
     use crate::functions::measurement::st_area;
@@ -173,6 +179,14 @@ mod tests {
         let buffered = st_buffer(&pt, 1.0).unwrap();
         let area = st_area(&buffered).unwrap();
         assert!((area - std::f64::consts::PI).abs() < 0.1);
+        assert_eq!(st_geometry_type(&buffered).unwrap(), "ST_Polygon");
+    }
+
+    #[test]
+    fn buffer_multipoint_returns_multipolygon_for_disconnected_components() {
+        let mp = geom_from_text("MULTIPOINT((0 0),(10 0))", None).unwrap();
+        let buffered = st_buffer(&mp, 1.0).unwrap();
+        assert_eq!(st_geometry_type(&buffered).unwrap(), "ST_MultiPolygon");
     }
 
     #[test]
@@ -196,5 +210,13 @@ mod tests {
         let shrunk = st_buffer(&poly, -1.0).unwrap();
         let area = st_area(&shrunk).unwrap();
         assert!(area < 100.0 && area > 0.0);
+    }
+
+    #[test]
+    fn buffer_empty_polygon_returns_empty_polygon() {
+        let empty = geom_from_text("POLYGON EMPTY", None).unwrap();
+        let buffered = st_buffer(&empty, 1.0).unwrap();
+        assert_eq!(st_geometry_type(&buffered).unwrap(), "ST_Polygon");
+        assert!(st_is_empty(&buffered).unwrap());
     }
 }

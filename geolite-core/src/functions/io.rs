@@ -24,6 +24,15 @@ fn is_empty_point_wkt(wkt: &str) -> bool {
     )
 }
 
+fn is_geometrycollection_single_empty_point_wkt(wkt: &str) -> bool {
+    let compact_upper = wkt
+        .chars()
+        .filter(|c| !c.is_ascii_whitespace())
+        .map(|c| c.to_ascii_uppercase())
+        .collect::<String>();
+    compact_upper == "GEOMETRYCOLLECTION(POINTEMPTY)"
+}
+
 fn is_empty_point_geojson(json: &str) -> bool {
     let Ok(value) = serde_json::from_str::<Value>(json) else {
         return false;
@@ -54,6 +63,10 @@ fn is_empty_point_geojson(json: &str) -> bool {
 pub fn geom_from_text(wkt: &str, srid: Option<i32>) -> Result<Vec<u8>> {
     if is_empty_point_wkt(wkt) {
         return write_ewkb(&Geometry::Point(Point::new(f64::NAN, f64::NAN)), srid);
+    }
+    if is_geometrycollection_single_empty_point_wkt(wkt) {
+        let gc = geo::GeometryCollection::new_from(vec![]);
+        return write_ewkb(&Geometry::GeometryCollection(gc), srid);
     }
     let geom: Geometry<f64> = geozero::wkt::Wkt(wkt.as_bytes()).to_geo()?;
     write_ewkb(&geom, srid)
@@ -405,5 +418,18 @@ mod tests {
         let wkb = as_binary(&blob).unwrap();
         let restored = geom_from_wkb(&wkb, None).unwrap();
         assert_eq!(as_text(&restored).unwrap(), "POINT EMPTY");
+    }
+
+    #[test]
+    fn geom_from_text_accepts_geometrycollection_with_empty_point() {
+        let blob = geom_from_text("GEOMETRYCOLLECTION(POINT EMPTY)", Some(4326)).unwrap();
+        assert_eq!(extract_srid(&blob), Some(4326));
+        assert_eq!(
+            crate::functions::accessors::st_num_geometries(&blob).unwrap(),
+            0
+        );
+        assert!(crate::functions::accessors::st_is_empty(&blob).unwrap());
+        assert_eq!(crate::functions::accessors::st_npoints(&blob).unwrap(), 0);
+        assert_eq!(as_text(&blob).unwrap(), "GEOMETRYCOLLECTION EMPTY");
     }
 }

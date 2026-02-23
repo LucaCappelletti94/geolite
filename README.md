@@ -134,6 +134,14 @@ cargo run -p xtask -- precommit --full
 
 Geometries are stored as EWKB (Extended Well-Known Binary) BLOBs, matching the PostGIS wire format.
 
+## Geographic SRID requirements
+
+Geodesic and spherical functions (`ST_DistanceSphere`, `ST_DistanceSpheroid`,
+`ST_LengthSphere`, `ST_Azimuth`, `ST_Project`) require geometries with explicit
+`SRID=4326`.
+
+Inputs with missing SRID or non-4326 SRID are rejected with an error.
+
 ## License
 
 MIT OR Apache-2.0

@@ -23,11 +23,40 @@ pub struct Geometry;
 
 /// Diesel SQL type for a geography column (stored as EWKB BLOB, SRID = 4326).
 ///
-/// Same wire format as [`Geometry`]; spatial functions use spherical algorithms.
+/// Same wire format as [`Geometry`], but `FromSql` enforces SRID 4326.
+/// Spatial functions use spherical/geodesic algorithms.
 #[derive(diesel::sql_types::SqlType, diesel::query_builder::QueryId, Debug, Clone, Copy)]
 #[diesel(sqlite_type(name = "Binary"))]
 #[diesel(postgres_type(name = "geography"))]
 pub struct Geography;
+
+#[cfg(any(feature = "sqlite", feature = "postgres"))]
+fn parse_geometry_blob(
+    blob: &[u8],
+) -> std::result::Result<geo::Geometry<f64>, Box<dyn std::error::Error + Send + Sync>> {
+    let (geom, _srid) = geolite_core::ewkb::parse_ewkb(blob)
+        .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+    Ok(geom)
+}
+
+#[cfg(any(feature = "sqlite", feature = "postgres"))]
+fn parse_geography_blob(
+    blob: &[u8],
+) -> std::result::Result<geo::Geometry<f64>, Box<dyn std::error::Error + Send + Sync>> {
+    let (geom, srid) = geolite_core::ewkb::parse_ewkb(blob)
+        .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+    match srid {
+        Some(4326) => Ok(geom),
+        Some(other) => Err(Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("geography EWKB must use SRID 4326 (got {other})"),
+        ))),
+        None => Err(Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "geography EWKB must include SRID 4326",
+        ))),
+    }
+}
 
 // ── SQLite FromSql / ToSql ────────────────────────────────────────────────────
 
@@ -38,7 +67,6 @@ mod sqlite_impls {
     use diesel::serialize::{self, IsNull, Output, ToSql};
     use diesel::sql_types::Binary;
     use diesel::sqlite::Sqlite;
-
     // SQLite Output does NOT implement std::io::Write.
     // Binary values are passed via `out.set_value(value)` where value
     // implements `Into<SqliteBindValue>` (e.g. &[u8], Vec<u8>).
@@ -81,9 +109,7 @@ mod sqlite_impls {
             bytes: <Sqlite as diesel::backend::Backend>::RawValue<'_>,
         ) -> deserialize::Result<Self> {
             let blob = <Vec<u8> as FromSql<Binary, Sqlite>>::from_sql(bytes)?;
-            let (geom, _srid) = geolite_core::ewkb::parse_ewkb(&blob)
-                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
-            Ok(geom)
+            super::parse_geometry_blob(&blob)
         }
     }
 
@@ -101,7 +127,8 @@ mod sqlite_impls {
         fn from_sql(
             bytes: <Sqlite as diesel::backend::Backend>::RawValue<'_>,
         ) -> deserialize::Result<Self> {
-            <geo::Geometry<f64> as FromSql<Geometry, Sqlite>>::from_sql(bytes)
+            let blob = <Vec<u8> as FromSql<Binary, Sqlite>>::from_sql(bytes)?;
+            super::parse_geography_blob(&blob)
         }
     }
 
@@ -166,9 +193,7 @@ mod postgres_impls {
             bytes: <Pg as diesel::backend::Backend>::RawValue<'_>,
         ) -> deserialize::Result<Self> {
             let blob = bytes.as_bytes();
-            let (geom, _srid) = geolite_core::ewkb::parse_ewkb(blob)
-                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
-            Ok(geom)
+            super::parse_geometry_blob(blob)
         }
     }
 
@@ -185,7 +210,7 @@ mod postgres_impls {
         fn from_sql(
             bytes: <Pg as diesel::backend::Backend>::RawValue<'_>,
         ) -> deserialize::Result<Self> {
-            <geo::Geometry<f64> as FromSql<Geometry, Pg>>::from_sql(bytes)
+            super::parse_geography_blob(bytes.as_bytes())
         }
     }
 

@@ -20,6 +20,16 @@ fn point_empty_round_trip() {
 }
 
 #[$test_attr]
+fn geometrycollection_with_empty_point_round_trip() {
+    let db = ActiveTestDb::open();
+    let npoints = db.query_i64("SELECT ST_NPoints(ST_GeomFromText('GEOMETRYCOLLECTION(POINT EMPTY)'))");
+    assert_eq!(npoints, 0);
+
+    let is_empty = db.query_i64("SELECT ST_IsEmpty(ST_GeomFromText('GEOMETRYCOLLECTION(POINT EMPTY)'))");
+    assert_eq!(is_empty, 1);
+}
+
+#[$test_attr]
 fn geojson_round_trip() {
     let db = ActiveTestDb::open();
     let json = db.query_text(
@@ -153,6 +163,29 @@ fn null_numeric_arg_st_point_returns_null() {
 }
 
 #[$test_attr]
+fn st_point_rejects_non_numeric_args() {
+    let db = ActiveTestDb::open();
+    let err = db
+        .try_query_i64("SELECT ST_Point('abc', 2) IS NULL")
+        .expect_err("non-numeric ST_Point argument should be a hard error");
+    assert!(
+        err.contains("must be numeric"),
+        "unexpected error message: {err}"
+    );
+}
+
+#[$test_attr]
+fn st_make_envelope_null_short_circuits_invalid_numeric_args() {
+    let db = ActiveTestDb::open();
+    let result = db.try_query_i64("SELECT ST_MakeEnvelope('abc', 0, 1, 1, NULL) IS NULL");
+    assert_eq!(
+        result,
+        Ok(1),
+        "NULL argument should short-circuit before numeric type errors: {result:?}"
+    );
+}
+
+#[$test_attr]
 fn st_make_line() {
     let db = ActiveTestDb::open();
     let n = db.query_i64("SELECT ST_NumPoints(ST_MakeLine(ST_Point(0,0), ST_Point(1,1)))");
@@ -192,6 +225,15 @@ fn st_srid_default() {
 }
 
 #[$test_attr]
+fn st_srid_rejects_malformed_ewkb() {
+    let db = ActiveTestDb::open();
+    let err = db
+        .try_query_i64("SELECT ST_SRID(X'01') IS NULL")
+        .expect_err("malformed EWKB must be a hard error");
+    assert!(err.contains("invalid EWKB"), "unexpected error message: {err}");
+}
+
+#[$test_attr]
 fn st_srid_set() {
     let db = ActiveTestDb::open();
     let srid = db.query_i64("SELECT ST_SRID(ST_GeomFromText('POINT(0 0)', 4326))");
@@ -210,6 +252,18 @@ fn st_geometry_type() {
     let db = ActiveTestDb::open();
     let t = db.query_text("SELECT ST_GeometryType(ST_GeomFromText('POINT(0 0)'))");
     assert_eq!(t, "ST_Point");
+}
+
+#[$test_attr]
+fn st_geometry_type_rejects_truncated_ewkb() {
+    let db = ActiveTestDb::open();
+    let err = db
+        .try_query_i64("SELECT ST_GeometryType(X'0101000000') IS NULL")
+        .expect_err("truncated EWKB must be a hard error");
+    assert!(
+        err.contains("truncated"),
+        "unexpected error message for truncated EWKB: {err}"
+    );
 }
 
 #[$test_attr]
@@ -451,7 +505,7 @@ fn st_hausdorff_distance() {
 fn st_distance_sphere() {
     let db = ActiveTestDb::open();
     let d = db.query_f64(
-        "SELECT ST_DistanceSphere(ST_Point(-0.1278, 51.5074), ST_Point(2.3522, 48.8566))",
+        "SELECT ST_DistanceSphere(ST_Point(-0.1278, 51.5074, 4326), ST_Point(2.3522, 48.8566, 4326))",
     );
     assert!(d > 300_000.0 && d < 400_000.0, "distance_sphere = {d}");
 }
@@ -460,7 +514,7 @@ fn st_distance_sphere() {
 fn st_distance_spheroid() {
     let db = ActiveTestDb::open();
     let d = db.query_f64(
-        "SELECT ST_DistanceSpheroid(ST_Point(-0.1278, 51.5074), ST_Point(2.3522, 48.8566))",
+        "SELECT ST_DistanceSpheroid(ST_Point(-0.1278, 51.5074, 4326), ST_Point(2.3522, 48.8566, 4326))",
     );
     assert!(d > 300_000.0 && d < 400_000.0, "distance_spheroid = {d}");
 }
@@ -469,7 +523,7 @@ fn st_distance_spheroid() {
 fn st_length_sphere() {
     let db = ActiveTestDb::open();
     let l = db.query_f64(
-        "SELECT ST_LengthSphere(ST_GeomFromText('LINESTRING(-0.1278 51.5074, 2.3522 48.8566)'))",
+        "SELECT ST_LengthSphere(ST_GeomFromText('LINESTRING(-0.1278 51.5074, 2.3522 48.8566)', 4326))",
     );
     assert!(l > 300_000.0, "length_sphere = {l}");
 }
@@ -477,15 +531,60 @@ fn st_length_sphere() {
 #[$test_attr]
 fn st_azimuth() {
     let db = ActiveTestDb::open();
-    let a = db.query_f64("SELECT ST_Azimuth(ST_Point(0,0), ST_Point(0,1))");
+    let a = db.query_f64("SELECT ST_Azimuth(ST_Point(0,0,4326), ST_Point(0,1,4326))");
     assert!(a.abs() < 1e-6, "azimuth = {a}");
 }
 
 #[$test_attr]
 fn st_project() {
     let db = ActiveTestDb::open();
-    let y = db.query_f64("SELECT ST_Y(ST_Project(ST_Point(0,0), 111000.0, 0.0))");
+    let y = db.query_f64("SELECT ST_Y(ST_Project(ST_Point(0,0,4326), 111000.0, 0.0))");
     assert!((y - 1.0).abs() < 0.1, "y = {y}");
+}
+
+#[$test_attr]
+fn st_distance_sphere_requires_explicit_4326_srid() {
+    let db = ActiveTestDb::open();
+    let err = db
+        .try_query_i64("SELECT ST_DistanceSphere(ST_Point(0,0), ST_Point(1,1))")
+        .expect_err("SRID-less geodesic distance should error");
+    assert!(err.contains("requires SRID 4326"), "unexpected error: {err}");
+}
+
+#[$test_attr]
+fn st_distance_spheroid_requires_explicit_4326_srid() {
+    let db = ActiveTestDb::open();
+    let err = db
+        .try_query_i64("SELECT ST_DistanceSpheroid(ST_Point(0,0), ST_Point(1,1))")
+        .expect_err("SRID-less geodesic distance should error");
+    assert!(err.contains("requires SRID 4326"), "unexpected error: {err}");
+}
+
+#[$test_attr]
+fn st_length_sphere_requires_explicit_4326_srid() {
+    let db = ActiveTestDb::open();
+    let err = db
+        .try_query_i64("SELECT ST_LengthSphere(ST_GeomFromText('LINESTRING(0 0,1 1)'))")
+        .expect_err("SRID-less geodesic length should error");
+    assert!(err.contains("requires SRID 4326"), "unexpected error: {err}");
+}
+
+#[$test_attr]
+fn st_azimuth_requires_explicit_4326_srid() {
+    let db = ActiveTestDb::open();
+    let err = db
+        .try_query_i64("SELECT ST_Azimuth(ST_Point(0,0), ST_Point(0,1))")
+        .expect_err("SRID-less geodesic azimuth should error");
+    assert!(err.contains("requires SRID 4326"), "unexpected error: {err}");
+}
+
+#[$test_attr]
+fn st_project_requires_explicit_4326_srid() {
+    let db = ActiveTestDb::open();
+    let err = db
+        .try_query_i64("SELECT ST_Project(ST_Point(0,0), 111000.0, 0.0)")
+        .expect_err("SRID-less geodesic projection should error");
+    assert!(err.contains("requires SRID 4326"), "unexpected error: {err}");
 }
 
 #[$test_attr]
@@ -721,6 +820,15 @@ fn null_input_st_astext() {
 fn null_input_st_geomfromtext() {
     let db = ActiveTestDb::open();
     assert!(db.query_is_null("SELECT ST_GeomFromText(NULL)"));
+}
+
+#[$test_attr]
+fn st_geomfromtext_invalid_utf8_errors() {
+    let db = ActiveTestDb::open();
+    let err = db
+        .try_query_i64("SELECT ST_GeomFromText(CAST(X'80' AS TEXT)) IS NULL")
+        .expect_err("invalid UTF-8 ST_GeomFromText input should be a hard error");
+    assert!(err.contains("UTF-8"), "unexpected error message: {err}");
 }
 
 #[$test_attr]
@@ -1016,6 +1124,19 @@ fn st_is_empty_geometrycollection() {
 }
 
 #[$test_attr]
+fn st_is_empty_collections_with_only_empty_members() {
+    let db = ActiveTestDb::open();
+    let e = db.query_i64("SELECT ST_IsEmpty(ST_GeomFromText('MULTILINESTRING(EMPTY,EMPTY)'))");
+    assert_eq!(e, 1);
+
+    let e = db.query_i64("SELECT ST_IsEmpty(ST_GeomFromText('MULTIPOLYGON(EMPTY)'))");
+    assert_eq!(e, 1);
+
+    let e = db.query_i64("SELECT ST_IsEmpty(ST_GeomFromText('GEOMETRYCOLLECTION(LINESTRING EMPTY)'))");
+    assert_eq!(e, 1);
+}
+
+#[$test_attr]
 fn st_perimeter_multipolygon() {
     let db = ActiveTestDb::open();
     let p = db.query_f64(
@@ -1097,7 +1218,7 @@ fn st_is_valid_reason_invalid_polygon() {
 fn st_length_sphere_multilinestring() {
     let db = ActiveTestDb::open();
     let l = db.query_f64(
-        "SELECT ST_LengthSphere(ST_GeomFromText('MULTILINESTRING((-0.1278 51.5074, 2.3522 48.8566),(2.3522 48.8566, 13.4050 52.5200))'))",
+        "SELECT ST_LengthSphere(ST_GeomFromText('MULTILINESTRING((-0.1278 51.5074, 2.3522 48.8566),(2.3522 48.8566, 13.4050 52.5200))', 4326))",
     );
     // London→Paris + Paris→Berlin, should be > 600km
     assert!(l > 600_000.0, "length_sphere = {l}");
@@ -1293,6 +1414,32 @@ fn spatial_index_narrows_candidates() {
          WHERE r.xmin >= 1.5 AND r.xmax <= 3.5 AND r.ymin >= 1.5 AND r.ymax <= 3.5",
     );
     assert_eq!(rtree_hits.len(), 4);
+}
+
+#[$test_attr]
+fn spatial_index_ignores_empty_geometries() {
+    let db = ActiveTestDb::open();
+    db.exec("CREATE TABLE empties (id INTEGER PRIMARY KEY, geom BLOB)");
+    db.exec(
+        "INSERT INTO empties (id, geom) VALUES \
+         (1, ST_Point(1, 2)), \
+         (2, ST_GeomFromText('POLYGON EMPTY')), \
+         (3, ST_GeomFromText('GEOMETRYCOLLECTION EMPTY'))",
+    );
+
+    let rc = db.query_i64("SELECT CreateSpatialIndex('empties', 'geom')");
+    assert_eq!(rc, 1);
+
+    let count = db.query_i64("SELECT COUNT(*) FROM empties_geom_rtree");
+    assert_eq!(count, 1, "only non-empty geometries should be indexed");
+
+    db.exec("UPDATE empties SET geom = ST_GeomFromText('POINT EMPTY') WHERE id = 1");
+    let count = db.query_i64("SELECT COUNT(*) FROM empties_geom_rtree");
+    assert_eq!(count, 0, "row should be removed when geometry becomes empty");
+
+    db.exec("UPDATE empties SET geom = ST_Point(5, 6) WHERE id = 2");
+    let count = db.query_i64("SELECT COUNT(*) FROM empties_geom_rtree");
+    assert_eq!(count, 1, "row should be indexed when geometry becomes non-empty");
 }
 
 #[$test_attr]

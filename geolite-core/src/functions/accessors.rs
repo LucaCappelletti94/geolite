@@ -13,11 +13,38 @@ use geo::{BoundingRect, Geometry};
 
 use crate::error::{GeoLiteError, Result};
 use crate::ewkb::{
-    extract_srid, geom_type_name, parse_ewkb, parse_ewkb_header, set_srid, write_ewkb,
+    geom_type_name, parse_ewkb, parse_ewkb_header, set_srid, write_ewkb, EwkbHeader,
 };
 
 fn is_empty_point(p: &geo::Point<f64>) -> bool {
     p.x().is_nan() && p.y().is_nan()
+}
+
+fn is_empty_polygon(p: &geo::Polygon<f64>) -> bool {
+    p.exterior().0.is_empty()
+}
+
+fn is_empty_geometry(geom: &Geometry<f64>) -> bool {
+    match geom {
+        Geometry::Point(p) => is_empty_point(p),
+        Geometry::Line(_) => false,
+        Geometry::LineString(ls) => ls.0.is_empty(),
+        Geometry::Polygon(p) => is_empty_polygon(p),
+        Geometry::MultiPoint(mp) => mp.0.is_empty() || mp.0.iter().all(is_empty_point),
+        Geometry::MultiLineString(mls) => {
+            mls.0.is_empty() || mls.0.iter().all(|ls| ls.0.is_empty())
+        }
+        Geometry::MultiPolygon(mp) => mp.0.is_empty() || mp.0.iter().all(is_empty_polygon),
+        Geometry::GeometryCollection(gc) => gc.0.is_empty() || gc.0.iter().all(is_empty_geometry),
+        Geometry::Rect(_) => false,
+        Geometry::Triangle(_) => false,
+    }
+}
+
+fn validated_header(blob: &[u8]) -> Result<EwkbHeader> {
+    let header = parse_ewkb_header(blob)?;
+    let _ = parse_ewkb(blob)?;
+    Ok(header)
 }
 
 /// ST_SRID — return the SRID stored in the EWKB header.
@@ -32,7 +59,8 @@ fn is_empty_point(p: &geo::Point<f64>) -> bool {
 /// assert_eq!(st_srid(&blob).unwrap(), 4326);
 /// ```
 pub fn st_srid(blob: &[u8]) -> Result<i32> {
-    Ok(extract_srid(blob).unwrap_or(0))
+    let header = validated_header(blob)?;
+    Ok(header.srid.unwrap_or(0))
 }
 
 /// ST_SetSRID — rewrite the SRID in the EWKB header.
@@ -63,7 +91,7 @@ pub fn st_set_srid(blob: &[u8], srid: i32) -> Result<Vec<u8>> {
 /// assert_eq!(st_geometry_type(&blob).unwrap(), "ST_Point");
 /// ```
 pub fn st_geometry_type(blob: &[u8]) -> Result<&'static str> {
-    let header = parse_ewkb_header(blob)?;
+    let header = validated_header(blob)?;
     Ok(geom_type_name(header.geom_type))
 }
 
@@ -79,7 +107,7 @@ pub fn st_geometry_type(blob: &[u8]) -> Result<&'static str> {
 /// assert_eq!(st_ndims(&blob).unwrap(), 2);
 /// ```
 pub fn st_ndims(blob: &[u8]) -> Result<i32> {
-    let header = parse_ewkb_header(blob)?;
+    let header = validated_header(blob)?;
     let z = if header.has_z { 1 } else { 0 };
     let m = if header.has_m { 1 } else { 0 };
     Ok(2 + z + m)
@@ -112,7 +140,7 @@ pub fn st_coord_dim(blob: &[u8]) -> Result<i32> {
 /// assert_eq!(st_zmflag(&blob).unwrap(), 0); // 2D
 /// ```
 pub fn st_zmflag(blob: &[u8]) -> Result<i32> {
-    let header = parse_ewkb_header(blob)?;
+    let header = validated_header(blob)?;
     let flag = match (header.has_z, header.has_m) {
         (false, false) => 0,
         (true, false) => 2,
@@ -138,19 +166,7 @@ pub fn st_zmflag(blob: &[u8]) -> Result<i32> {
 /// ```
 pub fn st_is_empty(blob: &[u8]) -> Result<bool> {
     let (geom, _) = parse_ewkb(blob)?;
-    let empty = match &geom {
-        Geometry::Point(p) => is_empty_point(p),
-        Geometry::Line(_) => false,
-        Geometry::LineString(ls) => ls.0.is_empty(),
-        Geometry::Polygon(p) => p.exterior().0.is_empty(),
-        Geometry::MultiPoint(mp) => mp.0.is_empty() || mp.0.iter().all(is_empty_point),
-        Geometry::MultiLineString(mls) => mls.0.is_empty(),
-        Geometry::MultiPolygon(mp) => mp.0.is_empty(),
-        Geometry::GeometryCollection(gc) => gc.0.is_empty(),
-        Geometry::Rect(_) => false,
-        Geometry::Triangle(_) => false,
-    };
-    Ok(empty)
+    Ok(is_empty_geometry(&geom))
 }
 
 /// ST_MemSize — byte length of the EWKB blob.
@@ -785,24 +801,35 @@ mod tests {
 
     #[test]
     fn st_ndims_coord_dim_and_zmflag_cover_all_header_flags() {
+        fn point_blob(flags: u32) -> Vec<u8> {
+            let mut blob = vec![0x01];
+            blob.extend_from_slice(&(WKB_POINT | flags).to_le_bytes());
+            blob.extend_from_slice(&1.0f64.to_le_bytes());
+            blob.extend_from_slice(&2.0f64.to_le_bytes());
+            if flags & EWKB_Z_FLAG != 0 {
+                blob.extend_from_slice(&3.0f64.to_le_bytes());
+            }
+            if flags & EWKB_M_FLAG != 0 {
+                blob.extend_from_slice(&4.0f64.to_le_bytes());
+            }
+            blob
+        }
+
         let xy = geom_from_text("POINT(1 2)", None).unwrap();
         assert_eq!(st_ndims(&xy).unwrap(), 2);
         assert_eq!(st_coord_dim(&xy).unwrap(), 2);
         assert_eq!(st_zmflag(&xy).unwrap(), 0);
 
-        let mut z = vec![0x01];
-        z.extend_from_slice(&(WKB_POINT | EWKB_Z_FLAG).to_le_bytes());
+        let z = point_blob(EWKB_Z_FLAG);
         assert_eq!(st_ndims(&z).unwrap(), 3);
         assert_eq!(st_coord_dim(&z).unwrap(), 3);
         assert_eq!(st_zmflag(&z).unwrap(), 2);
 
-        let mut m = vec![0x01];
-        m.extend_from_slice(&(WKB_POINT | EWKB_M_FLAG).to_le_bytes());
+        let m = point_blob(EWKB_M_FLAG);
         assert_eq!(st_ndims(&m).unwrap(), 3);
         assert_eq!(st_zmflag(&m).unwrap(), 1);
 
-        let mut zm = vec![0x01];
-        zm.extend_from_slice(&(WKB_POINT | EWKB_Z_FLAG | EWKB_M_FLAG).to_le_bytes());
+        let zm = point_blob(EWKB_Z_FLAG | EWKB_M_FLAG);
         assert_eq!(st_ndims(&zm).unwrap(), 4);
         assert_eq!(st_zmflag(&zm).unwrap(), 3);
     }
@@ -831,6 +858,18 @@ mod tests {
         assert!(st_is_empty(&multipolygon).unwrap());
 
         let gc = geom_from_text("GEOMETRYCOLLECTION EMPTY", None).unwrap();
+        assert!(st_is_empty(&gc).unwrap());
+    }
+
+    #[test]
+    fn st_is_empty_treats_collections_with_only_empty_members_as_empty() {
+        let multilinestring = geom_from_text("MULTILINESTRING(EMPTY,EMPTY)", None).unwrap();
+        assert!(st_is_empty(&multilinestring).unwrap());
+
+        let multipolygon = geom_from_text("MULTIPOLYGON(EMPTY)", None).unwrap();
+        assert!(st_is_empty(&multipolygon).unwrap());
+
+        let gc = geom_from_text("GEOMETRYCOLLECTION(LINESTRING EMPTY)", None).unwrap();
         assert!(st_is_empty(&gc).unwrap());
     }
 
@@ -867,6 +906,12 @@ mod tests {
         let gc =
             geom_from_text("GEOMETRYCOLLECTION(POINT(0 0),LINESTRING(0 0,1 1))", None).unwrap();
         assert_eq!(st_npoints(&gc).unwrap(), 3);
+
+        let mls_all_empty = geom_from_text("MULTILINESTRING(EMPTY,EMPTY)", None).unwrap();
+        assert_eq!(st_npoints(&mls_all_empty).unwrap(), 0);
+
+        let mpoly_all_empty = geom_from_text("MULTIPOLYGON(EMPTY)", None).unwrap();
+        assert_eq!(st_npoints(&mpoly_all_empty).unwrap(), 0);
     }
 
     #[test]
