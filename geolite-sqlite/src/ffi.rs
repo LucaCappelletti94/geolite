@@ -496,8 +496,39 @@ xfunc_blob!(st_coorddim_xfunc, "ST_CoordDim", st_coord_dim, set_i32);
 xfunc_blob!(st_zmflag_xfunc, "ST_Zmflag", st_zmflag, set_i32);
 xfunc_blob!(st_isempty_xfunc, "ST_IsEmpty", st_is_empty, set_bool);
 xfunc_blob!(st_memsize_xfunc, "ST_MemSize", st_mem_size, set_i64);
-xfunc_blob!(st_x_xfunc, "ST_X", st_x, set_f64);
-xfunc_blob!(st_y_xfunc, "ST_Y", st_y, set_f64);
+
+unsafe extern "C" fn st_x_xfunc(
+    ctx: *mut sqlite3_context,
+    _n: c_int,
+    argv: *mut *mut sqlite3_value,
+) {
+    let Some(blob) = get_blob(argv, 0) else {
+        set_null(ctx);
+        return;
+    };
+    match st_x(blob) {
+        Ok(v) if v.is_nan() => set_null(ctx),
+        Ok(v) => set_f64(ctx, v),
+        Err(e) => set_error(ctx, &format!("ST_X: {e}")),
+    }
+}
+
+unsafe extern "C" fn st_y_xfunc(
+    ctx: *mut sqlite3_context,
+    _n: c_int,
+    argv: *mut *mut sqlite3_value,
+) {
+    let Some(blob) = get_blob(argv, 0) else {
+        set_null(ctx);
+        return;
+    };
+    match st_y(blob) {
+        Ok(v) if v.is_nan() => set_null(ctx),
+        Ok(v) => set_f64(ctx, v),
+        Err(e) => set_error(ctx, &format!("ST_Y: {e}")),
+    }
+}
+
 xfunc_blob!(st_numpoints_xfunc, "ST_NumPoints", st_num_points, set_i32);
 xfunc_blob!(st_npoints_xfunc, "ST_NPoints", st_npoints, set_i32);
 xfunc_blob!(
@@ -804,7 +835,10 @@ unsafe extern "C" fn st_relatematch_xfunc(
         set_null(ctx);
         return;
     };
-    set_i32(ctx, st_relate_match(matrix, pattern) as i32);
+    match st_relate_match(matrix, pattern) {
+        Ok(v) => set_i32(ctx, v as i32),
+        Err(e) => set_error(ctx, &format!("ST_RelateMatch: {e}")),
+    }
 }
 
 // ── Spatial index helpers ─────────────────────────────────────────────────────

@@ -8,8 +8,8 @@ use geo::algorithm::{Contains, Intersects, Relate};
 use geo::coordinate_position::CoordPos;
 use geo::dimensions::Dimensions;
 
-use crate::error::Result;
-use crate::ewkb::{ensure_matching_srid, parse_ewkb};
+use crate::error::{GeoLiteError, Result};
+use crate::ewkb::parse_ewkb_pair;
 
 /// ST_Intersects — true if the two geometries share at least one point.
 ///
@@ -24,9 +24,7 @@ use crate::ewkb::{ensure_matching_srid, parse_ewkb};
 /// assert!(st_intersects(&a, &b).unwrap());
 /// ```
 pub fn st_intersects(a: &[u8], b: &[u8]) -> Result<bool> {
-    let (ga, srid_a) = parse_ewkb(a)?;
-    let (gb, srid_b) = parse_ewkb(b)?;
-    ensure_matching_srid(srid_a, srid_b)?;
+    let (ga, gb, _) = parse_ewkb_pair(a, b)?;
     Ok(ga.intersects(&gb))
 }
 
@@ -43,9 +41,7 @@ pub fn st_intersects(a: &[u8], b: &[u8]) -> Result<bool> {
 /// assert!(st_contains(&poly, &pt).unwrap());
 /// ```
 pub fn st_contains(a: &[u8], b: &[u8]) -> Result<bool> {
-    let (ga, srid_a) = parse_ewkb(a)?;
-    let (gb, srid_b) = parse_ewkb(b)?;
-    ensure_matching_srid(srid_a, srid_b)?;
+    let (ga, gb, _) = parse_ewkb_pair(a, b)?;
     Ok(ga.contains(&gb))
 }
 
@@ -112,9 +108,7 @@ pub fn st_dwithin(a: &[u8], b: &[u8], distance: f64) -> Result<bool> {
 /// assert!(st_covers(&poly, &pt).unwrap());
 /// ```
 pub fn st_covers(a: &[u8], b: &[u8]) -> Result<bool> {
-    let (ga, srid_a) = parse_ewkb(a)?;
-    let (gb, srid_b) = parse_ewkb(b)?;
-    ensure_matching_srid(srid_a, srid_b)?;
+    let (ga, gb, _) = parse_ewkb_pair(a, b)?;
     Ok(ga.relate(&gb).is_covers())
 }
 
@@ -147,9 +141,7 @@ pub fn st_covered_by(a: &[u8], b: &[u8]) -> Result<bool> {
 /// assert!(st_equals(&a, &b).unwrap());
 /// ```
 pub fn st_equals(a: &[u8], b: &[u8]) -> Result<bool> {
-    let (ga, srid_a) = parse_ewkb(a)?;
-    let (gb, srid_b) = parse_ewkb(b)?;
-    ensure_matching_srid(srid_a, srid_b)?;
+    let (ga, gb, _) = parse_ewkb_pair(a, b)?;
     Ok(ga.relate(&gb).is_equal_topo())
 }
 
@@ -166,9 +158,7 @@ pub fn st_equals(a: &[u8], b: &[u8]) -> Result<bool> {
 /// assert!(st_touches(&a, &b).unwrap());
 /// ```
 pub fn st_touches(a: &[u8], b: &[u8]) -> Result<bool> {
-    let (ga, srid_a) = parse_ewkb(a)?;
-    let (gb, srid_b) = parse_ewkb(b)?;
-    ensure_matching_srid(srid_a, srid_b)?;
+    let (ga, gb, _) = parse_ewkb_pair(a, b)?;
     // geo 0.32: is_touches() takes 0 arguments
     Ok(ga.relate(&gb).is_touches())
 }
@@ -186,9 +176,7 @@ pub fn st_touches(a: &[u8], b: &[u8]) -> Result<bool> {
 /// assert!(st_crosses(&line, &poly).unwrap());
 /// ```
 pub fn st_crosses(a: &[u8], b: &[u8]) -> Result<bool> {
-    let (ga, srid_a) = parse_ewkb(a)?;
-    let (gb, srid_b) = parse_ewkb(b)?;
-    ensure_matching_srid(srid_a, srid_b)?;
+    let (ga, gb, _) = parse_ewkb_pair(a, b)?;
     Ok(ga.relate(&gb).is_crosses())
 }
 
@@ -205,9 +193,7 @@ pub fn st_crosses(a: &[u8], b: &[u8]) -> Result<bool> {
 /// assert!(st_overlaps(&a, &b).unwrap());
 /// ```
 pub fn st_overlaps(a: &[u8], b: &[u8]) -> Result<bool> {
-    let (ga, srid_a) = parse_ewkb(a)?;
-    let (gb, srid_b) = parse_ewkb(b)?;
-    ensure_matching_srid(srid_a, srid_b)?;
+    let (ga, gb, _) = parse_ewkb_pair(a, b)?;
     Ok(ga.relate(&gb).is_overlaps())
 }
 
@@ -248,9 +234,7 @@ fn matrix_string(matrix: &geo::algorithm::relate::IntersectionMatrix) -> String 
 /// assert_eq!(matrix, "0FFFFFFF2");
 /// ```
 pub fn st_relate(a: &[u8], b: &[u8]) -> Result<String> {
-    let (ga, srid_a) = parse_ewkb(a)?;
-    let (gb, srid_b) = parse_ewkb(b)?;
-    ensure_matching_srid(srid_a, srid_b)?;
+    let (ga, gb, _) = parse_ewkb_pair(a, b)?;
     Ok(matrix_string(&ga.relate(&gb)))
 }
 
@@ -268,11 +252,12 @@ pub fn st_relate(a: &[u8], b: &[u8]) -> Result<String> {
 /// assert!(st_relate_match_geoms(&a, &b, "T*****FF*").unwrap());
 /// ```
 pub fn st_relate_match_geoms(a: &[u8], b: &[u8], pattern: &str) -> Result<bool> {
-    let (ga, srid_a) = parse_ewkb(a)?;
-    let (gb, srid_b) = parse_ewkb(b)?;
-    ensure_matching_srid(srid_a, srid_b)?;
+    let (ga, gb, _) = parse_ewkb_pair(a, b)?;
+    validate_de9im_pattern(pattern)?;
     // Use geo's built-in pattern matching
-    Ok(ga.relate(&gb).matches(pattern).unwrap_or(false))
+    ga.relate(&gb)
+        .matches(pattern)
+        .map_err(|e| GeoLiteError::InvalidInput(format!("invalid DE-9IM pattern: {e}")))
 }
 
 /// ST_RelateMatch — match a DE-9IM matrix string against a pattern string.
@@ -282,11 +267,55 @@ pub fn st_relate_match_geoms(a: &[u8], b: &[u8], pattern: &str) -> Result<bool> 
 /// ```
 /// use geolite_core::functions::predicates::st_relate_match;
 ///
-/// assert!(st_relate_match("0FFFFFFF2", "0FFF*FFF2"));
-/// assert!(!st_relate_match("0FFFFFFF2", "1********"));
+/// assert!(st_relate_match("0FFFFFFF2", "0FFF*FFF2").unwrap());
+/// assert!(!st_relate_match("0FFFFFFF2", "1********").unwrap());
 /// ```
-pub fn st_relate_match(matrix: &str, pattern: &str) -> bool {
-    de9im_pattern_match(matrix, pattern)
+pub fn st_relate_match(matrix: &str, pattern: &str) -> Result<bool> {
+    validate_de9im_matrix(matrix)?;
+    validate_de9im_pattern(pattern)?;
+    Ok(de9im_pattern_match(matrix, pattern))
+}
+
+fn validate_de9im_matrix(matrix: &str) -> Result<()> {
+    if matrix.len() != 9 {
+        return Err(GeoLiteError::InvalidInput(format!(
+            "invalid DE-9IM matrix length: expected 9, got {}",
+            matrix.len()
+        )));
+    }
+    for (idx, ch) in matrix.chars().enumerate() {
+        match ch {
+            'F' | '0' | '1' | '2' => {}
+            _ => {
+                return Err(GeoLiteError::InvalidInput(format!(
+                    "invalid DE-9IM matrix character '{ch}' at position {}",
+                    idx + 1
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_de9im_pattern(pattern: &str) -> Result<()> {
+    if pattern.len() != 9 {
+        return Err(GeoLiteError::InvalidInput(format!(
+            "invalid DE-9IM pattern length: expected 9, got {}",
+            pattern.len()
+        )));
+    }
+    for (idx, ch) in pattern.chars().enumerate() {
+        match ch {
+            'T' | 'F' | '*' | '0' | '1' | '2' => {}
+            _ => {
+                return Err(GeoLiteError::InvalidInput(format!(
+                    "invalid DE-9IM pattern character '{ch}' at position {}",
+                    idx + 1
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Pure DE-9IM pattern matcher.
@@ -421,9 +450,22 @@ mod tests {
 
     #[test]
     fn st_relate_match_string() {
-        assert!(st_relate_match("FF0FFF0F2", "FF0FFF0F2"));
-        assert!(st_relate_match("FF0FFF0F2", "FF*FFF*F*"));
-        assert!(!st_relate_match("FF0FFF0F2", "T********"));
+        assert!(st_relate_match("FF0FFF0F2", "FF0FFF0F2").unwrap());
+        assert!(st_relate_match("FF0FFF0F2", "FF*FFF*F*").unwrap());
+        assert!(!st_relate_match("FF0FFF0F2", "T********").unwrap());
+    }
+
+    #[test]
+    fn st_relate_match_rejects_invalid_pattern() {
+        assert!(st_relate_match("FF0FFF0F2", "INVALID").is_err());
+        assert!(st_relate_match("FF0FFF0F2", "T*").is_err());
+    }
+
+    #[test]
+    fn st_relate_match_rejects_invalid_matrix() {
+        assert!(st_relate_match("INVALID", "FF*FFF*F*").is_err());
+        assert!(st_relate_match("TFFFFFFF2", "FF*FFF*F*").is_err());
+        assert!(st_relate_match("FF0FFF0F*", "FF*FFF*F*").is_err());
     }
 
     #[test]
@@ -431,7 +473,7 @@ mod tests {
         let a = geom_from_text("POLYGON((0 0,2 0,2 2,0 2,0 0))", None).unwrap();
         let b = geom_from_text("POINT(1 1)", None).unwrap();
         assert!(st_relate_match_geoms(&a, &b, "T*****FF*").unwrap());
-        assert!(!st_relate_match_geoms(&a, &b, "INVALID").unwrap());
+        assert!(st_relate_match_geoms(&a, &b, "INVALID").is_err());
     }
 
     #[test]

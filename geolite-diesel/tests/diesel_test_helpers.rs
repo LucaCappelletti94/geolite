@@ -452,7 +452,7 @@ fn method_st_contains_in_filter() {
 }
 
 #[$test_attr]
-fn method_st_relate_match_in_select() {
+fn method_st_relate_match_geoms_in_select() {
     use geolite_diesel::prelude::*;
 
     let mut c = conn();
@@ -466,7 +466,7 @@ fn method_st_relate_match_in_select() {
     .unwrap();
     let matrix = matrix.expect("st_relate should return a DE-9IM matrix");
 
-    let inside: Option<bool> = diesel::dsl::select(st_point(1.0, 1.0).nullable().st_relate_match(
+    let inside: Option<bool> = diesel::dsl::select(st_point(1.0, 1.0).nullable().st_relate_match_geoms(
         st_geomfromtext(polygon),
         matrix.as_str(),
     ))
@@ -477,7 +477,7 @@ fn method_st_relate_match_in_select() {
     let impossible_pattern: Option<bool> = diesel::dsl::select(
         st_point(1.0, 1.0)
             .nullable()
-            .st_relate_match(st_geomfromtext(polygon), "FFFFFFFFF"),
+            .st_relate_match_geoms(st_geomfromtext(polygon), "FFFFFFFFF"),
     )
     .get_result(&mut c)
     .unwrap();

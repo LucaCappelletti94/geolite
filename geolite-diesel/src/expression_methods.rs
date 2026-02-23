@@ -12,21 +12,13 @@
 //!     .load(&mut conn)?;
 //! ```
 //!
-//! Both relate aliases are available in method form and map to the same SQL
-//! operator (`ST_Relate(a, b, pattern)`):
+//! Geometry-pair DE-9IM matching is available in method form:
 //!
 //! ```rust,ignore
 //! use diesel::prelude::*;
 //! use geolite_diesel::prelude::*;
 //!
 //! let pattern = "T*****FF*";
-//!
-//! let via_match: Option<bool> = diesel::dsl::select(
-//!     st_point(0.0, 0.0)
-//!         .nullable()
-//!         .st_relate_match(st_point(0.0, 0.0).nullable(), pattern),
-//! )
-//! .get_result(&mut conn)?;
 //!
 //! let via_match_geoms: Option<bool> = diesel::dsl::select(
 //!     st_point(0.0, 0.0)
@@ -35,7 +27,7 @@
 //! )
 //! .get_result(&mut conn)?;
 //!
-//! assert_eq!(via_match, via_match_geoms);
+//! assert_eq!(via_match_geoms, Some(true));
 //! ```
 
 use diesel::expression::{AsExpression, Expression};
@@ -462,34 +454,8 @@ pub trait GeometryExpressionMethods: Expression<SqlType = Nullable<Geometry>> + 
         functions::st_relate(self, other)
     }
 
-    /// Return whether the DE-9IM pattern matches between this and another geometry.
-    fn st_relate_pattern<T, P>(
-        self,
-        other: T,
-        pattern: P,
-    ) -> functions::st_relate_pattern<Self, T, P>
-    where
-        T: AsExpression<Nullable<Geometry>>,
-        P: AsExpression<diesel::sql_types::Text>,
-    {
-        functions::st_relate_pattern(self, other, pattern)
-    }
-
     /// Alias of `ST_Relate(a, b, pattern)` matching core naming.
     fn st_relate_match_geoms<T, P>(
-        self,
-        other: T,
-        pattern: P,
-    ) -> functions::st_relate_match_geoms<Self, T, P>
-    where
-        T: AsExpression<Nullable<Geometry>>,
-        P: AsExpression<diesel::sql_types::Text>,
-    {
-        functions::st_relate_match_geoms(self, other, pattern)
-    }
-
-    /// Alias of `ST_Relate(a, b, pattern)` matching core naming.
-    fn st_relate_match<T, P>(
         self,
         other: T,
         pattern: P,

@@ -722,15 +722,6 @@ fn debug_query_st_relate() {
 }
 
 #[test]
-fn debug_query_st_relate_pattern() {
-    use geolite_diesel::functions::*;
-    assert_sql_contains!(
-        diesel::dsl::select(st_relate_pattern(g!(), g!(), t!())),
-        "st_relate"
-    );
-}
-
-#[test]
 fn debug_query_st_relate_match_geoms() {
     use geolite_diesel::functions::*;
     assert_sql_contains!(

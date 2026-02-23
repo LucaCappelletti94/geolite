@@ -145,23 +145,14 @@ macro_rules! run_predicates_and_relate_bool_semantics {
         let matrix = matrix.expect("st_relate should return a DE-9IM matrix");
         assert_eq!(matrix.len(), 9);
 
-        let relate_pattern_exact: Option<bool> = diesel::dsl::select(st_relate_pattern(
+        let relate_match_geoms_exact: Option<bool> = diesel::dsl::select(st_relate_match_geoms(
             st_geomfromtext("POINT(1 1)"),
             st_geomfromtext("POLYGON((0 0,0 3,3 3,3 0,0 0))"),
             matrix.as_str(),
         ))
         .get_result(conn)
         .unwrap();
-        assert_eq!(relate_pattern_exact, Some(true));
-
-        let relate_pattern_alias: Option<bool> = diesel::dsl::select(st_relate_match_geoms(
-            st_geomfromtext("POINT(1 1)"),
-            st_geomfromtext("POLYGON((0 0,0 3,3 3,3 0,0 0))"),
-            matrix.as_str(),
-        ))
-        .get_result(conn)
-        .unwrap();
-        assert_eq!(relate_pattern_alias, Some(true));
+        assert_eq!(relate_match_geoms_exact, Some(true));
 
         let relate_match_exact: Option<bool> =
             diesel::dsl::select(st_relatematch(matrix.as_str(), matrix.as_str()))

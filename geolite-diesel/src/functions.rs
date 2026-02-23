@@ -409,12 +409,6 @@ diesel::define_sql_function! {
 }
 
 diesel::define_sql_function! {
-    /// Return whether the DE-9IM pattern matches for the two geometries.
-    #[sql_name = "ST_Relate"]
-    fn st_relate_pattern(a: Nullable<Geometry>, b: Nullable<Geometry>, pattern: Text) -> Nullable<diesel::sql_types::Bool>;
-}
-
-diesel::define_sql_function! {
     /// Alias of `ST_Relate(a, b, pattern)` matching core naming.
     #[sql_name = "ST_Relate"]
     fn st_relate_match_geoms(a: Nullable<Geometry>, b: Nullable<Geometry>, pattern: Text) -> Nullable<diesel::sql_types::Bool>;

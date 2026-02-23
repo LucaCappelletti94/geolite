@@ -7,7 +7,7 @@ use geo::algorithm::Buffer;
 use geo::{Geometry, MultiPolygon};
 
 use crate::error::{GeoLiteError, Result};
-use crate::ewkb::{ensure_matching_srid, parse_ewkb, write_ewkb};
+use crate::ewkb::{parse_ewkb, parse_ewkb_pair, write_ewkb};
 
 /// Extract a Polygon or MultiPolygon from a geometry, converting single
 /// Polygons into MultiPolygon for uniform BooleanOps handling.
@@ -34,9 +34,7 @@ fn require_multi_polygon(geom: Geometry<f64>) -> Result<MultiPolygon<f64>> {
 /// assert!((st_area(&u).unwrap() - 6.0).abs() < 1e-10);
 /// ```
 pub fn st_union(a: &[u8], b: &[u8]) -> Result<Vec<u8>> {
-    let (ga, srid_a) = parse_ewkb(a)?;
-    let (gb, srid_b) = parse_ewkb(b)?;
-    let srid = ensure_matching_srid(srid_a, srid_b)?;
+    let (ga, gb, srid) = parse_ewkb_pair(a, b)?;
     let ma = require_multi_polygon(ga)?;
     let mb = require_multi_polygon(gb)?;
     let result = ma.union(&mb);
@@ -58,9 +56,7 @@ pub fn st_union(a: &[u8], b: &[u8]) -> Result<Vec<u8>> {
 /// assert!((st_area(&i).unwrap() - 2.0).abs() < 1e-10);
 /// ```
 pub fn st_intersection(a: &[u8], b: &[u8]) -> Result<Vec<u8>> {
-    let (ga, srid_a) = parse_ewkb(a)?;
-    let (gb, srid_b) = parse_ewkb(b)?;
-    let srid = ensure_matching_srid(srid_a, srid_b)?;
+    let (ga, gb, srid) = parse_ewkb_pair(a, b)?;
     let ma = require_multi_polygon(ga)?;
     let mb = require_multi_polygon(gb)?;
     let result = ma.intersection(&mb);
@@ -82,9 +78,7 @@ pub fn st_intersection(a: &[u8], b: &[u8]) -> Result<Vec<u8>> {
 /// assert!((st_area(&d).unwrap() - 2.0).abs() < 1e-10);
 /// ```
 pub fn st_difference(a: &[u8], b: &[u8]) -> Result<Vec<u8>> {
-    let (ga, srid_a) = parse_ewkb(a)?;
-    let (gb, srid_b) = parse_ewkb(b)?;
-    let srid = ensure_matching_srid(srid_a, srid_b)?;
+    let (ga, gb, srid) = parse_ewkb_pair(a, b)?;
     let ma = require_multi_polygon(ga)?;
     let mb = require_multi_polygon(gb)?;
     let result = ma.difference(&mb);
@@ -106,9 +100,7 @@ pub fn st_difference(a: &[u8], b: &[u8]) -> Result<Vec<u8>> {
 /// assert!((st_area(&sd).unwrap() - 4.0).abs() < 1e-10);
 /// ```
 pub fn st_sym_difference(a: &[u8], b: &[u8]) -> Result<Vec<u8>> {
-    let (ga, srid_a) = parse_ewkb(a)?;
-    let (gb, srid_b) = parse_ewkb(b)?;
-    let srid = ensure_matching_srid(srid_a, srid_b)?;
+    let (ga, gb, srid) = parse_ewkb_pair(a, b)?;
     let ma = require_multi_polygon(ga)?;
     let mb = require_multi_polygon(gb)?;
     let result = ma.xor(&mb);

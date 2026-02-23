@@ -10,7 +10,7 @@
 //!   [i32]         — SRID (only when SRID flag set, in declared byte order)
 //!   …             — ISO WKB geometry payload
 
-use geo::Geometry;
+use geo::{Geometry, Point};
 use geozero::wkb::Ewkb;
 use geozero::{CoordDimensions, ToGeo, ToWkb};
 
@@ -29,6 +29,41 @@ pub const WKB_MULTIPOINT: u32 = 4;
 pub const WKB_MULTILINESTRING: u32 = 5;
 pub const WKB_MULTIPOLYGON: u32 = 6;
 pub const WKB_GEOMETRYCOLLECTION: u32 = 7;
+
+fn read_f64(bytes: [u8; 8], little_endian: bool) -> f64 {
+    if little_endian {
+        f64::from_le_bytes(bytes)
+    } else {
+        f64::from_be_bytes(bytes)
+    }
+}
+
+fn point_is_empty_with_header(blob: &[u8], header: &EwkbHeader) -> Result<bool> {
+    if header.geom_type != WKB_POINT {
+        return Ok(false);
+    }
+
+    let dims = 2 + usize::from(header.has_z) + usize::from(header.has_m);
+    let needed = header.data_offset + 8 * dims;
+    if blob.len() < needed {
+        return Err(GeoLiteError::InvalidEwkb("point payload truncated"));
+    }
+
+    let mut x_bytes = [0u8; 8];
+    x_bytes.copy_from_slice(&blob[header.data_offset..header.data_offset + 8]);
+    let mut y_bytes = [0u8; 8];
+    y_bytes.copy_from_slice(&blob[header.data_offset + 8..header.data_offset + 16]);
+
+    let x = read_f64(x_bytes, header.little_endian);
+    let y = read_f64(y_bytes, header.little_endian);
+    Ok(x.is_nan() && y.is_nan())
+}
+
+/// Return true when the EWKB blob encodes `POINT EMPTY`.
+pub fn is_empty_point_blob(blob: &[u8]) -> Result<bool> {
+    let header = parse_ewkb_header(blob)?;
+    point_is_empty_with_header(blob, &header)
+}
 
 /// Parsed EWKB header metadata.
 #[derive(Debug, Clone)]
@@ -164,8 +199,21 @@ pub fn ensure_matching_srid(left: Option<i32>, right: Option<i32>) -> Result<Opt
 /// ```
 pub fn parse_ewkb(blob: &[u8]) -> Result<(Geometry<f64>, Option<i32>)> {
     let header = parse_ewkb_header(blob)?;
+    if point_is_empty_with_header(blob, &header)? {
+        return Ok((Geometry::Point(Point::new(f64::NAN, f64::NAN)), header.srid));
+    }
     let geom = Ewkb(blob).to_geo()?;
     Ok((geom, header.srid))
+}
+
+/// Parse two EWKB blobs and enforce matching SRID.
+///
+/// Returns `(left_geometry, right_geometry, shared_srid)`.
+pub fn parse_ewkb_pair(a: &[u8], b: &[u8]) -> Result<(Geometry<f64>, Geometry<f64>, Option<i32>)> {
+    let (ga, srid_a) = parse_ewkb(a)?;
+    let (gb, srid_b) = parse_ewkb(b)?;
+    let srid = ensure_matching_srid(srid_a, srid_b)?;
+    Ok((ga, gb, srid))
 }
 
 /// Serialise a `geo::Geometry<f64>` to EWKB with an optional SRID.
@@ -184,6 +232,24 @@ pub fn parse_ewkb(blob: &[u8]) -> Result<(Geometry<f64>, Option<i32>)> {
 /// assert_eq!(srid, Some(4326));
 /// ```
 pub fn write_ewkb(geom: &Geometry<f64>, srid: Option<i32>) -> Result<Vec<u8>> {
+    if let Geometry::Point(p) = geom {
+        if p.x().is_nan() && p.y().is_nan() {
+            let mut out = Vec::with_capacity(if srid.is_some() { 25 } else { 21 });
+            out.push(0x01);
+            let mut geom_type = WKB_POINT;
+            if srid.is_some() {
+                geom_type |= EWKB_SRID_FLAG;
+            }
+            out.extend_from_slice(&geom_type.to_le_bytes());
+            if let Some(srid_val) = srid {
+                out.extend_from_slice(&srid_val.to_le_bytes());
+            }
+            out.extend_from_slice(&f64::NAN.to_le_bytes());
+            out.extend_from_slice(&f64::NAN.to_le_bytes());
+            return Ok(out);
+        }
+    }
+
     // Use geozero to produce ISO WKB (XY only for now)
     let iso_wkb = geom
         .to_wkb(CoordDimensions::xy())
@@ -485,5 +551,31 @@ mod tests {
     fn ensure_matching_srid_rejects_mismatch() {
         assert!(ensure_matching_srid(Some(4326), Some(3857)).is_err());
         assert!(ensure_matching_srid(Some(4326), None).is_err());
+    }
+
+    #[test]
+    fn parse_ewkb_pair_requires_matching_srid() {
+        let a = crate::functions::io::geom_from_text("POINT(0 0)", Some(4326)).unwrap();
+        let b = crate::functions::io::geom_from_text("POINT(1 1)", Some(4326)).unwrap();
+        assert!(parse_ewkb_pair(&a, &b).is_ok());
+
+        let mixed = crate::functions::io::geom_from_text("POINT(1 1)", Some(3857)).unwrap();
+        assert!(parse_ewkb_pair(&a, &mixed).is_err());
+    }
+
+    #[test]
+    fn parse_empty_point() {
+        let blob =
+            write_ewkb(&Geometry::Point(Point::new(f64::NAN, f64::NAN)), Some(4326)).unwrap();
+        let (geom, srid) = parse_ewkb(&blob).unwrap();
+        assert_eq!(srid, Some(4326));
+        match geom {
+            Geometry::Point(p) => {
+                assert!(p.x().is_nan());
+                assert!(p.y().is_nan());
+            }
+            other => panic!("expected point, got {other:?}"),
+        }
+        assert!(is_empty_point_blob(&blob).unwrap());
     }
 }

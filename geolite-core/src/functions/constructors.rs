@@ -6,7 +6,7 @@
 use geo::{Coord, Geometry, LineString, Point, Polygon, Rect};
 
 use crate::error::{GeoLiteError, Result};
-use crate::ewkb::{ensure_matching_srid, parse_ewkb, write_ewkb};
+use crate::ewkb::{parse_ewkb, parse_ewkb_pair, write_ewkb};
 
 /// ST_Point / ST_MakePoint (2D) — construct a Point geometry.
 ///
@@ -39,9 +39,7 @@ pub fn st_point(x: f64, y: f64, srid: Option<i32>) -> Result<Vec<u8>> {
 /// assert_eq!(st_num_points(&line).unwrap(), 2);
 /// ```
 pub fn st_make_line(a: &[u8], b: &[u8]) -> Result<Vec<u8>> {
-    let (ga, srid_a) = parse_ewkb(a)?;
-    let (gb, srid_b) = parse_ewkb(b)?;
-    let srid = ensure_matching_srid(srid_a, srid_b)?;
+    let (ga, gb, srid) = parse_ewkb_pair(a, b)?;
     let pa = match ga {
         Geometry::Point(p) => p,
         _ => return Err(GeoLiteError::WrongType("Point")),
@@ -126,9 +124,7 @@ pub fn st_make_envelope(
 /// assert_eq!(st_num_geometries(&gc).unwrap(), 2);
 /// ```
 pub fn st_collect(a: &[u8], b: &[u8]) -> Result<Vec<u8>> {
-    let (ga, srid_a) = parse_ewkb(a)?;
-    let (gb, srid_b) = parse_ewkb(b)?;
-    let srid = ensure_matching_srid(srid_a, srid_b)?;
+    let (ga, gb, srid) = parse_ewkb_pair(a, b)?;
     let gc = geo::GeometryCollection::new_from(vec![ga, gb]);
     write_ewkb(&Geometry::GeometryCollection(gc), srid)
 }

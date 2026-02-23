@@ -3,12 +3,41 @@
 //! ST_AsText, ST_AsEWKT, ST_AsBinary, ST_AsEWKB, ST_AsGeoJSON,
 //! ST_GeomFromText, ST_GeomFromWKB, ST_GeomFromEWKB, ST_GeomFromGeoJSON
 
-use geo::Geometry;
+use geo::{Geometry, Point};
 use geozero::wkb::Ewkb;
 use geozero::{CoordDimensions, ToGeo, ToJson, ToWkb, ToWkt};
+use serde_json::Value;
 
 use crate::error::{GeoLiteError, Result};
-use crate::ewkb::{extract_srid, parse_ewkb, parse_ewkb_header, write_ewkb};
+use crate::ewkb::{
+    extract_srid, is_empty_point_blob, parse_ewkb, parse_ewkb_header, write_ewkb, WKB_POINT,
+};
+
+const EMPTY_POINT_GEOJSON: &str = r#"{"type":"Point","coordinates":[]}"#;
+
+fn is_empty_point_wkt(wkt: &str) -> bool {
+    let mut parts = wkt.split_whitespace();
+    matches!(
+        (parts.next(), parts.next(), parts.next()),
+        (Some(a), Some(b), None)
+            if a.eq_ignore_ascii_case("POINT") && b.eq_ignore_ascii_case("EMPTY")
+    )
+}
+
+fn is_empty_point_geojson(json: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<Value>(json) else {
+        return false;
+    };
+    let Value::Object(obj) = value else {
+        return false;
+    };
+    let is_point = obj.get("type").and_then(Value::as_str) == Some("Point");
+    let is_empty_coords = matches!(
+        obj.get("coordinates").and_then(Value::as_array),
+        Some(coords) if coords.is_empty()
+    );
+    is_point && is_empty_coords
+}
 
 // ── Deserialization helpers ───────────────────────────────────────────────────
 
@@ -23,6 +52,9 @@ use crate::ewkb::{extract_srid, parse_ewkb, parse_ewkb_header, write_ewkb};
 /// assert!(!blob.is_empty());
 /// ```
 pub fn geom_from_text(wkt: &str, srid: Option<i32>) -> Result<Vec<u8>> {
+    if is_empty_point_wkt(wkt) {
+        return write_ewkb(&Geometry::Point(Point::new(f64::NAN, f64::NAN)), srid);
+    }
     let geom: Geometry<f64> = geozero::wkt::Wkt(wkt.as_bytes()).to_geo()?;
     write_ewkb(&geom, srid)
 }
@@ -41,6 +73,9 @@ pub fn geom_from_text(wkt: &str, srid: Option<i32>) -> Result<Vec<u8>> {
 /// assert_eq!(extract_srid(&restored), Some(4326));
 /// ```
 pub fn geom_from_wkb(wkb: &[u8], srid: Option<i32>) -> Result<Vec<u8>> {
+    if is_empty_point_blob(wkb)? {
+        return write_ewkb(&Geometry::Point(Point::new(f64::NAN, f64::NAN)), srid);
+    }
     let geom: Geometry<f64> = Ewkb(wkb).to_geo()?;
     write_ewkb(&geom, srid)
 }
@@ -59,6 +94,9 @@ pub fn geom_from_wkb(wkb: &[u8], srid: Option<i32>) -> Result<Vec<u8>> {
 pub fn geom_from_ewkb(ewkb: &[u8]) -> Result<Vec<u8>> {
     // Header validation (byte order/type flags/SRID layout)
     let _ = parse_ewkb_header(ewkb)?;
+    if is_empty_point_blob(ewkb)? {
+        return Ok(ewkb.to_vec());
+    }
     // Full geometry payload validation
     let _: Geometry<f64> = Ewkb(ewkb).to_geo()?;
     Ok(ewkb.to_vec())
@@ -76,9 +114,15 @@ pub fn geom_from_ewkb(ewkb: &[u8]) -> Result<Vec<u8>> {
 /// assert_eq!(extract_srid(&blob), Some(4326));
 /// ```
 pub fn geom_from_geojson(json: &str, srid: Option<i32>) -> Result<Vec<u8>> {
-    let geom: Geometry<f64> = geozero::geojson::GeoJson(json).to_geo()?;
     let effective_srid = srid.or(Some(4326));
-    write_ewkb(&geom, effective_srid)
+    match geozero::geojson::GeoJson(json).to_geo() {
+        Ok(geom) => write_ewkb(&geom, effective_srid),
+        Err(_) if is_empty_point_geojson(json) => write_ewkb(
+            &Geometry::Point(Point::new(f64::NAN, f64::NAN)),
+            effective_srid,
+        ),
+        Err(e) => Err(GeoLiteError::Geozero(e)),
+    }
 }
 
 // ── Serialization helpers ─────────────────────────────────────────────────────
@@ -95,6 +139,9 @@ pub fn geom_from_geojson(json: &str, srid: Option<i32>) -> Result<Vec<u8>> {
 /// assert!(wkt.contains("POINT"));
 /// ```
 pub fn as_text(blob: &[u8]) -> Result<String> {
+    if is_empty_point_blob(blob)? {
+        return Ok("POINT EMPTY".to_string());
+    }
     Ok(Ewkb(blob).to_wkt()?)
 }
 
@@ -111,6 +158,12 @@ pub fn as_text(blob: &[u8]) -> Result<String> {
 /// ```
 pub fn as_ewkt(blob: &[u8]) -> Result<String> {
     let srid = extract_srid(blob);
+    if is_empty_point_blob(blob)? {
+        if let Some(s) = srid {
+            return Ok(format!("SRID={s};POINT EMPTY"));
+        }
+        return Ok("POINT EMPTY".to_string());
+    }
     let wkt = Ewkb(blob).to_wkt()?;
     if let Some(s) = srid {
         Ok(format!("SRID={s};{wkt}"))
@@ -133,6 +186,22 @@ pub fn as_ewkt(blob: &[u8]) -> Result<String> {
 /// assert_eq!(extract_srid(&wkb), None);
 /// ```
 pub fn as_binary(blob: &[u8]) -> Result<Vec<u8>> {
+    let header = parse_ewkb_header(blob)?;
+    if is_empty_point_blob(blob)? {
+        let mut out = Vec::with_capacity(21);
+        if header.little_endian {
+            out.push(0x01);
+            out.extend_from_slice(&WKB_POINT.to_le_bytes());
+            out.extend_from_slice(&f64::NAN.to_le_bytes());
+            out.extend_from_slice(&f64::NAN.to_le_bytes());
+        } else {
+            out.push(0x00);
+            out.extend_from_slice(&WKB_POINT.to_be_bytes());
+            out.extend_from_slice(&f64::NAN.to_be_bytes());
+            out.extend_from_slice(&f64::NAN.to_be_bytes());
+        }
+        return Ok(out);
+    }
     let (geom, _srid) = parse_ewkb(blob)?;
     geom.to_wkb(CoordDimensions::xy())
         .map_err(GeoLiteError::Geozero)
@@ -166,6 +235,9 @@ pub fn as_ewkb(blob: &[u8]) -> Result<Vec<u8>> {
 /// assert!(json.contains("coordinates"));
 /// ```
 pub fn as_geojson(blob: &[u8]) -> Result<String> {
+    if is_empty_point_blob(blob)? {
+        return Ok(EMPTY_POINT_GEOJSON.to_string());
+    }
     Ok(Ewkb(blob).to_json()?)
 }
 
@@ -244,6 +316,24 @@ mod tests {
     }
 
     #[test]
+    fn point_empty_geojson_is_postgis_compatible() {
+        let blob = geom_from_text("POINT EMPTY", Some(4326)).unwrap();
+        let json = as_geojson(&blob).unwrap();
+        assert_eq!(json, EMPTY_POINT_GEOJSON);
+
+        let restored = geom_from_geojson(&json, None).unwrap();
+        assert_eq!(as_text(&restored).unwrap(), "POINT EMPTY");
+        assert_eq!(extract_srid(&restored), Some(4326));
+    }
+
+    #[test]
+    fn geom_from_geojson_accepts_point_empty_coordinates_array() {
+        let blob = geom_from_geojson(EMPTY_POINT_GEOJSON, Some(3857)).unwrap();
+        assert_eq!(as_text(&blob).unwrap(), "POINT EMPTY");
+        assert_eq!(extract_srid(&blob), Some(3857));
+    }
+
+    #[test]
     fn as_text_roundtrip() {
         let blob = geom_from_text("LINESTRING(0 0,1 1,2 2)", None).unwrap();
         let wkt = as_text(&blob).unwrap();
@@ -295,5 +385,25 @@ mod tests {
         let (g2, srid2) = parse_ewkb(&copied).unwrap();
         assert_eq!(format!("{g1:?}"), format!("{g2:?}"));
         assert_eq!(srid1, srid2);
+    }
+
+    #[test]
+    fn point_empty_is_supported_in_wkt_and_text_outputs() {
+        let blob = geom_from_text("POINT EMPTY", Some(4326)).unwrap();
+        assert_eq!(as_text(&blob).unwrap(), "POINT EMPTY");
+        assert_eq!(as_ewkt(&blob).unwrap(), "SRID=4326;POINT EMPTY");
+        assert!(crate::functions::accessors::st_is_empty(&blob).unwrap());
+        assert_eq!(
+            crate::functions::accessors::st_geometry_type(&blob).unwrap(),
+            "ST_Point"
+        );
+    }
+
+    #[test]
+    fn point_empty_binary_roundtrip() {
+        let blob = geom_from_text("POINT EMPTY", None).unwrap();
+        let wkb = as_binary(&blob).unwrap();
+        let restored = geom_from_wkb(&wkb, None).unwrap();
+        assert_eq!(as_text(&restored).unwrap(), "POINT EMPTY");
     }
 }

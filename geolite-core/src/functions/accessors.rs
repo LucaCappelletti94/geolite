@@ -16,6 +16,10 @@ use crate::ewkb::{
     extract_srid, geom_type_name, parse_ewkb, parse_ewkb_header, set_srid, write_ewkb,
 };
 
+fn is_empty_point(p: &geo::Point<f64>) -> bool {
+    p.x().is_nan() && p.y().is_nan()
+}
+
 /// ST_SRID — return the SRID stored in the EWKB header.
 ///
 /// # Example
@@ -135,11 +139,11 @@ pub fn st_zmflag(blob: &[u8]) -> Result<i32> {
 pub fn st_is_empty(blob: &[u8]) -> Result<bool> {
     let (geom, _) = parse_ewkb(blob)?;
     let empty = match &geom {
-        Geometry::Point(_) => false,
+        Geometry::Point(p) => is_empty_point(p),
         Geometry::Line(_) => false,
         Geometry::LineString(ls) => ls.0.is_empty(),
         Geometry::Polygon(p) => p.exterior().0.is_empty(),
-        Geometry::MultiPoint(mp) => mp.0.is_empty(),
+        Geometry::MultiPoint(mp) => mp.0.is_empty() || mp.0.iter().all(is_empty_point),
         Geometry::MultiLineString(mls) => mls.0.is_empty(),
         Geometry::MultiPolygon(mp) => mp.0.is_empty(),
         Geometry::GeometryCollection(gc) => gc.0.is_empty(),
@@ -235,13 +239,13 @@ pub fn st_num_points(blob: &[u8]) -> Result<i32> {
 pub fn st_npoints(blob: &[u8]) -> Result<i32> {
     fn count(g: &Geometry<f64>) -> usize {
         match g {
-            Geometry::Point(_) => 1,
+            Geometry::Point(p) => usize::from(!is_empty_point(p)),
             Geometry::Line(_) => 2,
             Geometry::LineString(ls) => ls.0.len(),
             Geometry::Polygon(p) => {
                 p.exterior().0.len() + p.interiors().iter().map(|r| r.0.len()).sum::<usize>()
             }
-            Geometry::MultiPoint(mp) => mp.0.len(),
+            Geometry::MultiPoint(mp) => mp.0.iter().map(|p| usize::from(!is_empty_point(p))).sum(),
             Geometry::MultiLineString(mls) => mls.0.iter().map(|ls| ls.0.len()).sum(),
             Geometry::MultiPolygon(mp) => mp
                 .0
@@ -808,6 +812,9 @@ mod tests {
         let point = geom_from_text("POINT(0 0)", None).unwrap();
         assert!(!st_is_empty(&point).unwrap());
 
+        let empty_point = geom_from_text("POINT EMPTY", None).unwrap();
+        assert!(st_is_empty(&empty_point).unwrap());
+
         let line = geom_from_text("LINESTRING EMPTY", None).unwrap();
         assert!(st_is_empty(&line).unwrap());
 
@@ -837,6 +844,9 @@ mod tests {
     fn st_npoints_covers_multi_geometries() {
         let point = geom_from_text("POINT(0 0)", None).unwrap();
         assert_eq!(st_npoints(&point).unwrap(), 1);
+
+        let empty_point = geom_from_text("POINT EMPTY", None).unwrap();
+        assert_eq!(st_npoints(&empty_point).unwrap(), 0);
 
         let line = geom_from_text("LINESTRING(0 0,1 1,2 2)", None).unwrap();
         assert_eq!(st_npoints(&line).unwrap(), 3);

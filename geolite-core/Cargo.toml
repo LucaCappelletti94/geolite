@@ -25,5 +25,8 @@ geozero      = { version = "0.15", features = ["with-wkt", "with-geojson", "with
 # Error handling
 thiserror    = "2"
 
+# GeoJSON structural checks for PostGIS-compatible POINT EMPTY handling
+serde_json   = "1"
+
 [features]
 default = []

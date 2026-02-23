@@ -13,7 +13,7 @@ use geo::Closest;
 use geo::{Geometry, Point};
 
 use crate::error::{GeoLiteError, Result};
-use crate::ewkb::{ensure_matching_srid, parse_ewkb, write_ewkb};
+use crate::ewkb::{ensure_matching_srid, parse_ewkb, parse_ewkb_pair, write_ewkb};
 
 /// ST_Area — planar area (square units of the CRS).
 ///
@@ -98,9 +98,7 @@ fn euclidean_geometry_distance(a: &Geometry<f64>, b: &Geometry<f64>) -> f64 {
 /// assert!((st_distance(&a, &b).unwrap() - 5.0).abs() < 1e-10);
 /// ```
 pub fn st_distance(a: &[u8], b: &[u8]) -> Result<f64> {
-    let (ga, srid_a) = parse_ewkb(a)?;
-    let (gb, srid_b) = parse_ewkb(b)?;
-    ensure_matching_srid(srid_a, srid_b)?;
+    let (ga, gb, _) = parse_ewkb_pair(a, b)?;
     Ok(euclidean_geometry_distance(&ga, &gb))
 }
 
@@ -161,9 +159,7 @@ pub fn st_point_on_surface(blob: &[u8]) -> Result<Vec<u8>> {
 /// assert!((st_hausdorff_distance(&a, &b).unwrap() - 1.0).abs() < 1e-10);
 /// ```
 pub fn st_hausdorff_distance(a: &[u8], b: &[u8]) -> Result<f64> {
-    let (ga, srid_a) = parse_ewkb(a)?;
-    let (gb, srid_b) = parse_ewkb(b)?;
-    ensure_matching_srid(srid_a, srid_b)?;
+    let (ga, gb, _) = parse_ewkb_pair(a, b)?;
     Ok(ga.hausdorff_distance(&gb))
 }
 
@@ -275,6 +271,19 @@ fn ensure_matching_geographic_srid(
     Ok(srid)
 }
 
+fn parse_two_geographic_points(
+    a: &[u8],
+    b: &[u8],
+    fn_name: &str,
+) -> Result<(Point<f64>, Point<f64>, Option<i32>)> {
+    let (ga, srid_a) = parse_ewkb(a)?;
+    let (gb, srid_b) = parse_ewkb(b)?;
+    let srid = ensure_matching_geographic_srid(srid_a, srid_b, fn_name)?;
+    let pa = require_point(ga)?;
+    let pb = require_point(gb)?;
+    Ok((pa, pb, srid))
+}
+
 /// ST_DistanceSphere — Haversine distance in metres (requires Point inputs).
 ///
 /// # Example
@@ -289,11 +298,7 @@ fn ensure_matching_geographic_srid(
 /// assert!(dist > 300_000.0 && dist < 400_000.0); // ~340 km
 /// ```
 pub fn st_distance_sphere(a: &[u8], b: &[u8]) -> Result<f64> {
-    let (ga, srid_a) = parse_ewkb(a)?;
-    let (gb, srid_b) = parse_ewkb(b)?;
-    ensure_matching_geographic_srid(srid_a, srid_b, "ST_DistanceSphere")?;
-    let pa = require_point(ga)?;
-    let pb = require_point(gb)?;
+    let (pa, pb, _) = parse_two_geographic_points(a, b, "ST_DistanceSphere")?;
     Ok(Haversine.distance(pa, pb))
 }
 
@@ -311,11 +316,7 @@ pub fn st_distance_sphere(a: &[u8], b: &[u8]) -> Result<f64> {
 /// assert!(dist > 300_000.0 && dist < 400_000.0); // ~340 km
 /// ```
 pub fn st_distance_spheroid(a: &[u8], b: &[u8]) -> Result<f64> {
-    let (ga, srid_a) = parse_ewkb(a)?;
-    let (gb, srid_b) = parse_ewkb(b)?;
-    ensure_matching_geographic_srid(srid_a, srid_b, "ST_DistanceSpheroid")?;
-    let pa = require_point(ga)?;
-    let pb = require_point(gb)?;
+    let (pa, pb, _) = parse_two_geographic_points(a, b, "ST_DistanceSpheroid")?;
     Ok(Geodesic.distance(pa, pb))
 }
 
@@ -356,11 +357,7 @@ pub fn st_length_sphere(blob: &[u8]) -> Result<f64> {
 /// assert!(az.abs() < 0.01);
 /// ```
 pub fn st_azimuth(origin: &[u8], target: &[u8]) -> Result<f64> {
-    let (go, srid_o) = parse_ewkb(origin)?;
-    let (gt, srid_t) = parse_ewkb(target)?;
-    ensure_matching_geographic_srid(srid_o, srid_t, "ST_Azimuth")?;
-    let po = require_point(go)?;
-    let pt = require_point(gt)?;
+    let (po, pt, _) = parse_two_geographic_points(origin, target, "ST_Azimuth")?;
     Ok(Geodesic.bearing(po, pt).to_radians())
 }
 
@@ -404,9 +401,7 @@ pub fn st_project(origin: &[u8], distance: f64, azimuth: f64) -> Result<Vec<u8>>
 /// assert!((st_y(&cp).unwrap() - 0.0).abs() < 1e-10);
 /// ```
 pub fn st_closest_point(a: &[u8], b: &[u8]) -> Result<Vec<u8>> {
-    let (ga, srid_a) = parse_ewkb(a)?;
-    let (gb, srid_b) = parse_ewkb(b)?;
-    let srid = ensure_matching_srid(srid_a, srid_b)?;
+    let (ga, gb, srid) = parse_ewkb_pair(a, b)?;
     let pb = require_point(gb)?;
     let cp = ga.closest_point(&pb);
     let pt = match cp {

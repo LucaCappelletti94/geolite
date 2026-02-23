@@ -86,8 +86,8 @@ Relate aliases in Diesel:
 
 - `st_relate_match_geoms(a, b, pattern)` maps to `ST_Relate(a, b, pattern)`.
 - `st_relate_match(matrix, pattern)` maps to `ST_RelateMatch(matrix, pattern)`.
-- Method-style aliases are also available via `geolite_diesel::prelude::*` as
-  `.st_relate_match_geoms(...)` and `.st_relate_match(...)`.
+- Method-style geometry matching is available via `geolite_diesel::prelude::*`
+  as `.st_relate_match_geoms(...)`.
 
 ## Documentation
 

@@ -335,25 +335,9 @@ fn method_st_relate() {
 }
 
 #[test]
-fn method_st_relate_pattern() {
-    assert_method_eq_func!(
-        g!().st_relate_pattern(g!(), t!()),
-        st_relate_pattern(g!(), g!(), t!())
-    );
-}
-
-#[test]
 fn method_st_relate_match_geoms() {
     assert_method_eq_func!(
         g!().st_relate_match_geoms(g!(), t!()),
-        st_relate_match_geoms(g!(), g!(), t!())
-    );
-}
-
-#[test]
-fn method_st_relate_match() {
-    assert_method_eq_func!(
-        g!().st_relate_match(g!(), t!()),
         st_relate_match_geoms(g!(), g!(), t!())
     );
 }
