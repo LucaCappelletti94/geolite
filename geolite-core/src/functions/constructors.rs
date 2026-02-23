@@ -73,6 +73,18 @@ pub fn st_make_polygon(shell: &[u8]) -> Result<Vec<u8>> {
         Geometry::LineString(ls) => ls,
         _ => return Err(GeoLiteError::WrongType("LineString")),
     };
+
+    if exterior.0.len() < 4 {
+        return Err(GeoLiteError::InvalidInput(
+            "polygon shell must contain at least 4 points".to_string(),
+        ));
+    }
+    if exterior.0.first() != exterior.0.last() {
+        return Err(GeoLiteError::InvalidInput(
+            "polygon shell must be closed (first point must equal last point)".to_string(),
+        ));
+    }
+
     let poly = Polygon::new(exterior, vec![]);
     write_ewkb(&Geometry::Polygon(poly), srid)
 }
@@ -184,6 +196,18 @@ mod tests {
     fn st_make_polygon_non_linestring() {
         let pt = st_point(0.0, 0.0, None).unwrap();
         assert!(st_make_polygon(&pt).is_err());
+    }
+
+    #[test]
+    fn st_make_polygon_rejects_unclosed_shell() {
+        let shell = geom_from_text("LINESTRING(0 0,1 0,1 1,0 1)", None).unwrap();
+        assert!(st_make_polygon(&shell).is_err());
+    }
+
+    #[test]
+    fn st_make_polygon_rejects_too_short_shell() {
+        let shell = geom_from_text("LINESTRING(0 0,1 1,0 0)", None).unwrap();
+        assert!(st_make_polygon(&shell).is_err());
     }
 
     #[test]

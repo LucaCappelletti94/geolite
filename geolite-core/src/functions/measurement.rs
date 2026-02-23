@@ -254,6 +254,27 @@ fn require_point(g: Geometry<f64>) -> Result<Point<f64>> {
     }
 }
 
+fn ensure_geographic_srid(srid: Option<i32>, fn_name: &str) -> Result<()> {
+    if let Some(srid) = srid {
+        if srid != 4326 {
+            return Err(GeoLiteError::InvalidInput(format!(
+                "{fn_name} requires SRID 4326 (got {srid})"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn ensure_matching_geographic_srid(
+    left: Option<i32>,
+    right: Option<i32>,
+    fn_name: &str,
+) -> Result<Option<i32>> {
+    let srid = ensure_matching_srid(left, right)?;
+    ensure_geographic_srid(srid, fn_name)?;
+    Ok(srid)
+}
+
 /// ST_DistanceSphere — Haversine distance in metres (requires Point inputs).
 ///
 /// # Example
@@ -270,7 +291,7 @@ fn require_point(g: Geometry<f64>) -> Result<Point<f64>> {
 pub fn st_distance_sphere(a: &[u8], b: &[u8]) -> Result<f64> {
     let (ga, srid_a) = parse_ewkb(a)?;
     let (gb, srid_b) = parse_ewkb(b)?;
-    ensure_matching_srid(srid_a, srid_b)?;
+    ensure_matching_geographic_srid(srid_a, srid_b, "ST_DistanceSphere")?;
     let pa = require_point(ga)?;
     let pb = require_point(gb)?;
     Ok(Haversine.distance(pa, pb))
@@ -292,7 +313,7 @@ pub fn st_distance_sphere(a: &[u8], b: &[u8]) -> Result<f64> {
 pub fn st_distance_spheroid(a: &[u8], b: &[u8]) -> Result<f64> {
     let (ga, srid_a) = parse_ewkb(a)?;
     let (gb, srid_b) = parse_ewkb(b)?;
-    ensure_matching_srid(srid_a, srid_b)?;
+    ensure_matching_geographic_srid(srid_a, srid_b, "ST_DistanceSpheroid")?;
     let pa = require_point(ga)?;
     let pb = require_point(gb)?;
     Ok(Geodesic.distance(pa, pb))
@@ -311,7 +332,8 @@ pub fn st_distance_spheroid(a: &[u8], b: &[u8]) -> Result<f64> {
 /// assert!(len > 300_000.0); // > 300 km
 /// ```
 pub fn st_length_sphere(blob: &[u8]) -> Result<f64> {
-    let (geom, _) = parse_ewkb(blob)?;
+    let (geom, srid) = parse_ewkb(blob)?;
+    ensure_geographic_srid(srid, "ST_LengthSphere")?;
     match &geom {
         Geometry::LineString(ls) => Ok(Haversine.length(ls)),
         Geometry::MultiLineString(mls) => Ok(mls.0.iter().map(|ls| Haversine.length(ls)).sum()),
@@ -334,8 +356,9 @@ pub fn st_length_sphere(blob: &[u8]) -> Result<f64> {
 /// assert!(az.abs() < 0.01);
 /// ```
 pub fn st_azimuth(origin: &[u8], target: &[u8]) -> Result<f64> {
-    let (go, _) = parse_ewkb(origin)?;
-    let (gt, _) = parse_ewkb(target)?;
+    let (go, srid_o) = parse_ewkb(origin)?;
+    let (gt, srid_t) = parse_ewkb(target)?;
+    ensure_matching_geographic_srid(srid_o, srid_t, "ST_Azimuth")?;
     let po = require_point(go)?;
     let pt = require_point(gt)?;
     Ok(Geodesic.bearing(po, pt).to_radians())
@@ -358,8 +381,9 @@ pub fn st_azimuth(origin: &[u8], target: &[u8]) -> Result<f64> {
 /// ```
 pub fn st_project(origin: &[u8], distance: f64, azimuth: f64) -> Result<Vec<u8>> {
     let (go, srid) = parse_ewkb(origin)?;
+    ensure_geographic_srid(srid, "ST_Project")?;
     let po = require_point(go)?;
-    let dest: Point<f64> = Haversine.destination(po, azimuth.to_degrees(), distance);
+    let dest: Point<f64> = Geodesic.destination(po, azimuth.to_degrees(), distance);
     write_ewkb(&Geometry::Point(dest), srid)
 }
 
@@ -467,6 +491,39 @@ mod tests {
         let a = st_point(0.0, 0.0, Some(4326)).unwrap();
         let b = st_point(3.0, 4.0, Some(3857)).unwrap();
         assert!(st_distance(&a, &b).is_err());
+    }
+
+    #[test]
+    fn st_azimuth_mixed_srid_errors() {
+        let a = st_point(0.0, 0.0, Some(4326)).unwrap();
+        let b = st_point(0.0, 1.0, Some(3857)).unwrap();
+        assert!(st_azimuth(&a, &b).is_err());
+    }
+
+    #[test]
+    fn st_distance_sphere_non_geographic_srid_errors() {
+        let a = st_point(0.0, 0.0, Some(3857)).unwrap();
+        let b = st_point(1.0, 1.0, Some(3857)).unwrap();
+        assert!(st_distance_sphere(&a, &b).is_err());
+    }
+
+    #[test]
+    fn st_distance_spheroid_non_geographic_srid_errors() {
+        let a = st_point(0.0, 0.0, Some(3857)).unwrap();
+        let b = st_point(1.0, 1.0, Some(3857)).unwrap();
+        assert!(st_distance_spheroid(&a, &b).is_err());
+    }
+
+    #[test]
+    fn st_length_sphere_non_geographic_srid_errors() {
+        let line = geom_from_text("LINESTRING(0 0,1 1)", Some(3857)).unwrap();
+        assert!(st_length_sphere(&line).is_err());
+    }
+
+    #[test]
+    fn st_project_non_geographic_srid_errors() {
+        let origin = st_point(0.0, 0.0, Some(3857)).unwrap();
+        assert!(st_project(&origin, 111_000.0, 0.0).is_err());
     }
 
     #[test]

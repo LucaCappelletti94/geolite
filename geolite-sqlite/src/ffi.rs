@@ -34,7 +34,10 @@ unsafe fn get_blob<'a>(argv: *mut *mut sqlite3_value, i: usize) -> Option<&'a [u
     }
     let ptr = sqlite3_value_blob(v) as *const u8;
     let len = sqlite3_value_bytes(v) as usize;
-    if ptr.is_null() || len == 0 {
+    if len == 0 {
+        return Some(&[]);
+    }
+    if ptr.is_null() {
         return None;
     }
     Some(std::slice::from_raw_parts(ptr, len))
@@ -424,21 +427,35 @@ unsafe extern "C" fn st_tileenvelope_xfunc(
     _n: c_int,
     argv: *mut *mut sqlite3_value,
 ) {
-    let Some(zoom) = get_i32_opt(argv, 0) else {
+    let Some(zoom_i32) = get_i32_opt(argv, 0) else {
         set_null(ctx);
         return;
     };
-    let Some(tile_x) = get_i32_opt(argv, 1) else {
+    let Some(tile_x_i32) = get_i32_opt(argv, 1) else {
         set_null(ctx);
         return;
     };
-    let Some(tile_y) = get_i32_opt(argv, 2) else {
+    let Some(tile_y_i32) = get_i32_opt(argv, 2) else {
         set_null(ctx);
         return;
     };
-    let zoom = zoom as u32;
-    let tile_x = tile_x as u32;
-    let tile_y = tile_y as u32;
+
+    if zoom_i32 < 0 {
+        set_error(ctx, "ST_TileEnvelope: zoom must be non-negative");
+        return;
+    }
+    if tile_x_i32 < 0 {
+        set_error(ctx, "ST_TileEnvelope: tile x must be non-negative");
+        return;
+    }
+    if tile_y_i32 < 0 {
+        set_error(ctx, "ST_TileEnvelope: tile y must be non-negative");
+        return;
+    }
+
+    let zoom = zoom_i32 as u32;
+    let tile_x = tile_x_i32 as u32;
+    let tile_y = tile_y_i32 as u32;
     match st_tile_envelope(zoom, tile_x, tile_y) {
         Ok(v) => set_blob(ctx, &v),
         Err(e) => set_error(ctx, &format!("ST_TileEnvelope: {e}")),

@@ -87,6 +87,18 @@ fn st_tile_envelope_zoom0() {
 }
 
 #[test]
+fn st_tile_envelope_negative_args_rejected_with_clear_error() {
+    let db = TestDb::open();
+    let err = db
+        .try_query_i64("SELECT ST_Area(ST_TileEnvelope(-1, 0, 0))")
+        .expect_err("negative zoom should return an error");
+    assert!(
+        err.contains("must be non-negative"),
+        "unexpected error message: {err}"
+    );
+}
+
+#[test]
 fn st_point_with_srid() {
     let db = TestDb::open();
     let srid = db.query_i64("SELECT ST_SRID(ST_Point(1, 2, 4326))");
@@ -782,6 +794,13 @@ fn null_input_st_geomfromwkb() {
 fn null_input_st_geomfromewkb() {
     let db = TestDb::open();
     assert!(db.query_is_null("SELECT ST_GeomFromEWKB(NULL)"));
+}
+
+#[test]
+fn empty_blob_input_reports_error_not_null() {
+    let db = TestDb::open();
+    let res = db.try_query_i64("SELECT ST_IsEmpty(X'')");
+    assert!(res.is_err(), "empty blob should be rejected, got: {res:?}");
 }
 
 // ── Multi-geometry tests ─────────────────────────────────────────────────────
