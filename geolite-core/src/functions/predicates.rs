@@ -9,7 +9,7 @@ use geo::coordinate_position::CoordPos;
 use geo::dimensions::Dimensions;
 
 use crate::error::Result;
-use crate::ewkb::parse_ewkb;
+use crate::ewkb::{ensure_matching_srid, parse_ewkb};
 
 /// ST_Intersects — true if the two geometries share at least one point.
 ///
@@ -24,8 +24,9 @@ use crate::ewkb::parse_ewkb;
 /// assert!(st_intersects(&a, &b).unwrap());
 /// ```
 pub fn st_intersects(a: &[u8], b: &[u8]) -> Result<bool> {
-    let (ga, _) = parse_ewkb(a)?;
-    let (gb, _) = parse_ewkb(b)?;
+    let (ga, srid_a) = parse_ewkb(a)?;
+    let (gb, srid_b) = parse_ewkb(b)?;
+    ensure_matching_srid(srid_a, srid_b)?;
     Ok(ga.intersects(&gb))
 }
 
@@ -42,8 +43,9 @@ pub fn st_intersects(a: &[u8], b: &[u8]) -> Result<bool> {
 /// assert!(st_contains(&poly, &pt).unwrap());
 /// ```
 pub fn st_contains(a: &[u8], b: &[u8]) -> Result<bool> {
-    let (ga, _) = parse_ewkb(a)?;
-    let (gb, _) = parse_ewkb(b)?;
+    let (ga, srid_a) = parse_ewkb(a)?;
+    let (gb, srid_b) = parse_ewkb(b)?;
+    ensure_matching_srid(srid_a, srid_b)?;
     Ok(ga.contains(&gb))
 }
 
@@ -110,8 +112,9 @@ pub fn st_dwithin(a: &[u8], b: &[u8], distance: f64) -> Result<bool> {
 /// assert!(st_covers(&poly, &pt).unwrap());
 /// ```
 pub fn st_covers(a: &[u8], b: &[u8]) -> Result<bool> {
-    let (ga, _) = parse_ewkb(a)?;
-    let (gb, _) = parse_ewkb(b)?;
+    let (ga, srid_a) = parse_ewkb(a)?;
+    let (gb, srid_b) = parse_ewkb(b)?;
+    ensure_matching_srid(srid_a, srid_b)?;
     Ok(ga.relate(&gb).is_covers())
 }
 
@@ -144,8 +147,9 @@ pub fn st_covered_by(a: &[u8], b: &[u8]) -> Result<bool> {
 /// assert!(st_equals(&a, &b).unwrap());
 /// ```
 pub fn st_equals(a: &[u8], b: &[u8]) -> Result<bool> {
-    let (ga, _) = parse_ewkb(a)?;
-    let (gb, _) = parse_ewkb(b)?;
+    let (ga, srid_a) = parse_ewkb(a)?;
+    let (gb, srid_b) = parse_ewkb(b)?;
+    ensure_matching_srid(srid_a, srid_b)?;
     Ok(ga.relate(&gb).is_equal_topo())
 }
 
@@ -162,8 +166,9 @@ pub fn st_equals(a: &[u8], b: &[u8]) -> Result<bool> {
 /// assert!(st_touches(&a, &b).unwrap());
 /// ```
 pub fn st_touches(a: &[u8], b: &[u8]) -> Result<bool> {
-    let (ga, _) = parse_ewkb(a)?;
-    let (gb, _) = parse_ewkb(b)?;
+    let (ga, srid_a) = parse_ewkb(a)?;
+    let (gb, srid_b) = parse_ewkb(b)?;
+    ensure_matching_srid(srid_a, srid_b)?;
     // geo 0.32: is_touches() takes 0 arguments
     Ok(ga.relate(&gb).is_touches())
 }
@@ -181,8 +186,9 @@ pub fn st_touches(a: &[u8], b: &[u8]) -> Result<bool> {
 /// assert!(st_crosses(&line, &poly).unwrap());
 /// ```
 pub fn st_crosses(a: &[u8], b: &[u8]) -> Result<bool> {
-    let (ga, _) = parse_ewkb(a)?;
-    let (gb, _) = parse_ewkb(b)?;
+    let (ga, srid_a) = parse_ewkb(a)?;
+    let (gb, srid_b) = parse_ewkb(b)?;
+    ensure_matching_srid(srid_a, srid_b)?;
     Ok(ga.relate(&gb).is_crosses())
 }
 
@@ -199,8 +205,9 @@ pub fn st_crosses(a: &[u8], b: &[u8]) -> Result<bool> {
 /// assert!(st_overlaps(&a, &b).unwrap());
 /// ```
 pub fn st_overlaps(a: &[u8], b: &[u8]) -> Result<bool> {
-    let (ga, _) = parse_ewkb(a)?;
-    let (gb, _) = parse_ewkb(b)?;
+    let (ga, srid_a) = parse_ewkb(a)?;
+    let (gb, srid_b) = parse_ewkb(b)?;
+    ensure_matching_srid(srid_a, srid_b)?;
     Ok(ga.relate(&gb).is_overlaps())
 }
 
@@ -241,8 +248,9 @@ fn matrix_string(matrix: &geo::algorithm::relate::IntersectionMatrix) -> String 
 /// assert_eq!(matrix, "0FFFFFFF2");
 /// ```
 pub fn st_relate(a: &[u8], b: &[u8]) -> Result<String> {
-    let (ga, _) = parse_ewkb(a)?;
-    let (gb, _) = parse_ewkb(b)?;
+    let (ga, srid_a) = parse_ewkb(a)?;
+    let (gb, srid_b) = parse_ewkb(b)?;
+    ensure_matching_srid(srid_a, srid_b)?;
     Ok(matrix_string(&ga.relate(&gb)))
 }
 
@@ -260,8 +268,9 @@ pub fn st_relate(a: &[u8], b: &[u8]) -> Result<String> {
 /// assert!(st_relate_match_geoms(&a, &b, "T*****FF*").unwrap());
 /// ```
 pub fn st_relate_match_geoms(a: &[u8], b: &[u8], pattern: &str) -> Result<bool> {
-    let (ga, _) = parse_ewkb(a)?;
-    let (gb, _) = parse_ewkb(b)?;
+    let (ga, srid_a) = parse_ewkb(a)?;
+    let (gb, srid_b) = parse_ewkb(b)?;
+    ensure_matching_srid(srid_a, srid_b)?;
     // Use geo's built-in pattern matching
     Ok(ga.relate(&gb).matches(pattern).unwrap_or(false))
 }

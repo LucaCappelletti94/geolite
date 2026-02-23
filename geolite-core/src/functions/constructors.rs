@@ -6,7 +6,7 @@
 use geo::{Coord, Geometry, LineString, Point, Polygon, Rect};
 
 use crate::error::{GeoLiteError, Result};
-use crate::ewkb::{parse_ewkb, write_ewkb};
+use crate::ewkb::{ensure_matching_srid, parse_ewkb, write_ewkb};
 
 /// ST_Point / ST_MakePoint (2D) — construct a Point geometry.
 ///
@@ -39,8 +39,9 @@ pub fn st_point(x: f64, y: f64, srid: Option<i32>) -> Result<Vec<u8>> {
 /// assert_eq!(st_num_points(&line).unwrap(), 2);
 /// ```
 pub fn st_make_line(a: &[u8], b: &[u8]) -> Result<Vec<u8>> {
-    let (ga, srid) = parse_ewkb(a)?;
-    let (gb, _) = parse_ewkb(b)?;
+    let (ga, srid_a) = parse_ewkb(a)?;
+    let (gb, srid_b) = parse_ewkb(b)?;
+    let srid = ensure_matching_srid(srid_a, srid_b)?;
     let pa = match ga {
         Geometry::Point(p) => p,
         _ => return Err(GeoLiteError::WrongType("Point")),
@@ -113,8 +114,9 @@ pub fn st_make_envelope(
 /// assert_eq!(st_num_geometries(&gc).unwrap(), 2);
 /// ```
 pub fn st_collect(a: &[u8], b: &[u8]) -> Result<Vec<u8>> {
-    let (ga, srid) = parse_ewkb(a)?;
-    let (gb, _) = parse_ewkb(b)?;
+    let (ga, srid_a) = parse_ewkb(a)?;
+    let (gb, srid_b) = parse_ewkb(b)?;
+    let srid = ensure_matching_srid(srid_a, srid_b)?;
     let gc = geo::GeometryCollection::new_from(vec![ga, gb]);
     write_ewkb(&Geometry::GeometryCollection(gc), srid)
 }
@@ -185,19 +187,17 @@ mod tests {
     }
 
     #[test]
-    fn st_make_line_srid_from_first_arg() {
+    fn st_make_line_mixed_srid_errors() {
         let a = st_point(0.0, 0.0, Some(4326)).unwrap();
         let b = st_point(1.0, 1.0, Some(3857)).unwrap();
-        let line = st_make_line(&a, &b).unwrap();
-        assert_eq!(extract_srid(&line), Some(4326));
+        assert!(st_make_line(&a, &b).is_err());
     }
 
     #[test]
-    fn st_collect_srid_from_first_arg() {
+    fn st_collect_mixed_srid_errors() {
         let a = st_point(0.0, 0.0, Some(4326)).unwrap();
         let b = st_point(1.0, 1.0, None).unwrap();
-        let gc = st_collect(&a, &b).unwrap();
-        assert_eq!(extract_srid(&gc), Some(4326));
+        assert!(st_collect(&a, &b).is_err());
     }
 
     #[test]

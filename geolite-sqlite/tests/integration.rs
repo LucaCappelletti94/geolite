@@ -736,6 +736,12 @@ fn null_input_st_setsrid() {
 }
 
 #[test]
+fn null_numeric_arg_st_setsrid_returns_null() {
+    let db = TestDb::open();
+    assert!(db.query_is_null("SELECT ST_SetSRID(ST_Point(0,0), NULL)"));
+}
+
+#[test]
 fn null_input_st_pointn() {
     let db = TestDb::open();
     assert!(db.query_is_null("SELECT ST_PointN(NULL, 1)"));

@@ -113,6 +113,21 @@ pub fn extract_srid(blob: &[u8]) -> Option<i32> {
     parse_ewkb_header(blob).ok().and_then(|h| h.srid)
 }
 
+/// Enforce equal SRIDs for binary geometry operations.
+///
+/// Returns the shared SRID when both inputs are compatible.
+pub fn ensure_matching_srid(left: Option<i32>, right: Option<i32>) -> Result<Option<i32>> {
+    if left == right {
+        Ok(left)
+    } else {
+        let l = left.unwrap_or(0);
+        let r = right.unwrap_or(0);
+        Err(GeoLiteError::InvalidInput(format!(
+            "operation on mixed SRID geometries ({l} != {r})"
+        )))
+    }
+}
+
 /// Parse an EWKB blob into a `geo::Geometry<f64>`.
 /// Returns `(geometry, srid)`.
 ///
@@ -127,9 +142,14 @@ pub fn extract_srid(blob: &[u8]) -> Option<i32> {
 /// assert_eq!(srid, Some(4326));
 /// ```
 pub fn parse_ewkb(blob: &[u8]) -> Result<(Geometry<f64>, Option<i32>)> {
-    let srid = extract_srid(blob);
+    let header = parse_ewkb_header(blob)?;
+    if header.has_z || header.has_m {
+        return Err(GeoLiteError::InvalidInput(
+            "Z/M geometries are not supported".to_string(),
+        ));
+    }
     let geom = Ewkb(blob).to_geo()?;
-    Ok((geom, srid))
+    Ok((geom, header.srid))
 }
 
 /// Serialise a `geo::Geometry<f64>` to EWKB with an optional SRID.
@@ -343,5 +363,17 @@ mod tests {
     #[test]
     fn parse_ewkb_invalid_blob() {
         assert!(parse_ewkb(&[0x01, 0x02]).is_err());
+    }
+
+    #[test]
+    fn ensure_matching_srid_accepts_equal() {
+        assert_eq!(ensure_matching_srid(Some(4326), Some(4326)).unwrap(), Some(4326));
+        assert_eq!(ensure_matching_srid(None, None).unwrap(), None);
+    }
+
+    #[test]
+    fn ensure_matching_srid_rejects_mismatch() {
+        assert!(ensure_matching_srid(Some(4326), Some(3857)).is_err());
+        assert!(ensure_matching_srid(Some(4326), None).is_err());
     }
 }

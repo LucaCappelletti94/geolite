@@ -294,8 +294,17 @@ fn debug_query_st_asbinary() {
 #[test]
 fn debug_query_st_geomfromwkb() {
     use geolite_diesel::functions::*;
-    let wkb = diesel::dsl::sql::<Geometry>("x");
+    let wkb = diesel::dsl::sql::<diesel::sql_types::Nullable<diesel::sql_types::Binary>>("x");
     assert_sql_contains!(diesel::dsl::select(st_geomfromwkb(wkb)), "st_geomfromwkb");
+}
+
+#[test]
+fn debug_query_st_geomfromwkb_accepts_st_asbinary_output() {
+    use geolite_diesel::functions::*;
+    assert_sql_contains!(
+        diesel::dsl::select(st_geomfromwkb(st_asbinary(g!()))),
+        "st_geomfromwkb"
+    );
 }
 
 #[test]

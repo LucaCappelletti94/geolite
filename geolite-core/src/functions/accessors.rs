@@ -525,14 +525,17 @@ pub fn st_geometry_n(blob: &[u8], n: i32) -> Result<Vec<u8>> {
 /// assert_eq!(st_dimension(&poly).unwrap(), 2);
 /// ```
 pub fn st_dimension(blob: &[u8]) -> Result<i32> {
-    let header = parse_ewkb_header(blob)?;
-    let dim = match header.geom_type {
-        1 | 4 => 0,     // Point, MultiPoint
-        2 | 5 => 1,     // LineString, MultiLineString
-        3 | 6 | 7 => 2, // Polygon, MultiPolygon, GeometryCollection (max dim)
-        _ => 0,
-    };
-    Ok(dim)
+    fn geometry_dimension(geom: &Geometry<f64>) -> i32 {
+        match geom {
+            Geometry::Point(_) | Geometry::MultiPoint(_) => 0,
+            Geometry::Line(_) | Geometry::LineString(_) | Geometry::MultiLineString(_) => 1,
+            Geometry::Polygon(_) | Geometry::MultiPolygon(_) | Geometry::Rect(_) | Geometry::Triangle(_) => 2,
+            Geometry::GeometryCollection(gc) => gc.0.iter().map(geometry_dimension).max().unwrap_or(0),
+        }
+    }
+
+    let (geom, _) = parse_ewkb(blob)?;
+    Ok(geometry_dimension(&geom))
 }
 
 /// ST_Envelope — bounding rectangle as a 5-point Polygon.
@@ -721,6 +724,12 @@ mod tests {
         )
         .unwrap();
         assert_eq!(st_dimension(&mp).unwrap(), 2);
+    }
+
+    #[test]
+    fn st_dimension_geometrycollection_uses_max_member_dimension() {
+        let gc = geom_from_text("GEOMETRYCOLLECTION(POINT(0 0),LINESTRING(0 0,1 1))", None).unwrap();
+        assert_eq!(st_dimension(&gc).unwrap(), 1);
     }
 
     // ── SRID propagation ───────────────────────────────────────────

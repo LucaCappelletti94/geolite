@@ -246,4 +246,15 @@ mod tests {
         let wkt = as_text(&blob).unwrap();
         assert!(wkt.contains("LINESTRING"));
     }
+
+    #[test]
+    fn geom_from_ewkb_rejects_z_dimension() {
+        let mut blob = vec![0x01];
+        let typ = crate::ewkb::EWKB_Z_FLAG | crate::ewkb::WKB_POINT;
+        blob.extend_from_slice(&typ.to_le_bytes());
+        blob.extend_from_slice(&1.0f64.to_le_bytes());
+        blob.extend_from_slice(&2.0f64.to_le_bytes());
+        blob.extend_from_slice(&3.0f64.to_le_bytes());
+        assert!(geom_from_ewkb(&blob).is_err());
+    }
 }

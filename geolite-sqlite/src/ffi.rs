@@ -53,12 +53,22 @@ unsafe fn get_text<'a>(argv: *mut *mut sqlite3_value, i: usize) -> Option<&'a st
     std::str::from_utf8(std::slice::from_raw_parts(ptr as _, len)).ok()
 }
 
-unsafe fn get_f64(argv: *mut *mut sqlite3_value, i: usize) -> f64 {
-    sqlite3_value_double(*argv.add(i))
+unsafe fn get_f64_opt(argv: *mut *mut sqlite3_value, i: usize) -> Option<f64> {
+    let v = *argv.add(i);
+    if sqlite3_value_type(v) == SQLITE_NULL {
+        None
+    } else {
+        Some(sqlite3_value_double(v))
+    }
 }
 
-unsafe fn get_i32(argv: *mut *mut sqlite3_value, i: usize) -> i32 {
-    sqlite3_value_int(*argv.add(i))
+unsafe fn get_i32_opt(argv: *mut *mut sqlite3_value, i: usize) -> Option<i32> {
+    let v = *argv.add(i);
+    if sqlite3_value_type(v) == SQLITE_NULL {
+        None
+    } else {
+        Some(sqlite3_value_int(v))
+    }
 }
 
 // ── Result-setting helpers ───────────────────────────────────────────────────
@@ -184,7 +194,10 @@ macro_rules! xfunc_text_optsrid_blob {
                 set_null(ctx);
                 return;
             };
-            let srid = get_i32(argv, 1);
+            let Some(srid) = get_i32_opt(argv, 1) else {
+                set_null(ctx);
+                return;
+            };
             match $func(t, Some(srid)) {
                 Ok(v) => set_blob(ctx, &v),
                 Err(e) => set_error(ctx, &format!(concat!($label, ": {}"), e)),
@@ -219,7 +232,10 @@ macro_rules! xfunc_blob_optsrid_blob {
                 set_null(ctx);
                 return;
             };
-            let srid = get_i32(argv, 1);
+            let Some(srid) = get_i32_opt(argv, 1) else {
+                set_null(ctx);
+                return;
+            };
             match $func(b, Some(srid)) {
                 Ok(v) => set_blob(ctx, &v),
                 Err(e) => set_error(ctx, &format!(concat!($label, ": {}"), e)),
@@ -286,8 +302,14 @@ unsafe extern "C" fn st_point_2_xfunc(
         set_null(ctx);
         return;
     }
-    let x = get_f64(argv, 0);
-    let y = get_f64(argv, 1);
+    let Some(x) = get_f64_opt(argv, 0) else {
+        set_null(ctx);
+        return;
+    };
+    let Some(y) = get_f64_opt(argv, 1) else {
+        set_null(ctx);
+        return;
+    };
     match st_point(x, y, None) {
         Ok(v) => set_blob(ctx, &v),
         Err(e) => set_error(ctx, &format!("ST_Point: {e}")),
@@ -306,9 +328,18 @@ unsafe extern "C" fn st_point_3_xfunc(
         set_null(ctx);
         return;
     }
-    let x = get_f64(argv, 0);
-    let y = get_f64(argv, 1);
-    let srid = get_i32(argv, 2);
+    let Some(x) = get_f64_opt(argv, 0) else {
+        set_null(ctx);
+        return;
+    };
+    let Some(y) = get_f64_opt(argv, 1) else {
+        set_null(ctx);
+        return;
+    };
+    let Some(srid) = get_i32_opt(argv, 2) else {
+        set_null(ctx);
+        return;
+    };
     match st_point(x, y, Some(srid)) {
         Ok(v) => set_blob(ctx, &v),
         Err(e) => set_error(ctx, &format!("ST_Point: {e}")),
@@ -333,10 +364,22 @@ unsafe extern "C" fn st_makeenvelope_4_xfunc(
     _n: c_int,
     argv: *mut *mut sqlite3_value,
 ) {
-    let xmin = get_f64(argv, 0);
-    let ymin = get_f64(argv, 1);
-    let xmax = get_f64(argv, 2);
-    let ymax = get_f64(argv, 3);
+    let Some(xmin) = get_f64_opt(argv, 0) else {
+        set_null(ctx);
+        return;
+    };
+    let Some(ymin) = get_f64_opt(argv, 1) else {
+        set_null(ctx);
+        return;
+    };
+    let Some(xmax) = get_f64_opt(argv, 2) else {
+        set_null(ctx);
+        return;
+    };
+    let Some(ymax) = get_f64_opt(argv, 3) else {
+        set_null(ctx);
+        return;
+    };
     match st_make_envelope(xmin, ymin, xmax, ymax, None) {
         Ok(v) => set_blob(ctx, &v),
         Err(e) => set_error(ctx, &format!("ST_MakeEnvelope: {e}")),
@@ -348,11 +391,26 @@ unsafe extern "C" fn st_makeenvelope_5_xfunc(
     _n: c_int,
     argv: *mut *mut sqlite3_value,
 ) {
-    let xmin = get_f64(argv, 0);
-    let ymin = get_f64(argv, 1);
-    let xmax = get_f64(argv, 2);
-    let ymax = get_f64(argv, 3);
-    let srid = get_i32(argv, 4);
+    let Some(xmin) = get_f64_opt(argv, 0) else {
+        set_null(ctx);
+        return;
+    };
+    let Some(ymin) = get_f64_opt(argv, 1) else {
+        set_null(ctx);
+        return;
+    };
+    let Some(xmax) = get_f64_opt(argv, 2) else {
+        set_null(ctx);
+        return;
+    };
+    let Some(ymax) = get_f64_opt(argv, 3) else {
+        set_null(ctx);
+        return;
+    };
+    let Some(srid) = get_i32_opt(argv, 4) else {
+        set_null(ctx);
+        return;
+    };
     match st_make_envelope(xmin, ymin, xmax, ymax, Some(srid)) {
         Ok(v) => set_blob(ctx, &v),
         Err(e) => set_error(ctx, &format!("ST_MakeEnvelope: {e}")),
@@ -366,9 +424,21 @@ unsafe extern "C" fn st_tileenvelope_xfunc(
     _n: c_int,
     argv: *mut *mut sqlite3_value,
 ) {
-    let zoom = get_i32(argv, 0) as u32;
-    let tile_x = get_i32(argv, 1) as u32;
-    let tile_y = get_i32(argv, 2) as u32;
+    let Some(zoom) = get_i32_opt(argv, 0) else {
+        set_null(ctx);
+        return;
+    };
+    let Some(tile_x) = get_i32_opt(argv, 1) else {
+        set_null(ctx);
+        return;
+    };
+    let Some(tile_y) = get_i32_opt(argv, 2) else {
+        set_null(ctx);
+        return;
+    };
+    let zoom = zoom as u32;
+    let tile_x = tile_x as u32;
+    let tile_y = tile_y as u32;
     match st_tile_envelope(zoom, tile_x, tile_y) {
         Ok(v) => set_blob(ctx, &v),
         Err(e) => set_error(ctx, &format!("ST_TileEnvelope: {e}")),
@@ -388,7 +458,10 @@ unsafe extern "C" fn st_setsrid_xfunc(
         set_null(ctx);
         return;
     };
-    let srid = get_i32(argv, 1);
+    let Some(srid) = get_i32_opt(argv, 1) else {
+        set_null(ctx);
+        return;
+    };
     match st_set_srid(b, srid) {
         Ok(v) => set_blob(ctx, &v),
         Err(e) => set_error(ctx, &format!("ST_SetSRID: {e}")),
@@ -433,7 +506,10 @@ unsafe extern "C" fn st_pointn_xfunc(
         set_null(ctx);
         return;
     };
-    let n = get_i32(argv, 1);
+    let Some(n) = get_i32_opt(argv, 1) else {
+        set_null(ctx);
+        return;
+    };
     match st_point_n(b, n, None) {
         Ok(v) => set_blob(ctx, &v),
         Err(e) => set_error(ctx, &format!("ST_PointN: {e}")),
@@ -468,7 +544,10 @@ unsafe extern "C" fn st_interiorringn_xfunc(
         set_null(ctx);
         return;
     };
-    let n = get_i32(argv, 1);
+    let Some(n) = get_i32_opt(argv, 1) else {
+        set_null(ctx);
+        return;
+    };
     match st_interior_ring_n(b, n) {
         Ok(v) => set_blob(ctx, &v),
         Err(e) => set_error(ctx, &format!("ST_InteriorRingN: {e}")),
@@ -484,7 +563,10 @@ unsafe extern "C" fn st_geometryn_xfunc(
         set_null(ctx);
         return;
     };
-    let n = get_i32(argv, 1);
+    let Some(n) = get_i32_opt(argv, 1) else {
+        set_null(ctx);
+        return;
+    };
     match st_geometry_n(b, n) {
         Ok(v) => set_blob(ctx, &v),
         Err(e) => set_error(ctx, &format!("ST_GeometryN: {e}")),
@@ -563,8 +645,14 @@ unsafe extern "C" fn st_project_xfunc(
         set_null(ctx);
         return;
     };
-    let distance = get_f64(argv, 1);
-    let azimuth = get_f64(argv, 2);
+    let Some(distance) = get_f64_opt(argv, 1) else {
+        set_null(ctx);
+        return;
+    };
+    let Some(azimuth) = get_f64_opt(argv, 2) else {
+        set_null(ctx);
+        return;
+    };
     match st_project(origin, distance, azimuth) {
         Ok(v) => set_blob(ctx, &v),
         Err(e) => set_error(ctx, &format!("ST_Project: {e}")),
@@ -609,7 +697,10 @@ unsafe extern "C" fn st_buffer_xfunc(
         set_null(ctx);
         return;
     };
-    let distance = get_f64(argv, 1);
+    let Some(distance) = get_f64_opt(argv, 1) else {
+        set_null(ctx);
+        return;
+    };
     match st_buffer(b, distance) {
         Ok(v) => set_blob(ctx, &v),
         Err(e) => set_error(ctx, &format!("ST_Buffer: {e}")),
@@ -641,7 +732,10 @@ unsafe extern "C" fn st_dwithin_xfunc(
         set_null(ctx);
         return;
     };
-    let d = get_f64(argv, 2);
+    let Some(d) = get_f64_opt(argv, 2) else {
+        set_null(ctx);
+        return;
+    };
     match st_dwithin(a, b, d) {
         Ok(v) => set_i32(ctx, v as i32),
         Err(e) => set_error(ctx, &format!("ST_DWithin: {e}")),

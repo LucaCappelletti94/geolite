@@ -15,7 +15,7 @@
 //! ```
 
 use crate::types::Geometry;
-use diesel::sql_types::{Double, Integer, Nullable, Text};
+use diesel::sql_types::{Binary, Double, Integer, Nullable, Text};
 
 // ── I/O ───────────────────────────────────────────────────────────────────────
 
@@ -47,7 +47,7 @@ diesel::define_sql_function! {
 
 diesel::define_sql_function! {
     /// Parse ISO WKB bytes into a geometry BLOB.
-    fn st_geomfromwkb(wkb: Geometry) -> Nullable<Geometry>;
+    fn st_geomfromwkb(wkb: Nullable<Binary>) -> Nullable<Geometry>;
 }
 
 diesel::define_sql_function! {
