@@ -8,6 +8,7 @@
 PostGIS-style spatial functions for SQLite in pure Rust.
 
 Use `geolite` as:
+
 - a native SQLite loadable extension,
 - a WASM-compatible SQLite extension,
 - or Diesel ORM integration.
