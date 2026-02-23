@@ -1,7 +1,5 @@
-//! `geolite-core` — Pure-Rust PostGIS-compatible spatial geometry library.
-//!
-//! All functions in this crate are pure Rust with zero C dependencies.
-//! SQLite wiring lives in `geolite-sqlite`; Diesel types live in `geolite-diesel`.
+#![doc = include_str!("../../README.md")]
+//! Crate-specific API surface for `geolite-core`.
 
 pub mod error;
 pub mod ewkb;

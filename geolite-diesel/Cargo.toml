@@ -5,6 +5,7 @@ edition      = "2021"
 rust-version.workspace = true
 license      = "MIT OR Apache-2.0"
 description  = "Diesel ORM integration for geolite spatial types (Geometry, Geography)"
+readme       = "../README.md"
 autotests    = false
 
 [lib]

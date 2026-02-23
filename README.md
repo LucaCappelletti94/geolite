@@ -5,134 +5,126 @@
 [![MSRV](https://img.shields.io/badge/MSRV-1.86-blue)](https://github.com/LucaCappelletti94/geolite)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](LICENSE)
 
-PostGIS-compatible spatial functions for SQLite, written in pure Rust.
+PostGIS-style spatial functions for SQLite in pure Rust.
 
-Load geolite as a SQLite extension to get `ST_*` spatial functions — the same API used by PostGIS — in any SQLite database. Works as a native loadable extension and in WebAssembly browsers.
+Use `geolite` as:
+- a native SQLite loadable extension,
+- a WASM-compatible SQLite extension,
+- or Diesel ORM integration.
 
-## Workspace
+## Workspace crates
 
-| Crate | Description |
+| Crate | Purpose |
 |---|---|
-| `geolite-core` | Pure-Rust spatial function library with zero C dependencies |
-| `geolite-sqlite` | SQLite loadable extension (native + WASM) |
-| `geolite-diesel` | Diesel ORM types and query builder integration |
+| `geolite-core` | Core geometry functions and EWKB handling |
+| `geolite-sqlite` | SQLite extension exposing `geolite-core` functions |
+| `geolite-diesel` | Diesel geometry types and query extensions |
 
 ## Quick start
 
-### As a SQLite loadable extension
-
-```sql
-.load geolite
-
-SELECT ST_AsText(ST_Buffer(ST_Point(0, 0), 1.0));
-SELECT ST_Distance(
-  ST_GeomFromText('POINT(0 0)'),
-  ST_GeomFromText('POINT(3 4)')
-);  -- 5.0
-```
-
-### From Rust with Diesel
-
-```rust
-use geolite_diesel::prelude::*;
-use geolite_diesel::functions::*;
-
-let nearby = features::table
-    .filter(features::geom.st_dwithin(st_point(13.4, 52.5), 1000.0))
-    .select((features::id, features::geom.st_astext()))
-    .load(&mut conn)?;
-```
-
-## Supported functions
-
-### I/O
-
-`ST_GeomFromText`, `ST_GeomFromWKB`, `ST_GeomFromEWKB`, `ST_GeomFromGeoJSON`,
-`ST_AsText`, `ST_AsEWKT`, `ST_AsBinary`, `ST_AsEWKB`, `ST_AsGeoJSON`
-
-### Constructors
-
-`ST_Point`, `ST_MakePoint`, `ST_MakeLine`, `ST_MakePolygon`,
-`ST_MakeEnvelope`, `ST_Collect`, `ST_TileEnvelope`
-
-### Accessors
-
-`ST_SRID`, `ST_SetSRID`, `ST_GeometryType`, `ST_NDims`, `ST_CoordDim`,
-`ST_Zmflag`, `ST_IsEmpty`, `ST_MemSize`, `ST_X`, `ST_Y`,
-`ST_NumPoints`, `ST_NPoints`, `ST_NumGeometries`,
-`ST_NumInteriorRings`, `ST_NumRings`, `ST_PointN`, `ST_StartPoint`,
-`ST_EndPoint`, `ST_ExteriorRing`, `ST_InteriorRingN`, `ST_GeometryN`,
-`ST_Dimension`, `ST_Envelope`, `ST_IsValid`, `ST_IsValidReason`
-
-### Measurement
-
-`ST_Area`, `ST_Length`, `ST_Perimeter`, `ST_Distance`, `ST_Centroid`,
-`ST_PointOnSurface`, `ST_HausdorffDistance`, `ST_XMin`, `ST_XMax`,
-`ST_YMin`, `ST_YMax`, `ST_DistanceSphere`, `ST_DistanceSpheroid`,
-`ST_LengthSphere`, `ST_Azimuth`, `ST_Project`, `ST_ClosestPoint`
-
-### Operations
-
-`ST_Union`, `ST_Intersection`, `ST_Difference`, `ST_SymDifference`, `ST_Buffer`
-
-### Predicates
-
-`ST_Intersects`, `ST_Contains`, `ST_Within`, `ST_Disjoint`, `ST_DWithin`,
-`ST_Covers`, `ST_CoveredBy`, `ST_Equals`, `ST_Touches`, `ST_Crosses`,
-`ST_Overlaps`, `ST_Relate`, `ST_RelateMatch`
-
-### Spatial Index
-
-`CreateSpatialIndex`, `DropSpatialIndex`
-
-## Building
-
-Requires Rust 1.86+.
+### SQLite extension
 
 ```sh
-# Native loadable extension
+cargo build --release -p geolite-sqlite
+```
+
+```sql
+SELECT load_extension('./target/release/libgeolite_sqlite');
+SELECT ST_AsText(ST_Buffer(ST_Point(0, 0), 1.0));
+SELECT ST_Distance(ST_GeomFromText('POINT(0 0)'), ST_GeomFromText('POINT(3 4)'));
+```
+
+### Rust API (`geolite-core`)
+
+```rust
+use geolite_core::functions::constructors::st_point;
+use geolite_core::functions::measurement::st_distance;
+
+let a = st_point(0.0, 0.0, None).unwrap();
+let b = st_point(3.0, 4.0, None).unwrap();
+assert!((st_distance(&a, &b).unwrap() - 5.0).abs() < 1e-10);
+```
+
+### Diesel integration
+
+```toml
+[dependencies]
+geolite-diesel = { path = "geolite-diesel", features = ["sqlite"] }
+```
+
+```rust,no_run
+# #[cfg(feature = "sqlite")]
+# {
+use diesel::debug_query;
+use diesel::prelude::*;
+use diesel::sqlite::Sqlite;
+use geolite_diesel::functions::st_point;
+use geolite_diesel::prelude::*;
+
+diesel::table! {
+    features (id) {
+        id -> Integer,
+        geom -> Nullable<geolite_diesel::Geometry>,
+    }
+}
+
+let query = features::table
+    .filter(
+        features::geom
+            .st_dwithin(st_point(13.4, 52.5).nullable(), 1000.0)
+            .eq(1),
+    )
+    .select(features::geom.st_astext());
+
+let sql = debug_query::<Sqlite, _>(&query).to_string();
+assert!(sql.contains("ST_DWithin"));
+# }
+```
+
+## Documentation
+
+- `geolite` docs are the source of truth for API surface.
+- Generate local docs:
+
+```sh
+cargo doc --workspace --no-deps
+```
+
+## Build and test
+
+Requires Rust `1.86+`.
+
+```sh
+# Native extension
 cargo build --release -p geolite-sqlite
 
-# WASM
+# WASM extension
 cargo build --release -p geolite-sqlite --target wasm32-unknown-unknown
 
-# Run tests
+# Workspace tests
 cargo test --workspace
 ```
 
-## Contributor workflow
+## Development
 
-Install the Rust-powered pre-commit hook:
+Install hooks:
 
 ```sh
 cargo run -p xtask -- install-hooks
 ```
 
-Run the same local pre-commit checks manually:
+Run checks locally:
 
 ```sh
-# Fast default checks
 cargo run -p xtask -- precommit
-
-# Full checks (includes PostGIS + wasm tests)
 cargo run -p xtask -- precommit --full
 ```
 
-`--full` requires Docker plus the `wasm32-unknown-unknown` target and `wasm-bindgen-test-runner` installed.
-
-CI executes the same hook checks plus an extended matrix:
-
-- formatting and clippy checks
-- workspace-wide clippy (`--workspace` and `--workspace --all-features`)
-- native tests
-- PostGIS testcontainer integration tests
-- wasm tests
-- MSRV checks
-- cross-platform compile checks (Linux/macOS/Windows)
+`precommit --full` requires Docker plus `wasm32-unknown-unknown` and `wasm-bindgen-test-runner`.
 
 ## Storage format
 
-Geometries are stored as EWKB (Extended Well-Known Binary) BLOBs, the same wire format used by PostGIS. This means existing tools that read EWKB can interoperate with geolite databases directly.
+Geometries are stored as EWKB (Extended Well-Known Binary) BLOBs, matching the PostGIS wire format.
 
 ## License
 

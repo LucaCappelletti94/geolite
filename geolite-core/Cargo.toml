@@ -5,6 +5,7 @@ edition      = "2021"
 rust-version.workspace = true
 license      = "MIT OR Apache-2.0"
 description  = "Pure-Rust PostGIS-compatible spatial functions (no SQLite dependency)"
+readme       = "../README.md"
 
 [lib]
 name = "geolite_core"
