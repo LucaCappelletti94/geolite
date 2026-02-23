@@ -13,6 +13,29 @@
 //!     .filter(st_dwithin(features::geom, st_point(lon, lat), 1000.0))
 //!     .load(&mut conn)?;
 //! ```
+//!
+//! The relate aliases are available in free-function form:
+//!
+//! ```rust,ignore
+//! use diesel::prelude::*;
+//! use geolite_diesel::functions::*;
+//!
+//! let a = st_geomfromtext("POINT(1 1)");
+//! let b = st_geomfromtext("POLYGON((0 0,0 3,3 3,3 0,0 0))");
+//! let pattern = "T*****FF*";
+//!
+//! // Alias for ST_Relate(a, b, pattern)
+//! let via_geoms: Option<bool> = diesel::dsl::select(st_relate_match_geoms(a, b, pattern))
+//!     .get_result(&mut conn)?;
+//!
+//! // Alias for ST_RelateMatch(matrix, pattern)
+//! let matrix = st_relate(
+//!     st_geomfromtext("POINT(1 1)"),
+//!     st_geomfromtext("POLYGON((0 0,0 3,3 3,3 0,0 0))"),
+//! );
+//! let via_matrix: Option<bool> = diesel::dsl::select(st_relate_match(matrix, pattern))
+//!     .get_result(&mut conn)?;
+//! ```
 
 use crate::types::Geometry;
 use diesel::sql_types::{Binary, Double, Integer, Nullable, Text};
@@ -46,8 +69,18 @@ diesel::define_sql_function! {
 }
 
 diesel::define_sql_function! {
+    /// Serialize a geometry BLOB to EWKB bytes (preserves SRID).
+    fn st_asewkb(geom: Nullable<Geometry>) -> Nullable<Binary>;
+}
+
+diesel::define_sql_function! {
     /// Parse ISO WKB bytes into a geometry BLOB.
     fn st_geomfromwkb(wkb: Nullable<Binary>) -> Nullable<Geometry>;
+}
+
+diesel::define_sql_function! {
+    /// Parse EWKB bytes into a geometry BLOB.
+    fn st_geomfromewkb(ewkb: Nullable<Binary>) -> Nullable<Geometry>;
 }
 
 diesel::define_sql_function! {
@@ -75,6 +108,21 @@ diesel::define_sql_function! {
 diesel::define_sql_function! {
     /// Construct a web-mercator tile envelope for the given zoom/x/y.
     fn st_tileenvelope(zoom: Integer, x: Integer, y: Integer) -> Geometry;
+}
+
+diesel::define_sql_function! {
+    /// Construct a LineString from two Point geometries.
+    fn st_makeline(a: Nullable<Geometry>, b: Nullable<Geometry>) -> Nullable<Geometry>;
+}
+
+diesel::define_sql_function! {
+    /// Construct a Polygon from a shell LineString.
+    fn st_makepolygon(shell: Nullable<Geometry>) -> Nullable<Geometry>;
+}
+
+diesel::define_sql_function! {
+    /// Combine two geometries into a GeometryCollection.
+    fn st_collect(a: Nullable<Geometry>, b: Nullable<Geometry>) -> Nullable<Geometry>;
 }
 
 // ── Accessors ─────────────────────────────────────────────────────────────────
@@ -105,8 +153,103 @@ diesel::define_sql_function! {
 }
 
 diesel::define_sql_function! {
-    /// Return 1 if the geometry is empty, 0 otherwise.
-    fn st_isempty(geom: Nullable<Geometry>) -> Nullable<Integer>;
+    /// Return whether the geometry is empty.
+    fn st_isempty(geom: Nullable<Geometry>) -> Nullable<diesel::sql_types::Bool>;
+}
+
+diesel::define_sql_function! {
+    /// Return the number of coordinate dimensions (2, 3, or 4).
+    fn st_ndims(geom: Nullable<Geometry>) -> Nullable<diesel::sql_types::SmallInt>;
+}
+
+diesel::define_sql_function! {
+    /// Return the coordinate dimension (same as `ST_NDims` for non-curve types).
+    fn st_coorddim(geom: Nullable<Geometry>) -> Nullable<diesel::sql_types::SmallInt>;
+}
+
+diesel::define_sql_function! {
+    /// Return the Z/M dimensionality flag (0=2D, 1=M, 2=Z, 3=ZM).
+    fn st_zmflag(geom: Nullable<Geometry>) -> Nullable<diesel::sql_types::SmallInt>;
+}
+
+diesel::define_sql_function! {
+    /// Return the EWKB memory size in bytes.
+    fn st_memsize(geom: Nullable<Geometry>) -> Nullable<diesel::sql_types::BigInt>;
+}
+
+diesel::define_sql_function! {
+    /// Return whether geometry is valid.
+    fn st_isvalid(geom: Nullable<Geometry>) -> Nullable<diesel::sql_types::Bool>;
+}
+
+diesel::define_sql_function! {
+    /// Return the validity reason string.
+    fn st_isvalidreason(geom: Nullable<Geometry>) -> Nullable<Text>;
+}
+
+diesel::define_sql_function! {
+    /// Return the number of points in a LineString.
+    fn st_numpoints(geom: Nullable<Geometry>) -> Nullable<Integer>;
+}
+
+diesel::define_sql_function! {
+    /// Return the total point count across any geometry type.
+    fn st_npoints(geom: Nullable<Geometry>) -> Nullable<Integer>;
+}
+
+diesel::define_sql_function! {
+    /// Return the number of component geometries.
+    fn st_numgeometries(geom: Nullable<Geometry>) -> Nullable<Integer>;
+}
+
+diesel::define_sql_function! {
+    /// Return the number of interior rings in a Polygon.
+    fn st_numinteriorrings(geom: Nullable<Geometry>) -> Nullable<Integer>;
+}
+
+diesel::define_sql_function! {
+    /// Return the total number of rings in a Polygon.
+    fn st_numrings(geom: Nullable<Geometry>) -> Nullable<Integer>;
+}
+
+diesel::define_sql_function! {
+    /// Return the topological dimension (0, 1, or 2).
+    fn st_dimension(geom: Nullable<Geometry>) -> Nullable<Integer>;
+}
+
+diesel::define_sql_function! {
+    /// Return the axis-aligned envelope of a geometry.
+    fn st_envelope(geom: Nullable<Geometry>) -> Nullable<Geometry>;
+}
+
+diesel::define_sql_function! {
+    /// Return the 1-based Nth point of a LineString.
+    fn st_pointn(geom: Nullable<Geometry>, n: Integer) -> Nullable<Geometry>;
+}
+
+diesel::define_sql_function! {
+    /// Return the first point of a LineString.
+    fn st_startpoint(geom: Nullable<Geometry>) -> Nullable<Geometry>;
+}
+
+diesel::define_sql_function! {
+    /// Return the last point of a LineString.
+    fn st_endpoint(geom: Nullable<Geometry>) -> Nullable<Geometry>;
+}
+
+diesel::define_sql_function! {
+    /// Return the exterior ring of a Polygon.
+    fn st_exteriorring(geom: Nullable<Geometry>) -> Nullable<Geometry>;
+}
+
+diesel::define_sql_function! {
+    /// Return the 1-based Nth interior ring of a Polygon.
+    fn st_interiorringn(geom: Nullable<Geometry>, n: Integer) -> Nullable<Geometry>;
+}
+
+diesel::define_sql_function! {
+    /// Return the 1-based Nth geometry from a collection.
+    fn st_geometryn(geom: Nullable<Geometry>, n: Integer) -> Nullable<Geometry>;
 }
 
 diesel::define_sql_function! {
@@ -206,63 +349,86 @@ diesel::define_sql_function! {
 // ── Predicates ────────────────────────────────────────────────────────────────
 
 diesel::define_sql_function! {
-    /// Return 1 if geometries share any interior or boundary points.
-    fn st_intersects(a: Nullable<Geometry>, b: Nullable<Geometry>) -> Nullable<Integer>;
+    /// Return whether geometries share any interior or boundary points.
+    fn st_intersects(a: Nullable<Geometry>, b: Nullable<Geometry>) -> Nullable<diesel::sql_types::Bool>;
 }
 
 diesel::define_sql_function! {
-    /// Return 1 if geometry A fully contains geometry B.
-    fn st_contains(a: Nullable<Geometry>, b: Nullable<Geometry>) -> Nullable<Integer>;
+    /// Return whether geometry A fully contains geometry B.
+    fn st_contains(a: Nullable<Geometry>, b: Nullable<Geometry>) -> Nullable<diesel::sql_types::Bool>;
 }
 
 diesel::define_sql_function! {
-    /// Return 1 if geometry A is fully contained within geometry B.
-    fn st_within(a: Nullable<Geometry>, b: Nullable<Geometry>) -> Nullable<Integer>;
+    /// Return whether geometry A is fully contained within geometry B.
+    fn st_within(a: Nullable<Geometry>, b: Nullable<Geometry>) -> Nullable<diesel::sql_types::Bool>;
 }
 
 diesel::define_sql_function! {
-    /// Return 1 if A covers B (every point of B lies within A).
-    fn st_covers(a: Nullable<Geometry>, b: Nullable<Geometry>) -> Nullable<Integer>;
+    /// Return whether A covers B (every point of B lies within A).
+    fn st_covers(a: Nullable<Geometry>, b: Nullable<Geometry>) -> Nullable<diesel::sql_types::Bool>;
 }
 
 diesel::define_sql_function! {
-    /// Return 1 if A is covered by B.
-    fn st_coveredby(a: Nullable<Geometry>, b: Nullable<Geometry>) -> Nullable<Integer>;
+    /// Return whether A is covered by B.
+    fn st_coveredby(a: Nullable<Geometry>, b: Nullable<Geometry>) -> Nullable<diesel::sql_types::Bool>;
 }
 
 diesel::define_sql_function! {
-    /// Return 1 if geometries share no points.
-    fn st_disjoint(a: Nullable<Geometry>, b: Nullable<Geometry>) -> Nullable<Integer>;
+    /// Return whether geometries share no points.
+    fn st_disjoint(a: Nullable<Geometry>, b: Nullable<Geometry>) -> Nullable<diesel::sql_types::Bool>;
 }
 
 diesel::define_sql_function! {
-    /// Return 1 if geometries are spatially equal.
-    fn st_equals(a: Nullable<Geometry>, b: Nullable<Geometry>) -> Nullable<Integer>;
+    /// Return whether geometries are spatially equal.
+    fn st_equals(a: Nullable<Geometry>, b: Nullable<Geometry>) -> Nullable<diesel::sql_types::Bool>;
 }
 
 diesel::define_sql_function! {
-    /// Return 1 if A and B are within the given Euclidean distance.
-    fn st_dwithin(a: Nullable<Geometry>, b: Nullable<Geometry>, distance: Double) -> Nullable<Integer>;
+    /// Return whether A and B are within the given Euclidean distance.
+    fn st_dwithin(a: Nullable<Geometry>, b: Nullable<Geometry>, distance: Double) -> Nullable<diesel::sql_types::Bool>;
 }
 
 diesel::define_sql_function! {
-    /// Return 1 if geometries share boundary points but no interior points.
-    fn st_touches(a: Nullable<Geometry>, b: Nullable<Geometry>) -> Nullable<Integer>;
+    /// Return whether geometries share boundary points but no interior points.
+    fn st_touches(a: Nullable<Geometry>, b: Nullable<Geometry>) -> Nullable<diesel::sql_types::Bool>;
 }
 
 diesel::define_sql_function! {
-    /// Return 1 if geometries cross each other (intersect with a lower-dimensional result).
-    fn st_crosses(a: Nullable<Geometry>, b: Nullable<Geometry>) -> Nullable<Integer>;
+    /// Return whether geometries cross each other (intersect with a lower-dimensional result).
+    fn st_crosses(a: Nullable<Geometry>, b: Nullable<Geometry>) -> Nullable<diesel::sql_types::Bool>;
 }
 
 diesel::define_sql_function! {
-    /// Return 1 if geometries overlap (same dimension, intersect but neither contains the other).
-    fn st_overlaps(a: Nullable<Geometry>, b: Nullable<Geometry>) -> Nullable<Integer>;
+    /// Return whether geometries overlap (same dimension, intersect but neither contains the other).
+    fn st_overlaps(a: Nullable<Geometry>, b: Nullable<Geometry>) -> Nullable<diesel::sql_types::Bool>;
 }
 
 diesel::define_sql_function! {
     /// Return the DE-9IM relationship matrix string between two geometries.
     fn st_relate(a: Nullable<Geometry>, b: Nullable<Geometry>) -> Nullable<Text>;
+}
+
+diesel::define_sql_function! {
+    /// Return whether the DE-9IM pattern matches for the two geometries.
+    #[sql_name = "ST_Relate"]
+    fn st_relate_pattern(a: Nullable<Geometry>, b: Nullable<Geometry>, pattern: Text) -> Nullable<diesel::sql_types::Bool>;
+}
+
+diesel::define_sql_function! {
+    /// Alias of `ST_Relate(a, b, pattern)` matching core naming.
+    #[sql_name = "ST_Relate"]
+    fn st_relate_match_geoms(a: Nullable<Geometry>, b: Nullable<Geometry>, pattern: Text) -> Nullable<diesel::sql_types::Bool>;
+}
+
+diesel::define_sql_function! {
+    /// Return whether the DE-9IM matrix string matches the pattern.
+    fn st_relatematch(matrix: Text, pattern: Text) -> Nullable<diesel::sql_types::Bool>;
+}
+
+diesel::define_sql_function! {
+    /// Alias of `ST_RelateMatch(matrix, pattern)` matching core naming.
+    #[sql_name = "st_relatematch"]
+    fn st_relate_match(matrix: Text, pattern: Text) -> Nullable<diesel::sql_types::Bool>;
 }
 
 // ── Geography variants ────────────────────────────────────────────────────────

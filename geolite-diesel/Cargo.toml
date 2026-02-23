@@ -6,20 +6,25 @@ rust-version.workspace = true
 license      = "MIT OR Apache-2.0"
 description  = "Diesel ORM integration for geolite spatial types (Geometry, Geography)"
 readme       = "../README.md"
+repository   = "https://github.com/LucaCappelletti94/geolite"
+homepage     = "https://github.com/LucaCappelletti94/geolite"
+documentation = "https://docs.rs/geolite-diesel"
+keywords     = ["geospatial", "diesel", "postgis", "ewkb", "sqlite"]
+categories   = ["database", "api-bindings"]
 autotests    = false
 
 [lib]
 name = "geolite_diesel"
 
 [dependencies]
-geolite-core = { path = "../geolite-core" }
+geolite-core = { version = "0.1.0", path = "../geolite-core" }
 geo           = { version = "0.32", default-features = false }
 # Diesel base (no backend enabled) — backends are opt-in via features.
 diesel = { version = "2", default-features = false }
 
 [dev-dependencies]
-geolite-core = { path = "../geolite-core" }
-geolite-sqlite = { path = "../geolite-sqlite" }
+geolite-core = { version = "0.1.0", path = "../geolite-core" }
+geolite-sqlite = { version = "0.1.0", path = "../geolite-sqlite" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 libsqlite3-sys = { version = ">=0.17.2, <0.36.0" }

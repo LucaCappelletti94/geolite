@@ -45,6 +45,30 @@ fn ewkb_round_trip() {
 }
 
 #[test]
+fn ewkb_round_trip_preserves_zm_payload() {
+    let db = TestDb::open();
+    let hex = db.query_text(
+        "SELECT hex(ST_AsEWKB(ST_GeomFromEWKB(X'01010000C0000000000000F03F000000000000004000000000000008400000000000001040')))",
+    );
+    assert_eq!(
+        hex,
+        "01010000C0000000000000F03F000000000000004000000000000008400000000000001040"
+    );
+}
+
+#[test]
+fn ewkb_round_trip_preserves_big_endian_payload() {
+    let db = TestDb::open();
+    let hex = db.query_text(
+        "SELECT hex(ST_AsEWKB(ST_GeomFromEWKB(X'00C00000013FF0000000000000400000000000000040080000000000004010000000000000')))",
+    );
+    assert_eq!(
+        hex,
+        "00C00000013FF0000000000000400000000000000040080000000000004010000000000000"
+    );
+}
+
+#[test]
 fn ewkt_round_trip() {
     let db = TestDb::open();
     let ewkt = db.query_text("SELECT ST_AsEWKT(ST_GeomFromText('POINT(1 2)', 4326))");

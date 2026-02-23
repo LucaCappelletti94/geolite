@@ -1,13 +1,13 @@
 //! EWKB (Extended Well-Known Binary) parser and writer.
 //!
-//! Wire format (little-endian):
-//!   [0x01]        — byte order marker
-//!   [u32 LE]      — geometry type with flags
+//! Wire format:
+//!   [0x01|0x00]   — byte order marker (little-endian or big-endian)
+//!   [u32]         — geometry type with flags (in the declared byte order)
 //!                   Bit 29 (0x20000000): SRID present
 //!                   Bit 31 (0x80000000): Z dimension
 //!                   Bit 30 (0x40000000): M dimension
 //!                   Bits 0–28: geometry type (1=Point, 2=LineString, …)
-//!   [i32 LE]      — SRID (only when SRID flag set)
+//!   [i32]         — SRID (only when SRID flag set, in declared byte order)
 //!   …             — ISO WKB geometry payload
 
 use geo::Geometry;
@@ -43,6 +43,8 @@ pub struct EwkbHeader {
     pub has_m: bool,
     /// Byte offset where the geometry payload starts (after header + optional SRID).
     pub data_offset: usize,
+    /// Whether numeric header fields are encoded in little-endian order.
+    pub little_endian: bool,
 }
 
 /// Peek at the EWKB header without fully parsing the geometry.
@@ -62,11 +64,29 @@ pub fn parse_ewkb_header(blob: &[u8]) -> Result<EwkbHeader> {
     if blob.len() < 5 {
         return Err(GeoLiteError::InvalidEwkb("blob too short"));
     }
-    if blob[0] != 0x01 {
-        return Err(GeoLiteError::InvalidEwkb("big-endian EWKB not supported"));
-    }
 
-    let raw_type = u32::from_le_bytes([blob[1], blob[2], blob[3], blob[4]]);
+    let little_endian = match blob[0] {
+        0x01 => true,
+        0x00 => false,
+        _ => return Err(GeoLiteError::InvalidEwkb("invalid byte order marker")),
+    };
+
+    let read_u32 = |bytes: [u8; 4]| {
+        if little_endian {
+            u32::from_le_bytes(bytes)
+        } else {
+            u32::from_be_bytes(bytes)
+        }
+    };
+    let read_i32 = |bytes: [u8; 4]| {
+        if little_endian {
+            i32::from_le_bytes(bytes)
+        } else {
+            i32::from_be_bytes(bytes)
+        }
+    };
+
+    let raw_type = read_u32([blob[1], blob[2], blob[3], blob[4]]);
     let has_srid = (raw_type & EWKB_SRID_FLAG) != 0;
     let has_z = (raw_type & EWKB_Z_FLAG) != 0;
     let has_m = (raw_type & EWKB_M_FLAG) != 0;
@@ -79,7 +99,7 @@ pub fn parse_ewkb_header(blob: &[u8]) -> Result<EwkbHeader> {
                 "SRID flag set but blob too short",
             ));
         }
-        let s = i32::from_le_bytes([blob[5], blob[6], blob[7], blob[8]]);
+        let s = read_i32([blob[5], blob[6], blob[7], blob[8]]);
         offset += 4;
         Some(s)
     } else {
@@ -92,6 +112,7 @@ pub fn parse_ewkb_header(blob: &[u8]) -> Result<EwkbHeader> {
         has_z,
         has_m,
         data_offset: offset,
+        little_endian,
     })
 }
 
@@ -143,11 +164,6 @@ pub fn ensure_matching_srid(left: Option<i32>, right: Option<i32>) -> Result<Opt
 /// ```
 pub fn parse_ewkb(blob: &[u8]) -> Result<(Geometry<f64>, Option<i32>)> {
     let header = parse_ewkb_header(blob)?;
-    if header.has_z || header.has_m {
-        return Err(GeoLiteError::InvalidInput(
-            "Z/M geometries are not supported".to_string(),
-        ));
-    }
     let geom = Ewkb(blob).to_geo()?;
     Ok((geom, header.srid))
 }
@@ -207,12 +223,21 @@ pub fn set_srid(blob: &[u8], new_srid: i32) -> Result<Vec<u8>> {
     let header = parse_ewkb_header(blob)?;
 
     let mut out = Vec::with_capacity(blob.len() + 4);
-    out.push(0x01); // byte order
+    out.push(if header.little_endian { 0x01 } else { 0x00 });
 
-    let raw_type = u32::from_le_bytes([blob[1], blob[2], blob[3], blob[4]]);
+    let raw_type = if header.little_endian {
+        u32::from_le_bytes([blob[1], blob[2], blob[3], blob[4]])
+    } else {
+        u32::from_be_bytes([blob[1], blob[2], blob[3], blob[4]])
+    };
     let ewkb_type = raw_type | EWKB_SRID_FLAG;
-    out.extend_from_slice(&ewkb_type.to_le_bytes());
-    out.extend_from_slice(&new_srid.to_le_bytes());
+    if header.little_endian {
+        out.extend_from_slice(&ewkb_type.to_le_bytes());
+        out.extend_from_slice(&new_srid.to_le_bytes());
+    } else {
+        out.extend_from_slice(&ewkb_type.to_be_bytes());
+        out.extend_from_slice(&new_srid.to_be_bytes());
+    }
 
     // Skip old SRID bytes if they were present, copy remaining payload
     out.extend_from_slice(&blob[header.data_offset..]);
@@ -255,9 +280,42 @@ mod tests {
     }
 
     #[test]
-    fn header_big_endian_rejected() {
-        // big-endian byte order marker = 0x00
-        assert!(parse_ewkb_header(&[0x00, 0x01, 0x00, 0x00, 0x00]).is_err());
+    fn header_big_endian_point_without_srid() {
+        // big-endian: byte-order + type(1) + x(1.0) + y(2.0)
+        let mut blob = vec![0x00];
+        blob.extend_from_slice(&WKB_POINT.to_be_bytes());
+        blob.extend_from_slice(&1.0f64.to_be_bytes());
+        blob.extend_from_slice(&2.0f64.to_be_bytes());
+
+        let hdr = parse_ewkb_header(&blob).unwrap();
+        assert_eq!(hdr.geom_type, WKB_POINT);
+        assert_eq!(hdr.srid, None);
+        assert!(!hdr.has_z);
+        assert!(!hdr.has_m);
+        assert_eq!(hdr.data_offset, 5);
+        assert!(!hdr.little_endian);
+    }
+
+    #[test]
+    fn header_big_endian_point_with_srid() {
+        // big-endian EWKB type with SRID flag.
+        let mut blob = vec![0x00];
+        let typ = WKB_POINT | EWKB_SRID_FLAG;
+        blob.extend_from_slice(&typ.to_be_bytes());
+        blob.extend_from_slice(&4326i32.to_be_bytes());
+        blob.extend_from_slice(&1.0f64.to_be_bytes());
+        blob.extend_from_slice(&2.0f64.to_be_bytes());
+
+        let hdr = parse_ewkb_header(&blob).unwrap();
+        assert_eq!(hdr.geom_type, WKB_POINT);
+        assert_eq!(hdr.srid, Some(4326));
+        assert_eq!(hdr.data_offset, 9);
+        assert!(!hdr.little_endian);
+    }
+
+    #[test]
+    fn header_invalid_byte_order_marker() {
+        assert!(parse_ewkb_header(&[0x02, 0x01, 0x00, 0x00, 0x00]).is_err());
     }
 
     #[test]
@@ -358,6 +416,55 @@ mod tests {
         let (geom2, srid2) = parse_ewkb(&blob2).unwrap();
         assert_eq!(srid, srid2);
         assert_eq!(format!("{geom:?}"), format!("{geom2:?}"));
+    }
+
+    #[test]
+    fn parse_big_endian_ewkb_point() {
+        let mut blob = vec![0x00];
+        let typ = WKB_POINT | EWKB_SRID_FLAG;
+        blob.extend_from_slice(&typ.to_be_bytes());
+        blob.extend_from_slice(&4326i32.to_be_bytes());
+        blob.extend_from_slice(&10.0f64.to_be_bytes());
+        blob.extend_from_slice(&(-20.0f64).to_be_bytes());
+
+        let (geom, srid) = parse_ewkb(&blob).unwrap();
+        assert_eq!(srid, Some(4326));
+        assert_eq!(
+            geom,
+            Geometry::Point(geo::Point::new(10.0, -20.0)),
+            "big-endian EWKB should parse into XY geometry"
+        );
+    }
+
+    #[test]
+    fn parse_ewkb_with_zm_point_drops_extra_dimensions() {
+        let mut blob = vec![0x01];
+        let typ = WKB_POINT | EWKB_Z_FLAG | EWKB_M_FLAG;
+        blob.extend_from_slice(&typ.to_le_bytes());
+        blob.extend_from_slice(&1.0f64.to_le_bytes());
+        blob.extend_from_slice(&2.0f64.to_le_bytes());
+        blob.extend_from_slice(&3.0f64.to_le_bytes()); // Z
+        blob.extend_from_slice(&4.0f64.to_le_bytes()); // M
+
+        let (geom, srid) = parse_ewkb(&blob).unwrap();
+        assert_eq!(srid, None);
+        assert_eq!(geom, Geometry::Point(geo::Point::new(1.0, 2.0)));
+    }
+
+    #[test]
+    fn set_srid_preserves_big_endian_header_order() {
+        let mut blob = vec![0x00];
+        blob.extend_from_slice(&WKB_POINT.to_be_bytes());
+        blob.extend_from_slice(&7.0f64.to_be_bytes());
+        blob.extend_from_slice(&8.0f64.to_be_bytes());
+
+        let updated = set_srid(&blob, 4326).unwrap();
+        assert_eq!(updated[0], 0x00, "byte-order marker must stay big-endian");
+        assert_eq!(extract_srid(&updated), Some(4326));
+
+        let (geom, srid) = parse_ewkb(&updated).unwrap();
+        assert_eq!(srid, Some(4326));
+        assert_eq!(geom, Geometry::Point(geo::Point::new(7.0, 8.0)));
     }
 
     #[test]

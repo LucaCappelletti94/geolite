@@ -10,6 +10,14 @@ use std::sync::Once;
 use diesel::prelude::*;
 use diesel::sql_query;
 
+mod predicate_bool_helpers;
+
+#[derive(QueryableByName, Debug)]
+struct PlanRow {
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    detail: String,
+}
+
 // ── Auto-extension registration ──────────────────────────────────────────────
 
 static INIT: Once = Once::new();
@@ -35,10 +43,16 @@ fn conn() -> SqliteConnection {
 include!("diesel_test_helpers.rs");
 define_diesel_sqlite_tests!(test);
 
-// ── Native-only: spatial index performance ───────────────────────────────────
+#[test]
+fn shared_predicates_and_relate_bool_semantics() {
+    let mut c = conn();
+    predicate_bool_helpers::assert_predicates_and_relate_bool_semantics_sqlite(&mut c);
+}
+
+// ── Native-only: deterministic spatial index behavior ───────────────────────
 
 #[test]
-fn spatial_index_performance() {
+fn spatial_index_narrows_candidates_deterministically() {
     let mut c = conn();
 
     // Create table with 10K points on a 100x100 grid
@@ -66,12 +80,11 @@ fn spatial_index_performance() {
     let non_indexed_sql = "SELECT COUNT(*) AS val FROM perf_grid
         WHERE ST_Intersects(geom, ST_MakeEnvelope(20, 20, 30, 30)) = 1";
 
-    // Measure non-indexed
-    let start = std::time::Instant::now();
-    for _ in 0..10 {
-        let _: I32Result = sql_query(non_indexed_sql).get_result(&mut c).unwrap();
-    }
-    let non_indexed_time = start.elapsed();
+    // Baseline table cardinality (all rows)
+    let full_scan_count: I32Result = sql_query("SELECT COUNT(*) AS val FROM perf_grid")
+        .get_result(&mut c)
+        .unwrap();
+    assert_eq!(full_scan_count.val, Some(10_000));
 
     // Create spatial index
     sql_query("SELECT CreateSpatialIndex('perf_grid', 'geom')")
@@ -81,25 +94,50 @@ fn spatial_index_performance() {
     // Indexed query: R-tree join
     let indexed_sql = "SELECT COUNT(*) AS val FROM perf_grid g
         JOIN perf_grid_geom_rtree r ON g.rowid = r.id
-        WHERE r.xmin >= 20 AND r.xmax <= 30 AND r.ymin >= 20 AND r.ymax <= 30
+         WHERE r.xmin >= 20 AND r.xmax <= 30 AND r.ymin >= 20 AND r.ymax <= 30
         AND ST_Intersects(g.geom, ST_MakeEnvelope(20, 20, 30, 30)) = 1";
 
-    // Measure indexed
-    let start = std::time::Instant::now();
-    for _ in 0..10 {
-        let _: I32Result = sql_query(indexed_sql).get_result(&mut c).unwrap();
-    }
-    let indexed_time = start.elapsed();
+    // Deterministic coarse candidate count from the R-tree join only.
+    let candidate_sql = "SELECT COUNT(*) AS val FROM perf_grid g
+        JOIN perf_grid_geom_rtree r ON g.rowid = r.id
+        WHERE r.xmin >= 20 AND r.xmax <= 30 AND r.ymin >= 20 AND r.ymax <= 30";
+    let candidate_count: I32Result = sql_query(candidate_sql).get_result(&mut c).unwrap();
+    assert_eq!(candidate_count.val, Some(121));
+    assert!(
+        candidate_count
+            .val
+            .expect("candidate count should not be NULL")
+            < full_scan_count
+                .val
+                .expect("full scan count should not be NULL")
+    );
 
-    // Verify correctness: both should return 11*11 = 121 points (20..=30 inclusive)
+    // Verify correctness: both should return 11*11 = 121 points (20..=30 inclusive).
     let non_indexed_count: I32Result = sql_query(non_indexed_sql).get_result(&mut c).unwrap();
     let indexed_count: I32Result = sql_query(indexed_sql).get_result(&mut c).unwrap();
     assert_eq!(non_indexed_count.val, indexed_count.val);
     assert_eq!(non_indexed_count.val, Some(121));
 
-    // Assert indexed is at least 2x faster
+    // Query-plan sanity checks (deterministic structure, not wall-clock timing).
+    let non_indexed_plan: Vec<PlanRow> = sql_query(format!("EXPLAIN QUERY PLAN {non_indexed_sql}"))
+        .load(&mut c)
+        .unwrap();
     assert!(
-        indexed_time < non_indexed_time / 2,
-        "Expected indexed ({indexed_time:?}) to be at least 2x faster than non-indexed ({non_indexed_time:?})"
+        non_indexed_plan
+            .iter()
+            .any(|row| row.detail.contains("SCAN perf_grid")),
+        "expected a table scan in non-indexed plan, got: {non_indexed_plan:?}"
+    );
+
+    let indexed_plan: Vec<PlanRow> = sql_query(format!("EXPLAIN QUERY PLAN {indexed_sql}"))
+        .load(&mut c)
+        .unwrap();
+    assert!(
+        indexed_plan.iter().any(|row| {
+            row.detail.contains("perf_grid_geom_rtree")
+                || row.detail.contains("VIRTUAL TABLE INDEX")
+                || row.detail.contains("USING INDEX")
+        }),
+        "expected indexed plan to reference the R-tree/index path, got: {indexed_plan:?}"
     );
 }

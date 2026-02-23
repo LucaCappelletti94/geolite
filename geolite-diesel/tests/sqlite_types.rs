@@ -292,6 +292,12 @@ fn debug_query_st_asbinary() {
 }
 
 #[test]
+fn debug_query_st_asewkb() {
+    use geolite_diesel::functions::*;
+    assert_sql_contains!(diesel::dsl::select(st_asewkb(g!())), "st_asewkb");
+}
+
+#[test]
 fn debug_query_st_geomfromwkb() {
     use geolite_diesel::functions::*;
     let wkb = diesel::dsl::sql::<diesel::sql_types::Nullable<diesel::sql_types::Binary>>("x");
@@ -304,6 +310,25 @@ fn debug_query_st_geomfromwkb_accepts_st_asbinary_output() {
     assert_sql_contains!(
         diesel::dsl::select(st_geomfromwkb(st_asbinary(g!()))),
         "st_geomfromwkb"
+    );
+}
+
+#[test]
+fn debug_query_st_geomfromewkb() {
+    use geolite_diesel::functions::*;
+    let ewkb = diesel::dsl::sql::<diesel::sql_types::Nullable<diesel::sql_types::Binary>>("x");
+    assert_sql_contains!(
+        diesel::dsl::select(st_geomfromewkb(ewkb)),
+        "st_geomfromewkb"
+    );
+}
+
+#[test]
+fn debug_query_st_geomfromewkb_accepts_st_asewkb_output() {
+    use geolite_diesel::functions::*;
+    assert_sql_contains!(
+        diesel::dsl::select(st_geomfromewkb(st_asewkb(g!()))),
+        "st_geomfromewkb"
     );
 }
 
@@ -348,6 +373,24 @@ fn debug_query_st_tileenvelope() {
     );
 }
 
+#[test]
+fn debug_query_st_makeline() {
+    use geolite_diesel::functions::*;
+    assert_sql_contains!(diesel::dsl::select(st_makeline(g!(), g!())), "st_makeline");
+}
+
+#[test]
+fn debug_query_st_makepolygon() {
+    use geolite_diesel::functions::*;
+    assert_sql_contains!(diesel::dsl::select(st_makepolygon(g!())), "st_makepolygon");
+}
+
+#[test]
+fn debug_query_st_collect() {
+    use geolite_diesel::functions::*;
+    assert_sql_contains!(diesel::dsl::select(st_collect(g!(), g!())), "st_collect");
+}
+
 // ── Accessor functions ───────────────────────────────────────────────────────
 
 #[test]
@@ -387,6 +430,138 @@ fn debug_query_st_y() {
 fn debug_query_st_isempty() {
     use geolite_diesel::functions::*;
     assert_sql_contains!(diesel::dsl::select(st_isempty(g!())), "st_isempty");
+}
+
+#[test]
+fn debug_query_st_ndims() {
+    use geolite_diesel::functions::*;
+    assert_sql_contains!(diesel::dsl::select(st_ndims(g!())), "st_ndims");
+}
+
+#[test]
+fn debug_query_st_coorddim() {
+    use geolite_diesel::functions::*;
+    assert_sql_contains!(diesel::dsl::select(st_coorddim(g!())), "st_coorddim");
+}
+
+#[test]
+fn debug_query_st_zmflag() {
+    use geolite_diesel::functions::*;
+    assert_sql_contains!(diesel::dsl::select(st_zmflag(g!())), "st_zmflag");
+}
+
+#[test]
+fn debug_query_st_memsize() {
+    use geolite_diesel::functions::*;
+    assert_sql_contains!(diesel::dsl::select(st_memsize(g!())), "st_memsize");
+}
+
+#[test]
+fn debug_query_st_isvalid() {
+    use geolite_diesel::functions::*;
+    assert_sql_contains!(diesel::dsl::select(st_isvalid(g!())), "st_isvalid");
+}
+
+#[test]
+fn debug_query_st_isvalidreason() {
+    use geolite_diesel::functions::*;
+    assert_sql_contains!(
+        diesel::dsl::select(st_isvalidreason(g!())),
+        "st_isvalidreason"
+    );
+}
+
+#[test]
+fn debug_query_st_numpoints() {
+    use geolite_diesel::functions::*;
+    assert_sql_contains!(diesel::dsl::select(st_numpoints(g!())), "st_numpoints");
+}
+
+#[test]
+fn debug_query_st_npoints() {
+    use geolite_diesel::functions::*;
+    assert_sql_contains!(diesel::dsl::select(st_npoints(g!())), "st_npoints");
+}
+
+#[test]
+fn debug_query_st_numgeometries() {
+    use geolite_diesel::functions::*;
+    assert_sql_contains!(
+        diesel::dsl::select(st_numgeometries(g!())),
+        "st_numgeometries"
+    );
+}
+
+#[test]
+fn debug_query_st_numinteriorrings() {
+    use geolite_diesel::functions::*;
+    assert_sql_contains!(
+        diesel::dsl::select(st_numinteriorrings(g!())),
+        "st_numinteriorrings"
+    );
+}
+
+#[test]
+fn debug_query_st_numrings() {
+    use geolite_diesel::functions::*;
+    assert_sql_contains!(diesel::dsl::select(st_numrings(g!())), "st_numrings");
+}
+
+#[test]
+fn debug_query_st_dimension() {
+    use geolite_diesel::functions::*;
+    assert_sql_contains!(diesel::dsl::select(st_dimension(g!())), "st_dimension");
+}
+
+#[test]
+fn debug_query_st_envelope() {
+    use geolite_diesel::functions::*;
+    assert_sql_contains!(diesel::dsl::select(st_envelope(g!())), "st_envelope");
+}
+
+#[test]
+fn debug_query_st_pointn() {
+    use geolite_diesel::functions::*;
+    assert_sql_contains!(diesel::dsl::select(st_pointn(g!(), i!())), "st_pointn");
+}
+
+#[test]
+fn debug_query_st_startpoint() {
+    use geolite_diesel::functions::*;
+    assert_sql_contains!(diesel::dsl::select(st_startpoint(g!())), "st_startpoint");
+}
+
+#[test]
+fn debug_query_st_endpoint() {
+    use geolite_diesel::functions::*;
+    assert_sql_contains!(diesel::dsl::select(st_endpoint(g!())), "st_endpoint");
+}
+
+#[test]
+fn debug_query_st_exteriorring() {
+    use geolite_diesel::functions::*;
+    assert_sql_contains!(
+        diesel::dsl::select(st_exteriorring(g!())),
+        "st_exteriorring"
+    );
+}
+
+#[test]
+fn debug_query_st_interiorringn() {
+    use geolite_diesel::functions::*;
+    assert_sql_contains!(
+        diesel::dsl::select(st_interiorringn(g!(), i!())),
+        "st_interiorringn"
+    );
+}
+
+#[test]
+fn debug_query_st_geometryn() {
+    use geolite_diesel::functions::*;
+    assert_sql_contains!(
+        diesel::dsl::select(st_geometryn(g!(), i!())),
+        "st_geometryn"
+    );
 }
 
 #[test]
@@ -544,6 +719,42 @@ fn debug_query_st_dwithin() {
 fn debug_query_st_relate() {
     use geolite_diesel::functions::*;
     assert_sql_contains!(diesel::dsl::select(st_relate(g!(), g!())), "st_relate");
+}
+
+#[test]
+fn debug_query_st_relate_pattern() {
+    use geolite_diesel::functions::*;
+    assert_sql_contains!(
+        diesel::dsl::select(st_relate_pattern(g!(), g!(), t!())),
+        "st_relate"
+    );
+}
+
+#[test]
+fn debug_query_st_relate_match_geoms() {
+    use geolite_diesel::functions::*;
+    assert_sql_contains!(
+        diesel::dsl::select(st_relate_match_geoms(g!(), g!(), t!())),
+        "st_relate"
+    );
+}
+
+#[test]
+fn debug_query_st_relatematch() {
+    use geolite_diesel::functions::*;
+    assert_sql_contains!(
+        diesel::dsl::select(st_relatematch(t!(), t!())),
+        "st_relatematch"
+    );
+}
+
+#[test]
+fn debug_query_st_relate_match() {
+    use geolite_diesel::functions::*;
+    assert_sql_contains!(
+        diesel::dsl::select(st_relate_match(t!(), t!())),
+        "st_relatematch"
+    );
 }
 
 // ── Geography variant functions ──────────────────────────────────────────────

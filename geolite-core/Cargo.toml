@@ -6,6 +6,11 @@ rust-version.workspace = true
 license      = "MIT OR Apache-2.0"
 description  = "Pure-Rust PostGIS-compatible spatial functions (no SQLite dependency)"
 readme       = "../README.md"
+repository   = "https://github.com/LucaCappelletti94/geolite"
+homepage     = "https://github.com/LucaCappelletti94/geolite"
+documentation = "https://docs.rs/geolite-core"
+keywords     = ["geospatial", "postgis", "wkb", "ewkb", "geometry"]
+categories   = ["algorithms", "science"]
 
 [lib]
 name = "geolite_core"

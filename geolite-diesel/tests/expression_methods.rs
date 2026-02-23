@@ -26,6 +26,12 @@ macro_rules! i {
     };
 }
 
+macro_rules! t {
+    () => {
+        diesel::dsl::sql::<diesel::sql_types::Text>("'T*****FF*'")
+    };
+}
+
 /// Assert method-style and function-style produce identical SQL.
 macro_rules! assert_method_eq_func {
     ($method_expr:expr, $func_expr:expr) => {{
@@ -55,8 +61,30 @@ fn method_st_asbinary() {
 }
 
 #[test]
+fn method_st_asewkb() {
+    assert_method_eq_func!(g!().st_asewkb(), st_asewkb(g!()));
+}
+
+#[test]
 fn method_st_asgeojson() {
     assert_method_eq_func!(g!().st_asgeojson(), st_asgeojson(g!()));
+}
+
+// ── Constructors / transforms ─────────────────────────────────────────────
+
+#[test]
+fn method_st_makeline() {
+    assert_method_eq_func!(g!().st_makeline(g!()), st_makeline(g!(), g!()));
+}
+
+#[test]
+fn method_st_makepolygon() {
+    assert_method_eq_func!(g!().st_makepolygon(), st_makepolygon(g!()));
+}
+
+#[test]
+fn method_st_collect() {
+    assert_method_eq_func!(g!().st_collect(g!()), st_collect(g!(), g!()));
 }
 
 // ── Accessors ───────────────────────────────────────────────────────────────
@@ -89,6 +117,101 @@ fn method_st_y() {
 #[test]
 fn method_st_isempty() {
     assert_method_eq_func!(g!().st_isempty(), st_isempty(g!()));
+}
+
+#[test]
+fn method_st_ndims() {
+    assert_method_eq_func!(g!().st_ndims(), st_ndims(g!()));
+}
+
+#[test]
+fn method_st_coorddim() {
+    assert_method_eq_func!(g!().st_coorddim(), st_coorddim(g!()));
+}
+
+#[test]
+fn method_st_zmflag() {
+    assert_method_eq_func!(g!().st_zmflag(), st_zmflag(g!()));
+}
+
+#[test]
+fn method_st_memsize() {
+    assert_method_eq_func!(g!().st_memsize(), st_memsize(g!()));
+}
+
+#[test]
+fn method_st_isvalid() {
+    assert_method_eq_func!(g!().st_isvalid(), st_isvalid(g!()));
+}
+
+#[test]
+fn method_st_isvalidreason() {
+    assert_method_eq_func!(g!().st_isvalidreason(), st_isvalidreason(g!()));
+}
+
+#[test]
+fn method_st_numpoints() {
+    assert_method_eq_func!(g!().st_numpoints(), st_numpoints(g!()));
+}
+
+#[test]
+fn method_st_npoints() {
+    assert_method_eq_func!(g!().st_npoints(), st_npoints(g!()));
+}
+
+#[test]
+fn method_st_numgeometries() {
+    assert_method_eq_func!(g!().st_numgeometries(), st_numgeometries(g!()));
+}
+
+#[test]
+fn method_st_numinteriorrings() {
+    assert_method_eq_func!(g!().st_numinteriorrings(), st_numinteriorrings(g!()));
+}
+
+#[test]
+fn method_st_numrings() {
+    assert_method_eq_func!(g!().st_numrings(), st_numrings(g!()));
+}
+
+#[test]
+fn method_st_dimension() {
+    assert_method_eq_func!(g!().st_dimension(), st_dimension(g!()));
+}
+
+#[test]
+fn method_st_envelope() {
+    assert_method_eq_func!(g!().st_envelope(), st_envelope(g!()));
+}
+
+#[test]
+fn method_st_pointn() {
+    assert_method_eq_func!(g!().st_pointn(i!()), st_pointn(g!(), i!()));
+}
+
+#[test]
+fn method_st_startpoint() {
+    assert_method_eq_func!(g!().st_startpoint(), st_startpoint(g!()));
+}
+
+#[test]
+fn method_st_endpoint() {
+    assert_method_eq_func!(g!().st_endpoint(), st_endpoint(g!()));
+}
+
+#[test]
+fn method_st_exteriorring() {
+    assert_method_eq_func!(g!().st_exteriorring(), st_exteriorring(g!()));
+}
+
+#[test]
+fn method_st_interiorringn() {
+    assert_method_eq_func!(g!().st_interiorringn(i!()), st_interiorringn(g!(), i!()));
+}
+
+#[test]
+fn method_st_geometryn() {
+    assert_method_eq_func!(g!().st_geometryn(i!()), st_geometryn(g!(), i!()));
 }
 
 #[test]
@@ -209,6 +332,30 @@ fn method_st_dwithin() {
 #[test]
 fn method_st_relate() {
     assert_method_eq_func!(g!().st_relate(g!()), st_relate(g!(), g!()));
+}
+
+#[test]
+fn method_st_relate_pattern() {
+    assert_method_eq_func!(
+        g!().st_relate_pattern(g!(), t!()),
+        st_relate_pattern(g!(), g!(), t!())
+    );
+}
+
+#[test]
+fn method_st_relate_match_geoms() {
+    assert_method_eq_func!(
+        g!().st_relate_match_geoms(g!(), t!()),
+        st_relate_match_geoms(g!(), g!(), t!())
+    );
+}
+
+#[test]
+fn method_st_relate_match() {
+    assert_method_eq_func!(
+        g!().st_relate_match(g!(), t!()),
+        st_relate_match_geoms(g!(), g!(), t!())
+    );
 }
 
 // ── Geography variants ──────────────────────────────────────────────────────

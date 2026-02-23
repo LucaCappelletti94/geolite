@@ -8,7 +8,7 @@ use geozero::wkb::Ewkb;
 use geozero::{CoordDimensions, ToGeo, ToJson, ToWkb, ToWkt};
 
 use crate::error::{GeoLiteError, Result};
-use crate::ewkb::{extract_srid, parse_ewkb, write_ewkb};
+use crate::ewkb::{extract_srid, parse_ewkb, parse_ewkb_header, write_ewkb};
 
 // ── Deserialization helpers ───────────────────────────────────────────────────
 
@@ -45,7 +45,7 @@ pub fn geom_from_wkb(wkb: &[u8], srid: Option<i32>) -> Result<Vec<u8>> {
     write_ewkb(&geom, srid)
 }
 
-/// Pass-through / re-normalise an EWKB blob (validates + strips unknown bits).
+/// Validate and pass through an EWKB blob without rewriting bytes.
 ///
 /// # Example
 ///
@@ -53,12 +53,15 @@ pub fn geom_from_wkb(wkb: &[u8], srid: Option<i32>) -> Result<Vec<u8>> {
 /// use geolite_core::functions::io::{geom_from_text, geom_from_ewkb};
 ///
 /// let blob = geom_from_text("POINT(1 2)", Some(4326)).unwrap();
-/// let normalised = geom_from_ewkb(&blob).unwrap();
-/// assert!(!normalised.is_empty());
+/// let passthrough = geom_from_ewkb(&blob).unwrap();
+/// assert_eq!(blob, passthrough);
 /// ```
 pub fn geom_from_ewkb(ewkb: &[u8]) -> Result<Vec<u8>> {
-    let (geom, srid) = parse_ewkb(ewkb)?;
-    write_ewkb(&geom, srid)
+    // Header validation (byte order/type flags/SRID layout)
+    let _ = parse_ewkb_header(ewkb)?;
+    // Full geometry payload validation
+    let _: Geometry<f64> = Ewkb(ewkb).to_geo()?;
+    Ok(ewkb.to_vec())
 }
 
 /// Parse a GeoJSON string into an EWKB blob (SRID = 4326 by default, per spec).
@@ -248,14 +251,38 @@ mod tests {
     }
 
     #[test]
-    fn geom_from_ewkb_rejects_z_dimension() {
+    fn geom_from_ewkb_preserves_z_dimension_payload() {
         let mut blob = vec![0x01];
         let typ = crate::ewkb::EWKB_Z_FLAG | crate::ewkb::WKB_POINT;
         blob.extend_from_slice(&typ.to_le_bytes());
         blob.extend_from_slice(&1.0f64.to_le_bytes());
         blob.extend_from_slice(&2.0f64.to_le_bytes());
         blob.extend_from_slice(&3.0f64.to_le_bytes());
-        assert!(geom_from_ewkb(&blob).is_err());
+        let passthrough = geom_from_ewkb(&blob).unwrap();
+        assert_eq!(passthrough, blob);
+
+        let hdr = crate::ewkb::parse_ewkb_header(&passthrough).unwrap();
+        assert!(hdr.has_z);
+        assert!(!hdr.has_m);
+    }
+
+    #[test]
+    fn geom_from_ewkb_preserves_big_endian_payload() {
+        let mut blob = vec![0x00];
+        let typ = crate::ewkb::EWKB_Z_FLAG | crate::ewkb::EWKB_M_FLAG | crate::ewkb::WKB_POINT;
+        blob.extend_from_slice(&typ.to_be_bytes());
+        blob.extend_from_slice(&1.0f64.to_be_bytes());
+        blob.extend_from_slice(&2.0f64.to_be_bytes());
+        blob.extend_from_slice(&3.0f64.to_be_bytes());
+        blob.extend_from_slice(&4.0f64.to_be_bytes());
+
+        let passthrough = geom_from_ewkb(&blob).unwrap();
+        assert_eq!(passthrough, blob);
+
+        let hdr = crate::ewkb::parse_ewkb_header(&passthrough).unwrap();
+        assert!(!hdr.little_endian);
+        assert!(hdr.has_z);
+        assert!(hdr.has_m);
     }
 
     #[test]

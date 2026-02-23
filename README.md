@@ -73,7 +73,7 @@ let query = features::table
     .filter(
         features::geom
             .st_dwithin(st_point(13.4, 52.5).nullable(), 1000.0)
-            .eq(1),
+            .eq(true),
     )
     .select(features::geom.st_astext());
 
@@ -81,6 +81,13 @@ let sql = debug_query::<Sqlite, _>(&query).to_string();
 assert!(sql.contains("ST_DWithin"));
 # }
 ```
+
+Relate aliases in Diesel:
+
+- `st_relate_match_geoms(a, b, pattern)` maps to `ST_Relate(a, b, pattern)`.
+- `st_relate_match(matrix, pattern)` maps to `ST_RelateMatch(matrix, pattern)`.
+- Method-style aliases are also available via `geolite_diesel::prelude::*` as
+  `.st_relate_match_geoms(...)` and `.st_relate_match(...)`.
 
 ## Documentation
 

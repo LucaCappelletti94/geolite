@@ -8,6 +8,8 @@ use testcontainers_modules::postgres::Postgres;
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
 use testcontainers_modules::testcontainers::ImageExt;
 
+mod predicate_bool_helpers;
+
 diesel::table! {
     t (id) {
         id -> diesel::sql_types::Integer,
@@ -378,6 +380,77 @@ macro_rules! postgis_tests {
                 .get_result(&mut c)
                 .unwrap();
                 assert!((difference_area.unwrap() - 3.0).abs() < 1e-10);
+            }
+
+            // ── 5. Predicate and DE-9IM bool semantics ──────────────────
+
+            #[tokio::test]
+            async fn postgis_predicates_and_relate_bool_semantics() {
+                let (_container, mut c) = pg_conn($tag).await;
+                predicate_bool_helpers::assert_predicates_and_relate_bool_semantics_postgres(
+                    &mut c,
+                );
+            }
+
+            // ── 6. EWKB Z/M pass-through via query builder ──────────────
+
+            #[tokio::test]
+            async fn postgis_ewkb_zm_metadata_via_query_builder() {
+                let (_container, mut c) = pg_conn($tag).await;
+                let ewkb_zm_le =
+                    "decode('01010000C0000000000000F03F000000000000004000000000000008400000000000001040','hex')";
+                let ewkb_zm_be =
+                    "decode('00C00000013FF0000000000000400000000000000040080000000000004010000000000000','hex')";
+
+                // Point ZM (1,2,3,4), little-endian EWKB in -> Z/M header flags out.
+                let out_le: Option<Vec<u8>> = diesel::dsl::select(st_asewkb(st_geomfromewkb(
+                    diesel::dsl::sql::<diesel::sql_types::Nullable<diesel::sql_types::Binary>>(
+                        ewkb_zm_le,
+                    ),
+                )))
+                .get_result(&mut c)
+                .unwrap();
+                let out_le = out_le.expect("ST_AsEWKB should not return NULL");
+                let hdr_le = geolite_core::ewkb::parse_ewkb_header(&out_le).unwrap();
+                assert!(hdr_le.has_z);
+                assert!(hdr_le.has_m);
+                let ndims_le: Option<i16> = diesel::dsl::select(st_ndims(st_geomfromewkb(
+                    diesel::dsl::sql::<diesel::sql_types::Nullable<diesel::sql_types::Binary>>(
+                        ewkb_zm_le,
+                    ),
+                )))
+                .get_result(&mut c)
+                .unwrap();
+                assert_eq!(ndims_le, Some(4));
+                let coorddim_le: Option<i16> = diesel::dsl::select(st_coorddim(st_geomfromewkb(
+                    diesel::dsl::sql::<diesel::sql_types::Nullable<diesel::sql_types::Binary>>(
+                        ewkb_zm_le,
+                    ),
+                )))
+                .get_result(&mut c)
+                .unwrap();
+                assert_eq!(coorddim_le, Some(4));
+                let zmflag_le: Option<i16> = diesel::dsl::select(st_zmflag(st_geomfromewkb(
+                    diesel::dsl::sql::<diesel::sql_types::Nullable<diesel::sql_types::Binary>>(
+                        ewkb_zm_le,
+                    ),
+                )))
+                .get_result(&mut c)
+                .unwrap();
+                assert_eq!(zmflag_le, Some(3));
+
+                // Same Point ZM payload in big-endian EWKB in -> Z/M header flags out.
+                let out_be: Option<Vec<u8>> = diesel::dsl::select(st_asewkb(st_geomfromewkb(
+                    diesel::dsl::sql::<diesel::sql_types::Nullable<diesel::sql_types::Binary>>(
+                        ewkb_zm_be,
+                    ),
+                )))
+                .get_result(&mut c)
+                .unwrap();
+                let out_be = out_be.expect("ST_AsEWKB should not return NULL");
+                let hdr_be = geolite_core::ewkb::parse_ewkb_header(&out_be).unwrap();
+                assert!(hdr_be.has_z);
+                assert!(hdr_be.has_m);
             }
         }
     };

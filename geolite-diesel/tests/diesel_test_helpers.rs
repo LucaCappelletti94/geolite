@@ -51,6 +51,14 @@ fn setup_features_table(c: &mut SqliteConnection) {
     .unwrap();
 }
 
+fn hex_to_bytes(hex: &str) -> Vec<u8> {
+    assert_eq!(hex.len() % 2, 0, "hex string must have even length");
+    (0..hex.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).expect("invalid hex byte"))
+        .collect()
+}
+
 // ── Spatial function execution via Diesel ────────────────────────────────────
 
 macro_rules! define_diesel_sqlite_tests {
@@ -179,22 +187,22 @@ fn diesel_select_st_intersects() {
 
     let mut c = conn();
     // Two overlapping squares
-    let result: Option<i32> = diesel::dsl::select(st_intersects(
+    let result: Option<bool> = diesel::dsl::select(st_intersects(
         st_geomfromtext("POLYGON((0 0,2 0,2 2,0 2,0 0))"),
         st_geomfromtext("POLYGON((1 1,3 1,3 3,1 3,1 1))"),
     ))
     .get_result(&mut c)
     .unwrap();
-    assert_eq!(result, Some(1));
+    assert_eq!(result, Some(true));
 
     // Two non-overlapping squares
-    let result: Option<i32> = diesel::dsl::select(st_intersects(
+    let result: Option<bool> = diesel::dsl::select(st_intersects(
         st_geomfromtext("POLYGON((0 0,1 0,1 1,0 1,0 0))"),
         st_geomfromtext("POLYGON((5 5,6 5,6 6,5 6,5 5))"),
     ))
     .get_result(&mut c)
     .unwrap();
-    assert_eq!(result, Some(0));
+    assert_eq!(result, Some(false));
 }
 
 #[$test_attr]
@@ -203,24 +211,24 @@ fn diesel_select_st_dwithin() {
 
     let mut c = conn();
     // Points within distance
-    let result: Option<i32> = diesel::dsl::select(st_dwithin(
+    let result: Option<bool> = diesel::dsl::select(st_dwithin(
         st_point(0.0, 0.0).nullable(),
         st_point(1.0, 0.0).nullable(),
         2.0,
     ))
     .get_result(&mut c)
     .unwrap();
-    assert_eq!(result, Some(1));
+    assert_eq!(result, Some(true));
 
     // Points not within distance
-    let result: Option<i32> = diesel::dsl::select(st_dwithin(
+    let result: Option<bool> = diesel::dsl::select(st_dwithin(
         st_point(0.0, 0.0).nullable(),
         st_point(10.0, 0.0).nullable(),
         2.0,
     ))
     .get_result(&mut c)
     .unwrap();
-    assert_eq!(result, Some(0));
+    assert_eq!(result, Some(false));
 }
 
 #[$test_attr]
@@ -249,6 +257,58 @@ fn diesel_select_st_geomfromtext() {
     .unwrap();
     let wkt = wkt.expect("should not be NULL");
     assert!(wkt.contains("MULTIPOINT"), "got: {wkt}");
+}
+
+#[$test_attr]
+fn diesel_select_st_geomfromewkb_st_asewkb_preserves_little_endian_zm_payload() {
+    use geolite_diesel::functions::*;
+
+    let mut c = conn();
+    let ewkb_hex = "01010000C0000000000000F03F000000000000004000000000000008400000000000001040";
+    let ewkb_expr = diesel::dsl::sql::<diesel::sql_types::Nullable<diesel::sql_types::Binary>>(
+        "X'01010000C0000000000000F03F000000000000004000000000000008400000000000001040'",
+    );
+
+    let roundtrip: Option<Vec<u8>> =
+        diesel::dsl::select(st_asewkb(st_geomfromewkb(ewkb_expr)))
+            .get_result(&mut c)
+            .unwrap();
+    assert_eq!(roundtrip, Some(hex_to_bytes(ewkb_hex)));
+
+    let zmflag: Option<i16> = diesel::dsl::select(st_zmflag(st_geomfromewkb(
+        diesel::dsl::sql::<diesel::sql_types::Nullable<diesel::sql_types::Binary>>(
+            "X'01010000C0000000000000F03F000000000000004000000000000008400000000000001040'",
+        ),
+    )))
+    .get_result(&mut c)
+    .unwrap();
+    assert_eq!(zmflag, Some(3));
+}
+
+#[$test_attr]
+fn diesel_select_st_geomfromewkb_st_asewkb_preserves_big_endian_zm_payload() {
+    use geolite_diesel::functions::*;
+
+    let mut c = conn();
+    let ewkb_hex = "00C00000013FF0000000000000400000000000000040080000000000004010000000000000";
+    let ewkb_expr = diesel::dsl::sql::<diesel::sql_types::Nullable<diesel::sql_types::Binary>>(
+        "X'00C00000013FF0000000000000400000000000000040080000000000004010000000000000'",
+    );
+
+    let roundtrip: Option<Vec<u8>> =
+        diesel::dsl::select(st_asewkb(st_geomfromewkb(ewkb_expr)))
+            .get_result(&mut c)
+            .unwrap();
+    assert_eq!(roundtrip, Some(hex_to_bytes(ewkb_hex)));
+
+    let zmflag: Option<i16> = diesel::dsl::select(st_zmflag(st_geomfromewkb(
+        diesel::dsl::sql::<diesel::sql_types::Nullable<diesel::sql_types::Binary>>(
+            "X'00C00000013FF0000000000000400000000000000040080000000000004010000000000000'",
+        ),
+    )))
+    .get_result(&mut c)
+    .unwrap();
+    assert_eq!(zmflag, Some(3));
 }
 
 #[$test_attr]
@@ -327,7 +387,7 @@ fn method_st_dwithin_in_filter() {
     .unwrap();
 
     let names: Vec<String> = features::table
-        .filter(features::geom.st_dwithin(st_point(0.0, 0.0).nullable(), 2.0).eq(1))
+        .filter(features::geom.st_dwithin(st_point(0.0, 0.0).nullable(), 2.0).eq(true))
         .select(features::name)
         .load(&mut c)
         .unwrap();
@@ -352,7 +412,7 @@ fn method_st_intersects_in_filter() {
     let names: Vec<String> = features::table
         .filter(features::geom.st_intersects(
             st_geomfromtext("POLYGON((0 0,10 0,10 10,0 10,0 0))"),
-        ).eq(1))
+        ).eq(true))
         .select(features::name)
         .load(&mut c)
         .unwrap();
@@ -375,7 +435,7 @@ fn method_st_contains_in_filter() {
     .unwrap();
 
     let result: Option<i32> = features::table
-        .filter(features::geom.st_contains(st_point(5.0, 5.0).nullable()).eq(1))
+        .filter(features::geom.st_contains(st_point(5.0, 5.0).nullable()).eq(true))
         .select(features::id)
         .first(&mut c)
         .optional()
@@ -383,12 +443,45 @@ fn method_st_contains_in_filter() {
     assert_eq!(result, Some(1));
 
     let result: Option<i32> = features::table
-        .filter(features::geom.st_contains(st_point(50.0, 50.0).nullable()).eq(1))
+        .filter(features::geom.st_contains(st_point(50.0, 50.0).nullable()).eq(true))
         .select(features::id)
         .first(&mut c)
         .optional()
         .unwrap();
     assert_eq!(result, None);
+}
+
+#[$test_attr]
+fn method_st_relate_match_in_select() {
+    use geolite_diesel::prelude::*;
+
+    let mut c = conn();
+    let polygon = "POLYGON((0 0,0 3,3 3,3 0,0 0))";
+
+    let matrix: Option<String> = diesel::dsl::select(st_relate(
+        st_point(1.0, 1.0).nullable(),
+        st_geomfromtext(polygon),
+    ))
+    .get_result(&mut c)
+    .unwrap();
+    let matrix = matrix.expect("st_relate should return a DE-9IM matrix");
+
+    let inside: Option<bool> = diesel::dsl::select(st_point(1.0, 1.0).nullable().st_relate_match(
+        st_geomfromtext(polygon),
+        matrix.as_str(),
+    ))
+    .get_result(&mut c)
+    .unwrap();
+    assert_eq!(inside, Some(true));
+
+    let impossible_pattern: Option<bool> = diesel::dsl::select(
+        st_point(1.0, 1.0)
+            .nullable()
+            .st_relate_match(st_geomfromtext(polygon), "FFFFFFFFF"),
+    )
+    .get_result(&mut c)
+    .unwrap();
+    assert_eq!(impossible_pattern, Some(false));
 }
 
 // ── Full ORM roundtrip ──────────────────────────────────────────────────────

@@ -11,6 +11,32 @@
 //!     .select((features::id, features::geom.st_astext()))
 //!     .load(&mut conn)?;
 //! ```
+//!
+//! Both relate aliases are available in method form and map to the same SQL
+//! operator (`ST_Relate(a, b, pattern)`):
+//!
+//! ```rust,ignore
+//! use diesel::prelude::*;
+//! use geolite_diesel::prelude::*;
+//!
+//! let pattern = "T*****FF*";
+//!
+//! let via_match: Option<bool> = diesel::dsl::select(
+//!     st_point(0.0, 0.0)
+//!         .nullable()
+//!         .st_relate_match(st_point(0.0, 0.0).nullable(), pattern),
+//! )
+//! .get_result(&mut conn)?;
+//!
+//! let via_match_geoms: Option<bool> = diesel::dsl::select(
+//!     st_point(0.0, 0.0)
+//!         .nullable()
+//!         .st_relate_match_geoms(st_point(0.0, 0.0).nullable(), pattern),
+//! )
+//! .get_result(&mut conn)?;
+//!
+//! assert_eq!(via_match, via_match_geoms);
+//! ```
 
 use diesel::expression::{AsExpression, Expression};
 use diesel::sql_types::{Double, Integer, Nullable};
@@ -44,9 +70,37 @@ pub trait GeometryExpressionMethods: Expression<SqlType = Nullable<Geometry>> + 
         functions::st_asbinary(self)
     }
 
+    /// Serialize this geometry to EWKB bytes (preserves SRID).
+    fn st_asewkb(self) -> functions::st_asewkb<Self> {
+        functions::st_asewkb(self)
+    }
+
     /// Serialize this geometry to GeoJSON text.
     fn st_asgeojson(self) -> functions::st_asgeojson<Self> {
         functions::st_asgeojson(self)
+    }
+
+    // ── Constructors / transforms ───────────────────────────────────────
+
+    /// Construct a LineString from this geometry and another Point geometry.
+    fn st_makeline<T>(self, other: T) -> functions::st_makeline<Self, T>
+    where
+        T: AsExpression<Nullable<Geometry>>,
+    {
+        functions::st_makeline(self, other)
+    }
+
+    /// Construct a Polygon from this geometry treated as a shell LineString.
+    fn st_makepolygon(self) -> functions::st_makepolygon<Self> {
+        functions::st_makepolygon(self)
+    }
+
+    /// Combine this geometry with another into a GeometryCollection.
+    fn st_collect<T>(self, other: T) -> functions::st_collect<Self, T>
+    where
+        T: AsExpression<Nullable<Geometry>>,
+    {
+        functions::st_collect(self, other)
     }
 
     // ── Accessors ───────────────────────────────────────────────────────
@@ -79,9 +133,113 @@ pub trait GeometryExpressionMethods: Expression<SqlType = Nullable<Geometry>> + 
         functions::st_y(self)
     }
 
-    /// Return 1 if the geometry is empty, 0 otherwise.
+    /// Return whether the geometry is empty.
     fn st_isempty(self) -> functions::st_isempty<Self> {
         functions::st_isempty(self)
+    }
+
+    /// Return the number of coordinate dimensions (2, 3, or 4).
+    fn st_ndims(self) -> functions::st_ndims<Self> {
+        functions::st_ndims(self)
+    }
+
+    /// Return the coordinate dimension (same as `ST_NDims` for non-curve types).
+    fn st_coorddim(self) -> functions::st_coorddim<Self> {
+        functions::st_coorddim(self)
+    }
+
+    /// Return the Z/M dimensionality flag (0=2D, 1=M, 2=Z, 3=ZM).
+    fn st_zmflag(self) -> functions::st_zmflag<Self> {
+        functions::st_zmflag(self)
+    }
+
+    /// Return the EWKB memory size in bytes.
+    fn st_memsize(self) -> functions::st_memsize<Self> {
+        functions::st_memsize(self)
+    }
+
+    /// Return whether geometry is valid.
+    fn st_isvalid(self) -> functions::st_isvalid<Self> {
+        functions::st_isvalid(self)
+    }
+
+    /// Return the validity reason string.
+    fn st_isvalidreason(self) -> functions::st_isvalidreason<Self> {
+        functions::st_isvalidreason(self)
+    }
+
+    /// Return the number of points in a LineString.
+    fn st_numpoints(self) -> functions::st_numpoints<Self> {
+        functions::st_numpoints(self)
+    }
+
+    /// Return the total point count across any geometry type.
+    fn st_npoints(self) -> functions::st_npoints<Self> {
+        functions::st_npoints(self)
+    }
+
+    /// Return the number of component geometries.
+    fn st_numgeometries(self) -> functions::st_numgeometries<Self> {
+        functions::st_numgeometries(self)
+    }
+
+    /// Return the number of interior rings in a Polygon.
+    fn st_numinteriorrings(self) -> functions::st_numinteriorrings<Self> {
+        functions::st_numinteriorrings(self)
+    }
+
+    /// Return the total number of rings in a Polygon.
+    fn st_numrings(self) -> functions::st_numrings<Self> {
+        functions::st_numrings(self)
+    }
+
+    /// Return the topological dimension (0, 1, or 2).
+    fn st_dimension(self) -> functions::st_dimension<Self> {
+        functions::st_dimension(self)
+    }
+
+    /// Return the axis-aligned envelope of this geometry.
+    fn st_envelope(self) -> functions::st_envelope<Self> {
+        functions::st_envelope(self)
+    }
+
+    /// Return the 1-based Nth point of this LineString.
+    fn st_pointn<S>(self, n: S) -> functions::st_pointn<Self, S>
+    where
+        S: AsExpression<Integer>,
+    {
+        functions::st_pointn(self, n)
+    }
+
+    /// Return the first point of this LineString.
+    fn st_startpoint(self) -> functions::st_startpoint<Self> {
+        functions::st_startpoint(self)
+    }
+
+    /// Return the last point of this LineString.
+    fn st_endpoint(self) -> functions::st_endpoint<Self> {
+        functions::st_endpoint(self)
+    }
+
+    /// Return the exterior ring of this Polygon.
+    fn st_exteriorring(self) -> functions::st_exteriorring<Self> {
+        functions::st_exteriorring(self)
+    }
+
+    /// Return the 1-based Nth interior ring of this Polygon.
+    fn st_interiorringn<S>(self, n: S) -> functions::st_interiorringn<Self, S>
+    where
+        S: AsExpression<Integer>,
+    {
+        functions::st_interiorringn(self, n)
+    }
+
+    /// Return the 1-based Nth geometry from this collection.
+    fn st_geometryn<S>(self, n: S) -> functions::st_geometryn<Self, S>
+    where
+        S: AsExpression<Integer>,
+    {
+        functions::st_geometryn(self, n)
     }
 
     /// Return the X coordinate of the bounding-box minimum corner.
@@ -207,7 +365,7 @@ pub trait GeometryExpressionMethods: Expression<SqlType = Nullable<Geometry>> + 
 
     // ── Predicates ──────────────────────────────────────────────────────
 
-    /// Return 1 if this geometry shares any interior or boundary points with another.
+    /// Return whether this geometry shares any interior or boundary points with another.
     fn st_intersects<T>(self, other: T) -> functions::st_intersects<Self, T>
     where
         T: AsExpression<Nullable<Geometry>>,
@@ -215,7 +373,7 @@ pub trait GeometryExpressionMethods: Expression<SqlType = Nullable<Geometry>> + 
         functions::st_intersects(self, other)
     }
 
-    /// Return 1 if this geometry fully contains another.
+    /// Return whether this geometry fully contains another.
     fn st_contains<T>(self, other: T) -> functions::st_contains<Self, T>
     where
         T: AsExpression<Nullable<Geometry>>,
@@ -223,7 +381,7 @@ pub trait GeometryExpressionMethods: Expression<SqlType = Nullable<Geometry>> + 
         functions::st_contains(self, other)
     }
 
-    /// Return 1 if this geometry is fully contained within another.
+    /// Return whether this geometry is fully contained within another.
     fn st_within<T>(self, other: T) -> functions::st_within<Self, T>
     where
         T: AsExpression<Nullable<Geometry>>,
@@ -231,7 +389,7 @@ pub trait GeometryExpressionMethods: Expression<SqlType = Nullable<Geometry>> + 
         functions::st_within(self, other)
     }
 
-    /// Return 1 if this geometry covers another.
+    /// Return whether this geometry covers another.
     fn st_covers<T>(self, other: T) -> functions::st_covers<Self, T>
     where
         T: AsExpression<Nullable<Geometry>>,
@@ -239,7 +397,7 @@ pub trait GeometryExpressionMethods: Expression<SqlType = Nullable<Geometry>> + 
         functions::st_covers(self, other)
     }
 
-    /// Return 1 if this geometry is covered by another.
+    /// Return whether this geometry is covered by another.
     fn st_coveredby<T>(self, other: T) -> functions::st_coveredby<Self, T>
     where
         T: AsExpression<Nullable<Geometry>>,
@@ -247,7 +405,7 @@ pub trait GeometryExpressionMethods: Expression<SqlType = Nullable<Geometry>> + 
         functions::st_coveredby(self, other)
     }
 
-    /// Return 1 if this geometry shares no points with another.
+    /// Return whether this geometry shares no points with another.
     fn st_disjoint<T>(self, other: T) -> functions::st_disjoint<Self, T>
     where
         T: AsExpression<Nullable<Geometry>>,
@@ -255,7 +413,7 @@ pub trait GeometryExpressionMethods: Expression<SqlType = Nullable<Geometry>> + 
         functions::st_disjoint(self, other)
     }
 
-    /// Return 1 if this geometry is spatially equal to another.
+    /// Return whether this geometry is spatially equal to another.
     fn st_equals<T>(self, other: T) -> functions::st_equals<Self, T>
     where
         T: AsExpression<Nullable<Geometry>>,
@@ -263,7 +421,7 @@ pub trait GeometryExpressionMethods: Expression<SqlType = Nullable<Geometry>> + 
         functions::st_equals(self, other)
     }
 
-    /// Return 1 if this geometry and another are within the given Euclidean distance.
+    /// Return whether this geometry and another are within the given Euclidean distance.
     fn st_dwithin<T, D>(self, other: T, distance: D) -> functions::st_dwithin<Self, T, D>
     where
         T: AsExpression<Nullable<Geometry>>,
@@ -272,7 +430,7 @@ pub trait GeometryExpressionMethods: Expression<SqlType = Nullable<Geometry>> + 
         functions::st_dwithin(self, other, distance)
     }
 
-    /// Return 1 if this geometry shares boundary points but no interior points with another.
+    /// Return whether this geometry shares boundary points but no interior points with another.
     fn st_touches<T>(self, other: T) -> functions::st_touches<Self, T>
     where
         T: AsExpression<Nullable<Geometry>>,
@@ -280,7 +438,7 @@ pub trait GeometryExpressionMethods: Expression<SqlType = Nullable<Geometry>> + 
         functions::st_touches(self, other)
     }
 
-    /// Return 1 if this geometry crosses another.
+    /// Return whether this geometry crosses another.
     fn st_crosses<T>(self, other: T) -> functions::st_crosses<Self, T>
     where
         T: AsExpression<Nullable<Geometry>>,
@@ -288,7 +446,7 @@ pub trait GeometryExpressionMethods: Expression<SqlType = Nullable<Geometry>> + 
         functions::st_crosses(self, other)
     }
 
-    /// Return 1 if this geometry overlaps another.
+    /// Return whether this geometry overlaps another.
     fn st_overlaps<T>(self, other: T) -> functions::st_overlaps<Self, T>
     where
         T: AsExpression<Nullable<Geometry>>,
@@ -302,6 +460,45 @@ pub trait GeometryExpressionMethods: Expression<SqlType = Nullable<Geometry>> + 
         T: AsExpression<Nullable<Geometry>>,
     {
         functions::st_relate(self, other)
+    }
+
+    /// Return whether the DE-9IM pattern matches between this and another geometry.
+    fn st_relate_pattern<T, P>(
+        self,
+        other: T,
+        pattern: P,
+    ) -> functions::st_relate_pattern<Self, T, P>
+    where
+        T: AsExpression<Nullable<Geometry>>,
+        P: AsExpression<diesel::sql_types::Text>,
+    {
+        functions::st_relate_pattern(self, other, pattern)
+    }
+
+    /// Alias of `ST_Relate(a, b, pattern)` matching core naming.
+    fn st_relate_match_geoms<T, P>(
+        self,
+        other: T,
+        pattern: P,
+    ) -> functions::st_relate_match_geoms<Self, T, P>
+    where
+        T: AsExpression<Nullable<Geometry>>,
+        P: AsExpression<diesel::sql_types::Text>,
+    {
+        functions::st_relate_match_geoms(self, other, pattern)
+    }
+
+    /// Alias of `ST_Relate(a, b, pattern)` matching core naming.
+    fn st_relate_match<T, P>(
+        self,
+        other: T,
+        pattern: P,
+    ) -> functions::st_relate_match_geoms<Self, T, P>
+    where
+        T: AsExpression<Nullable<Geometry>>,
+        P: AsExpression<diesel::sql_types::Text>,
+    {
+        functions::st_relate_match_geoms(self, other, pattern)
     }
 
     // ── Geography variants ──────────────────────────────────────────────
