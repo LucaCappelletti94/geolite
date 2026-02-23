@@ -529,8 +529,13 @@ pub fn st_dimension(blob: &[u8]) -> Result<i32> {
         match geom {
             Geometry::Point(_) | Geometry::MultiPoint(_) => 0,
             Geometry::Line(_) | Geometry::LineString(_) | Geometry::MultiLineString(_) => 1,
-            Geometry::Polygon(_) | Geometry::MultiPolygon(_) | Geometry::Rect(_) | Geometry::Triangle(_) => 2,
-            Geometry::GeometryCollection(gc) => gc.0.iter().map(geometry_dimension).max().unwrap_or(0),
+            Geometry::Polygon(_)
+            | Geometry::MultiPolygon(_)
+            | Geometry::Rect(_)
+            | Geometry::Triangle(_) => 2,
+            Geometry::GeometryCollection(gc) => {
+                gc.0.iter().map(geometry_dimension).max().unwrap_or(0)
+            }
         }
     }
 
@@ -728,7 +733,8 @@ mod tests {
 
     #[test]
     fn st_dimension_geometrycollection_uses_max_member_dimension() {
-        let gc = geom_from_text("GEOMETRYCOLLECTION(POINT(0 0),LINESTRING(0 0,1 1))", None).unwrap();
+        let gc =
+            geom_from_text("GEOMETRYCOLLECTION(POINT(0 0),LINESTRING(0 0,1 1))", None).unwrap();
         assert_eq!(st_dimension(&gc).unwrap(), 1);
     }
 

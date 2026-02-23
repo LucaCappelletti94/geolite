@@ -367,7 +367,10 @@ mod tests {
 
     #[test]
     fn ensure_matching_srid_accepts_equal() {
-        assert_eq!(ensure_matching_srid(Some(4326), Some(4326)).unwrap(), Some(4326));
+        assert_eq!(
+            ensure_matching_srid(Some(4326), Some(4326)).unwrap(),
+            Some(4326)
+        );
         assert_eq!(ensure_matching_srid(None, None).unwrap(), None);
     }
 
