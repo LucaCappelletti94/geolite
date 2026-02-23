@@ -528,4 +528,70 @@ mod tests {
         let mls = geom_from_text("MULTILINESTRING((0 0,1 0),(0 0,0 1))", None).unwrap();
         assert!((st_length(&mls).unwrap() - 2.0).abs() < 1e-10);
     }
+
+    #[test]
+    fn st_length_linestring() {
+        let line = geom_from_text("LINESTRING(0 0,3 4)", None).unwrap();
+        assert!((st_length(&line).unwrap() - 5.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn st_perimeter_polygon_and_multipolygon() {
+        let poly =
+            geom_from_text("POLYGON((0 0,4 0,4 4,0 4,0 0),(1 1,2 1,2 2,1 2,1 1))", None).unwrap();
+        assert!((st_perimeter(&poly).unwrap() - 20.0).abs() < 1e-10);
+
+        let mpoly = geom_from_text(
+            "MULTIPOLYGON(((0 0,1 0,1 1,0 1,0 0)),((2 2,3 2,3 3,2 3,2 2)))",
+            None,
+        )
+        .unwrap();
+        assert!((st_perimeter(&mpoly).unwrap() - 8.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn centroid_and_point_on_surface_are_computable() {
+        let poly = geom_from_text("POLYGON((0 0,2 0,2 2,0 2,0 0))", Some(4326)).unwrap();
+
+        let centroid = st_centroid(&poly).unwrap();
+        assert!((st_x(&centroid).unwrap() - 1.0).abs() < 1e-10);
+        assert!((st_y(&centroid).unwrap() - 1.0).abs() < 1e-10);
+
+        let pos = st_point_on_surface(&poly).unwrap();
+        assert!(st_x(&pos).unwrap() >= 0.0);
+        assert!(st_y(&pos).unwrap() >= 0.0);
+    }
+
+    #[test]
+    fn st_length_sphere_linestring_and_multilinestring() {
+        let line =
+            geom_from_text("LINESTRING(-0.1278 51.5074,2.3522 48.8566)", Some(4326)).unwrap();
+        assert!(st_length_sphere(&line).unwrap() > 300_000.0);
+
+        let mls = geom_from_text(
+            "MULTILINESTRING((-0.1278 51.5074,2.3522 48.8566),(2.3522 48.8566,13.4050 52.5200))",
+            Some(4326),
+        )
+        .unwrap();
+        assert!(st_length_sphere(&mls).unwrap() > st_length_sphere(&line).unwrap());
+    }
+
+    #[test]
+    fn st_azimuth_and_project_success() {
+        let origin = st_point(0.0, 0.0, Some(4326)).unwrap();
+        let north = st_point(0.0, 1.0, Some(4326)).unwrap();
+        let azimuth = st_azimuth(&origin, &north).unwrap();
+        assert!(azimuth.abs() < 0.01);
+
+        let dest = st_project(&origin, 111_000.0, 0.0).unwrap();
+        assert!((st_y(&dest).unwrap() - 1.0).abs() < 0.2);
+        assert_eq!(crate::functions::accessors::st_srid(&dest).unwrap(), 4326);
+    }
+
+    #[test]
+    fn st_closest_point_indeterminate_for_empty_geometry() {
+        let empty = geom_from_text("GEOMETRYCOLLECTION EMPTY", None).unwrap();
+        let pt = st_point(0.0, 0.0, None).unwrap();
+        assert!(st_closest_point(&empty, &pt).is_err());
+    }
 }

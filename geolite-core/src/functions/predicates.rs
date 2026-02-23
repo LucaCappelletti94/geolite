@@ -427,6 +427,22 @@ mod tests {
     }
 
     #[test]
+    fn st_relate_match_geoms_handles_valid_and_invalid_patterns() {
+        let a = geom_from_text("POLYGON((0 0,2 0,2 2,0 2,0 0))", None).unwrap();
+        let b = geom_from_text("POINT(1 1)", None).unwrap();
+        assert!(st_relate_match_geoms(&a, &b, "T*****FF*").unwrap());
+        assert!(!st_relate_match_geoms(&a, &b, "INVALID").unwrap());
+    }
+
+    #[test]
+    fn st_relate_line_intersection_matrix_includes_one_dimensional_entry() {
+        let a = geom_from_text("LINESTRING(0 0,2 2)", None).unwrap();
+        let b = geom_from_text("LINESTRING(0 2,2 0)", None).unwrap();
+        let matrix = st_relate(&a, &b).unwrap();
+        assert!(matrix.contains('1'));
+    }
+
+    #[test]
     fn st_equals_same_geometry() {
         let a = geom_from_text("POLYGON((0 0,1 0,1 1,0 1,0 0))", None).unwrap();
         let b = geom_from_text("POLYGON((0 0,1 0,1 1,0 1,0 0))", None).unwrap();

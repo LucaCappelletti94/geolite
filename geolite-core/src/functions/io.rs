@@ -257,4 +257,16 @@ mod tests {
         blob.extend_from_slice(&3.0f64.to_le_bytes());
         assert!(geom_from_ewkb(&blob).is_err());
     }
+
+    #[test]
+    fn geom_from_ewkb_and_as_ewkb_roundtrip() {
+        let blob = geom_from_text("LINESTRING(0 0,1 1)", Some(4326)).unwrap();
+        let normalized = geom_from_ewkb(&blob).unwrap();
+        let copied = as_ewkb(&normalized).unwrap();
+
+        let (g1, srid1) = parse_ewkb(&blob).unwrap();
+        let (g2, srid2) = parse_ewkb(&copied).unwrap();
+        assert_eq!(format!("{g1:?}"), format!("{g2:?}"));
+        assert_eq!(srid1, srid2);
+    }
 }

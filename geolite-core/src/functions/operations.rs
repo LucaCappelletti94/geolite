@@ -191,6 +191,14 @@ mod tests {
     }
 
     #[test]
+    fn union_accepts_multipolygon_inputs() {
+        let mp = geom_from_text("MULTIPOLYGON(((0 0,1 0,1 1,0 1,0 0)))", None).unwrap();
+        let poly = geom_from_text("POLYGON((1 0,2 0,2 1,1 1,1 0))", None).unwrap();
+        let u = st_union(&mp, &poly).unwrap();
+        assert!(st_area(&u).unwrap() > 1.0);
+    }
+
+    #[test]
     fn buffer_negative_shrinks() {
         let poly = geom_from_text("POLYGON((0 0,10 0,10 10,0 10,0 0))", None).unwrap();
         let shrunk = st_buffer(&poly, -1.0).unwrap();

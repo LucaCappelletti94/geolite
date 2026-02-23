@@ -611,6 +611,7 @@ pub fn st_is_valid_reason(blob: &[u8]) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ewkb::{EWKB_M_FLAG, EWKB_Z_FLAG, WKB_POINT};
     use crate::functions::io::geom_from_text;
 
     // ── Wrong-type errors ──────────────────────────────────────────
@@ -760,5 +761,218 @@ mod tests {
     fn st_is_valid_reason_valid() {
         let blob = geom_from_text("POLYGON((0 0,1 0,1 1,0 1,0 0))", None).unwrap();
         assert_eq!(st_is_valid_reason(&blob).unwrap(), "Valid Geometry");
+    }
+
+    #[test]
+    fn st_set_srid_rewrites_header() {
+        let blob = geom_from_text("POINT(1 2)", Some(4326)).unwrap();
+        let updated = st_set_srid(&blob, 3857).unwrap();
+        assert_eq!(st_srid(&updated).unwrap(), 3857);
+    }
+
+    #[test]
+    fn st_geometry_type_and_num_points_success() {
+        let point = geom_from_text("POINT(3 4)", None).unwrap();
+        assert_eq!(st_geometry_type(&point).unwrap(), "ST_Point");
+
+        let line = geom_from_text("LINESTRING(0 0,1 1,2 2)", None).unwrap();
+        assert_eq!(st_num_points(&line).unwrap(), 3);
+    }
+
+    #[test]
+    fn st_ndims_coord_dim_and_zmflag_cover_all_header_flags() {
+        let xy = geom_from_text("POINT(1 2)", None).unwrap();
+        assert_eq!(st_ndims(&xy).unwrap(), 2);
+        assert_eq!(st_coord_dim(&xy).unwrap(), 2);
+        assert_eq!(st_zmflag(&xy).unwrap(), 0);
+
+        let mut z = vec![0x01];
+        z.extend_from_slice(&(WKB_POINT | EWKB_Z_FLAG).to_le_bytes());
+        assert_eq!(st_ndims(&z).unwrap(), 3);
+        assert_eq!(st_coord_dim(&z).unwrap(), 3);
+        assert_eq!(st_zmflag(&z).unwrap(), 2);
+
+        let mut m = vec![0x01];
+        m.extend_from_slice(&(WKB_POINT | EWKB_M_FLAG).to_le_bytes());
+        assert_eq!(st_ndims(&m).unwrap(), 3);
+        assert_eq!(st_zmflag(&m).unwrap(), 1);
+
+        let mut zm = vec![0x01];
+        zm.extend_from_slice(&(WKB_POINT | EWKB_Z_FLAG | EWKB_M_FLAG).to_le_bytes());
+        assert_eq!(st_ndims(&zm).unwrap(), 4);
+        assert_eq!(st_zmflag(&zm).unwrap(), 3);
+    }
+
+    #[test]
+    fn st_is_empty_checks_multiple_geometry_kinds() {
+        let point = geom_from_text("POINT(0 0)", None).unwrap();
+        assert!(!st_is_empty(&point).unwrap());
+
+        let line = geom_from_text("LINESTRING EMPTY", None).unwrap();
+        assert!(st_is_empty(&line).unwrap());
+
+        let polygon = geom_from_text("POLYGON EMPTY", None).unwrap();
+        assert!(st_is_empty(&polygon).unwrap());
+
+        let multipoint = geom_from_text("MULTIPOINT EMPTY", None).unwrap();
+        assert!(st_is_empty(&multipoint).unwrap());
+
+        let multilinestring = geom_from_text("MULTILINESTRING EMPTY", None).unwrap();
+        assert!(st_is_empty(&multilinestring).unwrap());
+
+        let multipolygon = geom_from_text("MULTIPOLYGON EMPTY", None).unwrap();
+        assert!(st_is_empty(&multipolygon).unwrap());
+
+        let gc = geom_from_text("GEOMETRYCOLLECTION EMPTY", None).unwrap();
+        assert!(st_is_empty(&gc).unwrap());
+    }
+
+    #[test]
+    fn st_mem_size_matches_blob_length() {
+        let blob = geom_from_text("POINT(1 2)", Some(4326)).unwrap();
+        assert_eq!(st_mem_size(&blob).unwrap(), blob.len() as i64);
+    }
+
+    #[test]
+    fn st_npoints_covers_multi_geometries() {
+        let point = geom_from_text("POINT(0 0)", None).unwrap();
+        assert_eq!(st_npoints(&point).unwrap(), 1);
+
+        let line = geom_from_text("LINESTRING(0 0,1 1,2 2)", None).unwrap();
+        assert_eq!(st_npoints(&line).unwrap(), 3);
+
+        let multipoint = geom_from_text("MULTIPOINT((0 0),(1 1))", None).unwrap();
+        assert_eq!(st_npoints(&multipoint).unwrap(), 2);
+
+        let multilinestring = geom_from_text("MULTILINESTRING((0 0,1 0),(2 0,2 2))", None).unwrap();
+        assert_eq!(st_npoints(&multilinestring).unwrap(), 4);
+
+        let multipolygon = geom_from_text(
+            "MULTIPOLYGON(((0 0,4 0,4 4,0 4,0 0),(1 1,2 1,2 2,1 2,1 1)))",
+            None,
+        )
+        .unwrap();
+        assert_eq!(st_npoints(&multipolygon).unwrap(), 10);
+
+        let gc =
+            geom_from_text("GEOMETRYCOLLECTION(POINT(0 0),LINESTRING(0 0,1 1))", None).unwrap();
+        assert_eq!(st_npoints(&gc).unwrap(), 3);
+    }
+
+    #[test]
+    fn st_num_geometries_covers_collection_kinds() {
+        let mp = geom_from_text("MULTIPOINT((0 0),(1 1),(2 2))", None).unwrap();
+        assert_eq!(st_num_geometries(&mp).unwrap(), 3);
+
+        let mls = geom_from_text("MULTILINESTRING((0 0,1 1),(2 2,3 3))", None).unwrap();
+        assert_eq!(st_num_geometries(&mls).unwrap(), 2);
+
+        let mpoly = geom_from_text(
+            "MULTIPOLYGON(((0 0,1 0,1 1,0 1,0 0)),((2 2,3 2,3 3,2 3,2 2)))",
+            None,
+        )
+        .unwrap();
+        assert_eq!(st_num_geometries(&mpoly).unwrap(), 2);
+
+        let gc = geom_from_text(
+            "GEOMETRYCOLLECTION(POINT(0 0),LINESTRING(0 0,1 1),POINT(2 2))",
+            None,
+        )
+        .unwrap();
+        assert_eq!(st_num_geometries(&gc).unwrap(), 3);
+
+        let single = geom_from_text("POINT(0 0)", None).unwrap();
+        assert_eq!(st_num_geometries(&single).unwrap(), 1);
+    }
+
+    #[test]
+    fn ring_accessors_success_and_bounds_errors() {
+        let poly =
+            geom_from_text("POLYGON((0 0,4 0,4 4,0 4,0 0),(1 1,2 1,2 2,1 2,1 1))", None).unwrap();
+
+        assert_eq!(st_num_interior_rings(&poly).unwrap(), 1);
+        assert_eq!(st_num_rings(&poly).unwrap(), 2);
+
+        let exterior = st_exterior_ring(&poly).unwrap();
+        assert_eq!(st_num_points(&exterior).unwrap(), 5);
+
+        let interior = st_interior_ring_n(&poly, 1).unwrap();
+        assert_eq!(st_num_points(&interior).unwrap(), 5);
+
+        assert!(st_interior_ring_n(&poly, 0).is_err());
+        let pt = geom_from_text("POINT(0 0)", None).unwrap();
+        assert!(st_interior_ring_n(&pt, 1).is_err());
+    }
+
+    #[test]
+    fn st_point_n_start_and_end_success_paths() {
+        let line = geom_from_text("LINESTRING(10 20,30 40,50 60)", Some(4326)).unwrap();
+
+        let second = st_point_n(&line, 2, None).unwrap();
+        assert!((st_x(&second).unwrap() - 30.0).abs() < 1e-10);
+        assert!((st_y(&second).unwrap() - 40.0).abs() < 1e-10);
+        assert_eq!(st_srid(&second).unwrap(), 4326);
+
+        let override_srid = st_point_n(&line, 2, Some(3857)).unwrap();
+        assert_eq!(st_srid(&override_srid).unwrap(), 3857);
+
+        let start = st_start_point(&line).unwrap();
+        assert!((st_x(&start).unwrap() - 10.0).abs() < 1e-10);
+
+        let end = st_end_point(&line).unwrap();
+        assert!((st_x(&end).unwrap() - 50.0).abs() < 1e-10);
+
+        let empty = geom_from_text("LINESTRING EMPTY", None).unwrap();
+        assert!(st_end_point(&empty).is_err());
+
+        let pt = geom_from_text("POINT(1 1)", None).unwrap();
+        assert!(st_point_n(&pt, 1, None).is_err());
+    }
+
+    #[test]
+    fn st_geometry_n_handles_multi_types_and_bounds() {
+        let mp = geom_from_text("MULTIPOINT((1 1),(2 2))", Some(4326)).unwrap();
+        let mp_sub = st_geometry_n(&mp, 1).unwrap();
+        assert_eq!(st_geometry_type(&mp_sub).unwrap(), "ST_Point");
+        assert_eq!(st_srid(&mp_sub).unwrap(), 4326);
+
+        let mls = geom_from_text("MULTILINESTRING((0 0,1 1),(2 2,3 3))", None).unwrap();
+        let mls_sub = st_geometry_n(&mls, 2).unwrap();
+        assert_eq!(st_geometry_type(&mls_sub).unwrap(), "ST_LineString");
+
+        let mpoly = geom_from_text(
+            "MULTIPOLYGON(((0 0,1 0,1 1,0 1,0 0)),((2 2,3 2,3 3,2 3,2 2)))",
+            None,
+        )
+        .unwrap();
+        let mpoly_sub = st_geometry_n(&mpoly, 1).unwrap();
+        assert_eq!(st_geometry_type(&mpoly_sub).unwrap(), "ST_Polygon");
+
+        let gc =
+            geom_from_text("GEOMETRYCOLLECTION(POINT(0 0),LINESTRING(0 0,1 1))", None).unwrap();
+        let gc_sub = st_geometry_n(&gc, 2).unwrap();
+        assert_eq!(st_geometry_type(&gc_sub).unwrap(), "ST_LineString");
+
+        assert!(st_geometry_n(&mp, 0).is_err());
+        assert!(st_geometry_n(&mp, 3).is_err());
+    }
+
+    #[test]
+    fn st_envelope_for_non_empty_and_empty_geometries() {
+        let line = geom_from_text("LINESTRING(1 2,3 4)", Some(3857)).unwrap();
+        let env = st_envelope(&line).unwrap();
+        assert_eq!(st_geometry_type(&env).unwrap(), "ST_Polygon");
+        assert_eq!(st_srid(&env).unwrap(), 3857);
+
+        let empty = geom_from_text("GEOMETRYCOLLECTION EMPTY", None).unwrap();
+        assert!(st_envelope(&empty).is_err());
+    }
+
+    #[test]
+    fn st_is_valid_reason_invalid_reports_message() {
+        let bowtie = geom_from_text("POLYGON((0 0,2 2,2 0,0 2,0 0))", None).unwrap();
+        let reason = st_is_valid_reason(&bowtie).unwrap();
+        assert_ne!(reason, "Valid Geometry");
+        assert!(!reason.is_empty());
     }
 }

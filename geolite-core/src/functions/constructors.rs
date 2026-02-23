@@ -162,7 +162,7 @@ pub fn st_tile_envelope(zoom: u32, tile_x: u32, tile_y: u32) -> Result<Vec<u8>> 
 mod tests {
     use super::*;
     use crate::ewkb::extract_srid;
-    use crate::functions::accessors::{st_x, st_y};
+    use crate::functions::accessors::{st_geometry_type, st_num_geometries, st_x, st_y};
     use crate::functions::io::geom_from_text;
     use crate::functions::measurement::st_area;
 
@@ -229,5 +229,39 @@ mod tests {
         let blob = st_make_envelope(0.0, 0.0, 1.0, 1.0, Some(4326)).unwrap();
         // st_make_envelope produces a Rect which is serialized as a geometry
         assert_eq!(extract_srid(&blob), Some(4326));
+    }
+
+    #[test]
+    fn st_make_line_success() {
+        let a = st_point(0.0, 0.0, Some(4326)).unwrap();
+        let b = st_point(1.0, 1.0, Some(4326)).unwrap();
+        let line = st_make_line(&a, &b).unwrap();
+        assert_eq!(extract_srid(&line), Some(4326));
+        assert_eq!(st_geometry_type(&line).unwrap(), "ST_LineString");
+    }
+
+    #[test]
+    fn st_make_polygon_success() {
+        let shell = geom_from_text("LINESTRING(0 0,2 0,2 2,0 2,0 0)", Some(3857)).unwrap();
+        let poly = st_make_polygon(&shell).unwrap();
+        assert_eq!(extract_srid(&poly), Some(3857));
+        assert_eq!(st_geometry_type(&poly).unwrap(), "ST_Polygon");
+    }
+
+    #[test]
+    fn st_collect_success() {
+        let a = st_point(0.0, 0.0, Some(4326)).unwrap();
+        let b = st_point(1.0, 1.0, Some(4326)).unwrap();
+        let gc = st_collect(&a, &b).unwrap();
+        assert_eq!(extract_srid(&gc), Some(4326));
+        assert_eq!(st_geometry_type(&gc).unwrap(), "ST_GeometryCollection");
+        assert_eq!(st_num_geometries(&gc).unwrap(), 2);
+    }
+
+    #[test]
+    fn st_tile_envelope_rejects_invalid_inputs() {
+        assert!(st_tile_envelope(32, 0, 0).is_err());
+        assert!(st_tile_envelope(1, 2, 0).is_err());
+        assert!(st_tile_envelope(1, 0, 2).is_err());
     }
 }
