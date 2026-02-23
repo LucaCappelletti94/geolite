@@ -216,6 +216,37 @@ pub fn parse_ewkb_pair(a: &[u8], b: &[u8]) -> Result<(Geometry<f64>, Geometry<f6
     Ok((ga, gb, srid))
 }
 
+fn patch_wkb_with_srid(iso_wkb: &[u8], srid_val: i32) -> Result<Vec<u8>> {
+    if iso_wkb.len() < 5 {
+        return Err(GeoLiteError::InvalidEwkb("WKB output too short"));
+    }
+    let little_endian = match iso_wkb[0] {
+        0x01 => true,
+        0x00 => false,
+        _ => return Err(GeoLiteError::InvalidEwkb("invalid byte order marker")),
+    };
+    let raw_type = if little_endian {
+        u32::from_le_bytes([iso_wkb[1], iso_wkb[2], iso_wkb[3], iso_wkb[4]])
+    } else {
+        u32::from_be_bytes([iso_wkb[1], iso_wkb[2], iso_wkb[3], iso_wkb[4]])
+    };
+    let ewkb_type = raw_type | EWKB_SRID_FLAG;
+
+    // ISO WKB: [byte_order(1)][type_u32(4)][payload…]
+    // EWKB:    [byte_order(1)][type_u32_with_flag(4)][srid_i32(4)][payload…]
+    let mut out = Vec::with_capacity(iso_wkb.len() + 4);
+    out.push(iso_wkb[0]);
+    if little_endian {
+        out.extend_from_slice(&ewkb_type.to_le_bytes());
+        out.extend_from_slice(&srid_val.to_le_bytes());
+    } else {
+        out.extend_from_slice(&ewkb_type.to_be_bytes());
+        out.extend_from_slice(&srid_val.to_be_bytes());
+    }
+    out.extend_from_slice(&iso_wkb[5..]);
+    Ok(out)
+}
+
 /// Serialise a `geo::Geometry<f64>` to EWKB with an optional SRID.
 ///
 /// If `srid` is `None`, produces standard ISO WKB (no SRID flag).
@@ -256,18 +287,7 @@ pub fn write_ewkb(geom: &Geometry<f64>, srid: Option<i32>) -> Result<Vec<u8>> {
         .map_err(GeoLiteError::Geozero)?;
 
     if let Some(srid_val) = srid {
-        // Patch the ISO WKB header to add the SRID flag + SRID value.
-        // ISO WKB: [byte_order(1)][type_u32(4)][payload…]
-        // EWKB:    [byte_order(1)][type_u32_with_flag(4)][srid_i32(4)][payload…]
-        let mut out = Vec::with_capacity(iso_wkb.len() + 4);
-        out.push(iso_wkb[0]); // byte order (0x01)
-
-        let raw_type = u32::from_le_bytes([iso_wkb[1], iso_wkb[2], iso_wkb[3], iso_wkb[4]]);
-        let ewkb_type = raw_type | EWKB_SRID_FLAG;
-        out.extend_from_slice(&ewkb_type.to_le_bytes());
-        out.extend_from_slice(&srid_val.to_le_bytes());
-        out.extend_from_slice(&iso_wkb[5..]);
-        Ok(out)
+        patch_wkb_with_srid(&iso_wkb, srid_val)
     } else {
         Ok(iso_wkb)
     }
@@ -577,5 +597,40 @@ mod tests {
             other => panic!("expected point, got {other:?}"),
         }
         assert!(is_empty_point_blob(&blob).unwrap());
+    }
+
+    #[test]
+    fn patch_wkb_with_srid_little_endian() {
+        let mut iso = vec![0x01];
+        iso.extend_from_slice(&WKB_POINT.to_le_bytes());
+        iso.extend_from_slice(&1.0f64.to_le_bytes());
+        iso.extend_from_slice(&2.0f64.to_le_bytes());
+
+        let ewkb = patch_wkb_with_srid(&iso, 4326).unwrap();
+        let hdr = parse_ewkb_header(&ewkb).unwrap();
+        assert!(hdr.little_endian);
+        assert_eq!(hdr.srid, Some(4326));
+    }
+
+    #[test]
+    fn patch_wkb_with_srid_big_endian() {
+        let mut iso = vec![0x00];
+        iso.extend_from_slice(&WKB_POINT.to_be_bytes());
+        iso.extend_from_slice(&1.0f64.to_be_bytes());
+        iso.extend_from_slice(&2.0f64.to_be_bytes());
+
+        let ewkb = patch_wkb_with_srid(&iso, 4326).unwrap();
+        let hdr = parse_ewkb_header(&ewkb).unwrap();
+        assert!(!hdr.little_endian);
+        assert_eq!(hdr.srid, Some(4326));
+
+        let (geom, srid) = parse_ewkb(&ewkb).unwrap();
+        assert_eq!(srid, Some(4326));
+        assert_eq!(geom, Geometry::Point(Point::new(1.0, 2.0)));
+    }
+
+    #[test]
+    fn patch_wkb_with_srid_rejects_short_input() {
+        assert!(patch_wkb_with_srid(&[0x01], 4326).is_err());
     }
 }

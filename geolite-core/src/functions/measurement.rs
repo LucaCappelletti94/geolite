@@ -15,6 +15,45 @@ use geo::{Geometry, Point, Rect};
 use crate::error::{GeoLiteError, Result};
 use crate::ewkb::{ensure_matching_srid, parse_ewkb, parse_ewkb_pair, write_ewkb};
 
+fn geometry_is_empty(geom: &Geometry<f64>) -> bool {
+    match geom {
+        Geometry::Point(p) => p.x().is_nan() && p.y().is_nan(),
+        Geometry::Line(_) => false,
+        Geometry::LineString(ls) => ls.0.is_empty(),
+        Geometry::Polygon(p) => p.exterior().0.is_empty(),
+        Geometry::MultiPoint(mp) => {
+            mp.0.is_empty() || mp.0.iter().all(|p| p.x().is_nan() && p.y().is_nan())
+        }
+        Geometry::MultiLineString(mls) => {
+            mls.0.is_empty() || mls.0.iter().all(|ls| ls.0.is_empty())
+        }
+        Geometry::MultiPolygon(mp) => {
+            mp.0.is_empty() || mp.0.iter().all(|p| p.exterior().0.is_empty())
+        }
+        Geometry::GeometryCollection(gc) => gc.0.is_empty() || gc.0.iter().all(geometry_is_empty),
+        Geometry::Rect(_) => false,
+        Geometry::Triangle(_) => false,
+    }
+}
+
+fn require_non_empty_geometry(geom: &Geometry<f64>, fn_name: &str) -> Result<()> {
+    if geometry_is_empty(geom) {
+        return Err(GeoLiteError::InvalidInput(format!(
+            "{fn_name} does not accept empty geometries"
+        )));
+    }
+    Ok(())
+}
+
+fn require_non_empty_point(point: Point<f64>, fn_name: &str) -> Result<Point<f64>> {
+    if point.x().is_nan() || point.y().is_nan() {
+        return Err(GeoLiteError::InvalidInput(format!(
+            "{fn_name} does not accept empty points"
+        )));
+    }
+    Ok(point)
+}
+
 /// ST_Area — planar area (square units of the CRS).
 ///
 /// # Example
@@ -99,6 +138,8 @@ fn euclidean_geometry_distance(a: &Geometry<f64>, b: &Geometry<f64>) -> f64 {
 /// ```
 pub fn st_distance(a: &[u8], b: &[u8]) -> Result<f64> {
     let (ga, gb, _) = parse_ewkb_pair(a, b)?;
+    require_non_empty_geometry(&ga, "ST_Distance")?;
+    require_non_empty_geometry(&gb, "ST_Distance")?;
     Ok(euclidean_geometry_distance(&ga, &gb))
 }
 
@@ -274,8 +315,8 @@ fn parse_two_geographic_points(
     let (ga, srid_a) = parse_ewkb(a)?;
     let (gb, srid_b) = parse_ewkb(b)?;
     let srid = ensure_matching_geographic_srid(srid_a, srid_b, fn_name)?;
-    let pa = require_point(ga)?;
-    let pb = require_point(gb)?;
+    let pa = require_non_empty_point(require_point(ga)?, fn_name)?;
+    let pb = require_non_empty_point(require_point(gb)?, fn_name)?;
     Ok((pa, pb, srid))
 }
 
@@ -374,7 +415,7 @@ pub fn st_azimuth(origin: &[u8], target: &[u8]) -> Result<f64> {
 pub fn st_project(origin: &[u8], distance: f64, azimuth: f64) -> Result<Vec<u8>> {
     let (go, srid) = parse_ewkb(origin)?;
     ensure_geographic_srid(srid, "ST_Project")?;
-    let po = require_point(go)?;
+    let po = require_non_empty_point(require_point(go)?, "ST_Project")?;
     let dest: Point<f64> = Geodesic.destination(po, azimuth.to_degrees(), distance);
     write_ewkb(&Geometry::Point(dest), srid)
 }
@@ -397,7 +438,8 @@ pub fn st_project(origin: &[u8], distance: f64, azimuth: f64) -> Result<Vec<u8>>
 /// ```
 pub fn st_closest_point(a: &[u8], b: &[u8]) -> Result<Vec<u8>> {
     let (ga, gb, srid) = parse_ewkb_pair(a, b)?;
-    let pb = require_point(gb)?;
+    require_non_empty_geometry(&ga, "ST_ClosestPoint")?;
+    let pb = require_non_empty_point(require_point(gb)?, "ST_ClosestPoint")?;
     let cp = ga.closest_point(&pb);
     let pt = match cp {
         Closest::Intersection(p) | Closest::SinglePoint(p) => p,
@@ -673,5 +715,47 @@ mod tests {
         let empty = geom_from_text("GEOMETRYCOLLECTION EMPTY", None).unwrap();
         let pt = st_point(0.0, 0.0, None).unwrap();
         assert!(st_closest_point(&empty, &pt).is_err());
+    }
+
+    #[test]
+    fn st_distance_empty_point_errors() {
+        let empty = geom_from_text("POINT EMPTY", None).unwrap();
+        let pt = st_point(0.0, 0.0, None).unwrap();
+        let err = st_distance(&empty, &pt).expect_err("empty point must error");
+        assert!(format!("{err}").contains("does not accept empty geometries"));
+    }
+
+    #[test]
+    fn st_distance_sphere_empty_point_errors() {
+        let empty = geom_from_text("POINT EMPTY", Some(4326)).unwrap();
+        let pt = st_point(0.0, 0.0, Some(4326)).unwrap();
+        assert!(st_distance_sphere(&empty, &pt).is_err());
+    }
+
+    #[test]
+    fn st_distance_spheroid_empty_point_errors() {
+        let empty = geom_from_text("POINT EMPTY", Some(4326)).unwrap();
+        let pt = st_point(0.0, 0.0, Some(4326)).unwrap();
+        assert!(st_distance_spheroid(&empty, &pt).is_err());
+    }
+
+    #[test]
+    fn st_azimuth_empty_point_errors() {
+        let empty = geom_from_text("POINT EMPTY", Some(4326)).unwrap();
+        let pt = st_point(0.0, 0.0, Some(4326)).unwrap();
+        assert!(st_azimuth(&empty, &pt).is_err());
+    }
+
+    #[test]
+    fn st_project_empty_point_errors() {
+        let empty = geom_from_text("POINT EMPTY", Some(4326)).unwrap();
+        assert!(st_project(&empty, 1_000.0, 0.0).is_err());
+    }
+
+    #[test]
+    fn st_closest_point_empty_target_point_errors() {
+        let line = geom_from_text("LINESTRING(0 0,10 0)", None).unwrap();
+        let empty = geom_from_text("POINT EMPTY", None).unwrap();
+        assert!(st_closest_point(&line, &empty).is_err());
     }
 }

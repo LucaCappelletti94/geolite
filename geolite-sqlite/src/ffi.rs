@@ -118,8 +118,7 @@ unsafe fn set_null(ctx: *mut sqlite3_context) {
 }
 
 unsafe fn set_error(ctx: *mut sqlite3_context, msg: &str) {
-    let c = CString::new(msg).unwrap_or_else(|_| CString::new("geolite error").unwrap());
-    sqlite3_result_error(ctx, c.as_ptr(), -1);
+    sqlite3_result_error(ctx, msg.as_ptr() as _, msg.len() as c_int);
 }
 
 unsafe fn require_f64_arg(
@@ -881,7 +880,13 @@ fn validate_identifier(s: &str) -> Option<&str> {
 /// On failure, sets `sqlite3_result_error` on `ctx` with the error message
 /// from SQLite and frees it via `sqlite3_free`.
 unsafe fn exec_sql(db: *mut sqlite3, ctx: *mut sqlite3_context, sql: &str) -> c_int {
-    let c_sql = CString::new(sql).expect("SQL string contains NUL byte");
+    let c_sql = match CString::new(sql) {
+        Ok(v) => v,
+        Err(_) => {
+            set_error(ctx, "internal error: generated SQL contains NUL byte");
+            return SQLITE_ERROR;
+        }
+    };
     let mut err_msg: *mut std::ffi::c_char = std::ptr::null_mut();
     let rc = sqlite3_exec(db, c_sql.as_ptr(), None, std::ptr::null_mut(), &mut err_msg);
     if rc != SQLITE_OK {
@@ -1081,34 +1086,18 @@ unsafe fn reg(
     db: *mut sqlite3,
     name: &str,
     n_arg: c_int,
+    flags: c_int,
     xfunc: unsafe extern "C" fn(*mut sqlite3_context, c_int, *mut *mut sqlite3_value),
 ) -> c_int {
-    let c_name = CString::new(name).unwrap();
+    let c_name = match CString::new(name) {
+        Ok(v) => v,
+        Err(_) => return SQLITE_ERROR,
+    };
     sqlite3_create_function_v2(
         db,
         c_name.as_ptr(),
         n_arg,
-        DET,
-        std::ptr::null_mut(),
-        Some(xfunc),
-        None,
-        None,
-        None,
-    )
-}
-
-unsafe fn reg_direct(
-    db: *mut sqlite3,
-    name: &str,
-    n_arg: c_int,
-    xfunc: unsafe extern "C" fn(*mut sqlite3_context, c_int, *mut *mut sqlite3_value),
-) -> c_int {
-    let c_name = CString::new(name).unwrap();
-    sqlite3_create_function_v2(
-        db,
-        c_name.as_ptr(),
-        n_arg,
-        DIRECT,
+        flags,
         std::ptr::null_mut(),
         Some(xfunc),
         None,
@@ -1221,7 +1210,7 @@ pub unsafe fn register_functions(db: *mut sqlite3) -> c_int {
     ];
 
     for (name, n_arg, xfunc) in deterministic {
-        let rc = reg(db, name, *n_arg, *xfunc);
+        let rc = reg(db, name, *n_arg, DET, *xfunc);
         if rc != SQLITE_OK {
             return rc;
         }
@@ -1233,7 +1222,7 @@ pub unsafe fn register_functions(db: *mut sqlite3) -> c_int {
     ];
 
     for (name, n_arg, xfunc) in direct_only {
-        let rc = reg_direct(db, name, *n_arg, *xfunc);
+        let rc = reg(db, name, *n_arg, DIRECT, *xfunc);
         if rc != SQLITE_OK {
             return rc;
         }

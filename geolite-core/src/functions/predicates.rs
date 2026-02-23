@@ -276,46 +276,35 @@ pub fn st_relate_match(matrix: &str, pattern: &str) -> Result<bool> {
     Ok(de9im_pattern_match(matrix, pattern))
 }
 
-fn validate_de9im_matrix(matrix: &str) -> Result<()> {
-    if matrix.len() != 9 {
+fn validate_de9im_text<F>(value: &str, kind: &str, allowed: F) -> Result<()>
+where
+    F: Fn(char) -> bool,
+{
+    if value.len() != 9 {
         return Err(GeoLiteError::InvalidInput(format!(
-            "invalid DE-9IM matrix length: expected 9, got {}",
-            matrix.len()
+            "invalid DE-9IM {kind} length: expected 9, got {}",
+            value.len()
         )));
     }
-    for (idx, ch) in matrix.chars().enumerate() {
-        match ch {
-            'F' | '0' | '1' | '2' => {}
-            _ => {
-                return Err(GeoLiteError::InvalidInput(format!(
-                    "invalid DE-9IM matrix character '{ch}' at position {}",
-                    idx + 1
-                )));
-            }
+    for (idx, ch) in value.chars().enumerate() {
+        if !allowed(ch) {
+            return Err(GeoLiteError::InvalidInput(format!(
+                "invalid DE-9IM {kind} character '{ch}' at position {}",
+                idx + 1
+            )));
         }
     }
     Ok(())
 }
 
+fn validate_de9im_matrix(matrix: &str) -> Result<()> {
+    validate_de9im_text(matrix, "matrix", |ch| matches!(ch, 'F' | '0' | '1' | '2'))
+}
+
 fn validate_de9im_pattern(pattern: &str) -> Result<()> {
-    if pattern.len() != 9 {
-        return Err(GeoLiteError::InvalidInput(format!(
-            "invalid DE-9IM pattern length: expected 9, got {}",
-            pattern.len()
-        )));
-    }
-    for (idx, ch) in pattern.chars().enumerate() {
-        match ch {
-            'T' | 'F' | '*' | '0' | '1' | '2' => {}
-            _ => {
-                return Err(GeoLiteError::InvalidInput(format!(
-                    "invalid DE-9IM pattern character '{ch}' at position {}",
-                    idx + 1
-                )));
-            }
-        }
-    }
-    Ok(())
+    validate_de9im_text(pattern, "pattern", |ch| {
+        matches!(ch, 'T' | 'F' | '*' | '0' | '1' | '2')
+    })
 }
 
 /// Pure DE-9IM pattern matcher.

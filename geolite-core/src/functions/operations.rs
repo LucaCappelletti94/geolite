@@ -127,7 +127,14 @@ pub fn st_buffer(blob: &[u8], distance: f64) -> Result<Vec<u8>> {
     let mut polygons = result.0;
     let out_geom = match polygons.len() {
         0 => Geometry::Polygon(geo::Polygon::new(geo::LineString::new(vec![]), vec![])),
-        1 => Geometry::Polygon(polygons.pop().expect("single polygon expected")),
+        1 => {
+            let polygon = polygons.pop().ok_or_else(|| {
+                GeoLiteError::InvalidInput(
+                    "buffer result unexpectedly missing single polygon".to_string(),
+                )
+            })?;
+            Geometry::Polygon(polygon)
+        }
         _ => Geometry::MultiPolygon(MultiPolygon::new(polygons)),
     };
     write_ewkb(&out_geom, srid)

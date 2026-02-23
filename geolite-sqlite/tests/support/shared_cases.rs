@@ -588,12 +588,75 @@ fn st_project_requires_explicit_4326_srid() {
 }
 
 #[$test_attr]
+fn st_distance_empty_point_errors() {
+    let db = ActiveTestDb::open();
+    let err = db
+        .try_query_i64("SELECT ST_Distance(ST_GeomFromText('POINT EMPTY'), ST_Point(0,0))")
+        .expect_err("empty point should be rejected");
+    assert!(
+        err.contains("does not accept empty geometries"),
+        "unexpected error: {err}"
+    );
+}
+
+#[$test_attr]
+fn st_distance_sphere_empty_point_errors() {
+    let db = ActiveTestDb::open();
+    let err = db
+        .try_query_i64(
+            "SELECT ST_DistanceSphere(ST_GeomFromText('POINT EMPTY', 4326), ST_Point(0,0,4326))",
+        )
+        .expect_err("empty point should be rejected");
+    assert!(err.contains("does not accept empty points"), "unexpected error: {err}");
+}
+
+#[$test_attr]
+fn st_distance_spheroid_empty_point_errors() {
+    let db = ActiveTestDb::open();
+    let err = db
+        .try_query_i64(
+            "SELECT ST_DistanceSpheroid(ST_GeomFromText('POINT EMPTY', 4326), ST_Point(0,0,4326))",
+        )
+        .expect_err("empty point should be rejected");
+    assert!(err.contains("does not accept empty points"), "unexpected error: {err}");
+}
+
+#[$test_attr]
+fn st_azimuth_empty_point_errors() {
+    let db = ActiveTestDb::open();
+    let err = db
+        .try_query_i64("SELECT ST_Azimuth(ST_GeomFromText('POINT EMPTY', 4326), ST_Point(0,1,4326))")
+        .expect_err("empty point should be rejected");
+    assert!(err.contains("does not accept empty points"), "unexpected error: {err}");
+}
+
+#[$test_attr]
+fn st_project_empty_point_errors() {
+    let db = ActiveTestDb::open();
+    let err = db
+        .try_query_i64("SELECT ST_Project(ST_GeomFromText('POINT EMPTY', 4326), 1000.0, 0.0)")
+        .expect_err("empty point should be rejected");
+    assert!(err.contains("does not accept empty points"), "unexpected error: {err}");
+}
+
+#[$test_attr]
 fn st_closest_point() {
     let db = ActiveTestDb::open();
     let y = db.query_f64(
         "SELECT ST_Y(ST_ClosestPoint(ST_GeomFromText('LINESTRING(0 0,10 0)'), ST_Point(5,5)))",
     );
     assert!(y.abs() < 1e-10, "y = {y}");
+}
+
+#[$test_attr]
+fn st_closest_point_empty_target_point_errors() {
+    let db = ActiveTestDb::open();
+    let err = db
+        .try_query_i64(
+            "SELECT ST_X(ST_ClosestPoint(ST_GeomFromText('LINESTRING(0 0,10 0)'), ST_GeomFromText('POINT EMPTY')))",
+        )
+        .expect_err("empty target point should be rejected");
+    assert!(err.contains("does not accept empty points"), "unexpected error: {err}");
 }
 
 // ── Predicates ────────────────────────────────────────────────────────────────

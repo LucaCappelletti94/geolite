@@ -31,31 +31,42 @@ pub struct Geometry;
 pub struct Geography;
 
 #[cfg(any(feature = "sqlite", feature = "postgres"))]
-fn parse_geometry_blob(
+type DynError = Box<dyn std::error::Error + Send + Sync>;
+
+#[cfg(any(feature = "sqlite", feature = "postgres"))]
+fn parse_blob_with_srid_constraint(
     blob: &[u8],
-) -> std::result::Result<geo::Geometry<f64>, Box<dyn std::error::Error + Send + Sync>> {
-    let (geom, _srid) = geolite_core::ewkb::parse_ewkb(blob)
-        .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+    required_srid: Option<i32>,
+) -> std::result::Result<geo::Geometry<f64>, DynError> {
+    let (geom, srid) = geolite_core::ewkb::parse_ewkb(blob).map_err(|e| Box::new(e) as DynError)?;
+    if let Some(expected) = required_srid {
+        match srid {
+            Some(actual) if actual == expected => {}
+            Some(other) => {
+                return Err(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("geography EWKB must use SRID {expected} (got {other})"),
+                )));
+            }
+            None => {
+                return Err(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("geography EWKB must include SRID {expected}"),
+                )));
+            }
+        }
+    }
     Ok(geom)
 }
 
 #[cfg(any(feature = "sqlite", feature = "postgres"))]
-fn parse_geography_blob(
-    blob: &[u8],
-) -> std::result::Result<geo::Geometry<f64>, Box<dyn std::error::Error + Send + Sync>> {
-    let (geom, srid) = geolite_core::ewkb::parse_ewkb(blob)
-        .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
-    match srid {
-        Some(4326) => Ok(geom),
-        Some(other) => Err(Box::new(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!("geography EWKB must use SRID 4326 (got {other})"),
-        ))),
-        None => Err(Box::new(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "geography EWKB must include SRID 4326",
-        ))),
-    }
+fn parse_geometry_blob(blob: &[u8]) -> std::result::Result<geo::Geometry<f64>, DynError> {
+    parse_blob_with_srid_constraint(blob, None)
+}
+
+#[cfg(any(feature = "sqlite", feature = "postgres"))]
+fn parse_geography_blob(blob: &[u8]) -> std::result::Result<geo::Geometry<f64>, DynError> {
+    parse_blob_with_srid_constraint(blob, Some(4326))
 }
 
 // ── SQLite FromSql / ToSql ────────────────────────────────────────────────────
