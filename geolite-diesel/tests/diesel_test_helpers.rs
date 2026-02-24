@@ -80,6 +80,36 @@ fn st_point_and_astext() {
     assert!(wkt.contains("2.5"), "got: {wkt}");
 }
 
+#[$test_attr]
+fn st_point_srid_execution() {
+    let mut c = conn();
+    let result: I32Result = diesel::sql_query("SELECT ST_SRID(ST_Point(1.5, 2.5, 4326)) AS val")
+        .get_result(&mut c)
+        .unwrap();
+    assert_eq!(result.val, Some(4326));
+}
+
+#[$test_attr]
+fn st_makeenvelope_srid_execution() {
+    let mut c = conn();
+    let result: I32Result =
+        diesel::sql_query("SELECT ST_SRID(ST_MakeEnvelope(0, 0, 1, 1, 3857)) AS val")
+            .get_result(&mut c)
+            .unwrap();
+    assert_eq!(result.val, Some(3857));
+}
+
+#[$test_attr]
+fn st_geomfromwkb_srid_execution() {
+    let mut c = conn();
+    let result: I32Result = diesel::sql_query(
+        "SELECT ST_SRID(ST_GeomFromWKB(ST_AsBinary(ST_Point(1.5, 2.5)), 4326)) AS val",
+    )
+    .get_result(&mut c)
+    .unwrap();
+    assert_eq!(result.val, Some(4326));
+}
+
 // ── ST_Distance ──────────────────────────────────────────────────────────────
 
 #[$test_attr]

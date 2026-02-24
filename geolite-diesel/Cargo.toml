@@ -28,7 +28,7 @@ geolite-sqlite = { version = "0.1.0", path = "../geolite-sqlite" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 libsqlite3-sys = { version = ">=0.17.2, <0.36.0" }
-testcontainers-modules = { version = "0.14", features = ["postgres"] }
+testcontainers-modules = { version = "0.15", features = ["postgres"] }
 tokio = { version = "1", features = ["rt", "macros"] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
@@ -38,22 +38,27 @@ wasm-bindgen-test = "0.3"
 [[test]]
 name = "sqlite_types"
 path = "tests/sqlite_types.rs"
+required-features = ["sqlite"]
 
 [[test]]
 name = "expression_methods"
 path = "tests/expression_methods.rs"
+required-features = ["sqlite"]
 
 [[test]]
 name = "postgres_integration"
 path = "tests/postgres_integration.rs"
+required-features = ["postgres"]
 
 [[test]]
 name = "sqlite_integration"
 path = "tests/sqlite_integration.rs"
+required-features = ["sqlite"]
 
 [[test]]
 name = "wasm_integration"
 path = "tests/wasm_integration.rs"
+required-features = ["sqlite"]
 
 [features]
 default = []

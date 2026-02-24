@@ -351,6 +351,17 @@ fn debug_query_st_geomfromwkb() {
 }
 
 #[test]
+fn debug_query_st_geomfromwkb_srid() {
+    use geolite_diesel::functions::*;
+    let wkb = diesel::dsl::sql::<diesel::sql_types::Nullable<diesel::sql_types::Binary>>("x");
+    // sql_name = "ST_GeomFromWKB" — Rust alias maps to the same SQL function.
+    assert_sql_contains!(
+        diesel::dsl::select(st_geomfromwkb_srid(wkb, i!())),
+        "st_geomfromwkb"
+    );
+}
+
+#[test]
 fn debug_query_st_geomfromwkb_accepts_st_asbinary_output() {
     use geolite_diesel::functions::*;
     assert_sql_contains!(
@@ -402,10 +413,30 @@ fn debug_query_st_point() {
 }
 
 #[test]
+fn debug_query_st_point_srid() {
+    use geolite_diesel::functions::*;
+    // sql_name = "ST_Point" — Rust alias maps to the same SQL function.
+    assert_sql_contains!(
+        diesel::dsl::select(st_point_srid(d!(), d!(), i!())),
+        "st_point"
+    );
+}
+
+#[test]
 fn debug_query_st_makeenvelope() {
     use geolite_diesel::functions::*;
     assert_sql_contains!(
         diesel::dsl::select(st_makeenvelope(d!(), d!(), d!(), d!())),
+        "st_makeenvelope"
+    );
+}
+
+#[test]
+fn debug_query_st_makeenvelope_srid() {
+    use geolite_diesel::functions::*;
+    // sql_name = "ST_MakeEnvelope" — Rust alias maps to the same SQL function.
+    assert_sql_contains!(
+        diesel::dsl::select(st_makeenvelope_srid(d!(), d!(), d!(), d!(), i!())),
         "st_makeenvelope"
     );
 }

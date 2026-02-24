@@ -111,6 +111,10 @@ cargo build --release -p geolite-sqlite --target wasm32-unknown-unknown
 
 # Workspace tests
 cargo test --workspace
+
+# Diesel integration (feature-gated)
+cargo test -p geolite-diesel --features sqlite
+cargo check -p geolite-diesel --features postgres
 ```
 
 ## Development

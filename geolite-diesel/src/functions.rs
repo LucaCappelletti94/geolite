@@ -79,6 +79,12 @@ diesel::define_sql_function! {
 }
 
 diesel::define_sql_function! {
+    /// Parse ISO WKB bytes with explicit SRID into a geometry BLOB.
+    #[sql_name = "ST_GeomFromWKB"]
+    fn st_geomfromwkb_srid(wkb: Nullable<Binary>, srid: Integer) -> Nullable<Geometry>;
+}
+
+diesel::define_sql_function! {
     /// Parse EWKB bytes into a geometry BLOB.
     fn st_geomfromewkb(ewkb: Nullable<Binary>) -> Nullable<Geometry>;
 }
@@ -101,8 +107,26 @@ diesel::define_sql_function! {
 }
 
 diesel::define_sql_function! {
+    /// Construct a Point geometry from X and Y coordinates with explicit SRID.
+    #[sql_name = "ST_Point"]
+    fn st_point_srid(x: Double, y: Double, srid: Integer) -> Geometry;
+}
+
+diesel::define_sql_function! {
     /// Construct a rectangular envelope polygon from corner coordinates.
     fn st_makeenvelope(xmin: Double, ymin: Double, xmax: Double, ymax: Double) -> Geometry;
+}
+
+diesel::define_sql_function! {
+    /// Construct a rectangular envelope polygon with explicit SRID.
+    #[sql_name = "ST_MakeEnvelope"]
+    fn st_makeenvelope_srid(
+        xmin: Double,
+        ymin: Double,
+        xmax: Double,
+        ymax: Double,
+        srid: Integer,
+    ) -> Geometry;
 }
 
 diesel::define_sql_function! {
