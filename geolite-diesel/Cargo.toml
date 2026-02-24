@@ -13,6 +13,10 @@ keywords     = ["geospatial", "diesel", "postgis", "ewkb", "sqlite"]
 categories   = ["database", "api-bindings"]
 autotests    = false
 
+[package.metadata.docs.rs]
+features = ["sqlite"]
+rustdoc-args = ["--cfg", "docsrs"]
+
 [lib]
 name = "geolite_diesel"
 

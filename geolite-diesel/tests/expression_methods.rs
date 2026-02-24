@@ -179,6 +179,26 @@ fn diesel_sql_functions_are_backed_by_sqlite_catalog() {
     );
 }
 
+#[test]
+fn catalog_functions_are_covered_by_diesel_declarations() {
+    let catalog_signatures: BTreeSet<(String, usize)> = SQLITE_DETERMINISTIC_FUNCTIONS
+        .iter()
+        .map(|spec| (spec.name.to_ascii_uppercase(), spec.n_arg as usize))
+        .collect();
+
+    let diesel_signatures = diesel_sql_signatures(include_str!("../src/functions.rs"));
+
+    let missing_diesel: Vec<_> = catalog_signatures
+        .difference(&diesel_signatures)
+        .cloned()
+        .collect();
+
+    assert!(
+        missing_diesel.is_empty(),
+        "catalog functions not covered by Diesel declarations: {missing_diesel:?}"
+    );
+}
+
 // ── I/O ─────────────────────────────────────────────────────────────────────
 
 #[test]

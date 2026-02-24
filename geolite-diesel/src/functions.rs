@@ -408,7 +408,10 @@ diesel::define_sql_function! {
 }
 
 diesel::define_sql_function! {
-    /// Return whether A and B are within the given Euclidean distance.
+    /// Return whether A and B are within the given **Euclidean** (planar) distance.
+    ///
+    /// Note: This uses planar distance only. For spherical distance, use
+    /// `ST_DistanceSphere` with a manual threshold comparison instead.
     fn st_dwithin(a: Nullable<Geometry>, b: Nullable<Geometry>, distance: Double) -> Nullable<diesel::sql_types::Bool>;
 }
 
