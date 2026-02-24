@@ -51,14 +51,6 @@ fn setup_features_table(c: &mut SqliteConnection) {
     .unwrap();
 }
 
-fn hex_to_bytes(hex: &str) -> Vec<u8> {
-    assert_eq!(hex.len() % 2, 0, "hex string must have even length");
-    (0..hex.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).expect("invalid hex byte"))
-        .collect()
-}
-
 // ── Spatial function execution via Diesel ────────────────────────────────────
 
 macro_rules! define_diesel_sqlite_tests {
@@ -290,55 +282,35 @@ fn diesel_select_st_geomfromtext() {
 }
 
 #[$test_attr]
-fn diesel_select_st_geomfromewkb_st_asewkb_preserves_little_endian_zm_payload() {
+fn diesel_select_st_geomfromewkb_rejects_little_endian_zm_payload() {
     use geolite_diesel::functions::*;
 
     let mut c = conn();
-    let ewkb_hex = "01010000C0000000000000F03F000000000000004000000000000008400000000000001040";
     let ewkb_expr = diesel::dsl::sql::<diesel::sql_types::Nullable<diesel::sql_types::Binary>>(
         "X'01010000C0000000000000F03F000000000000004000000000000008400000000000001040'",
     );
 
-    let roundtrip: Option<Vec<u8>> =
-        diesel::dsl::select(st_asewkb(st_geomfromewkb(ewkb_expr)))
-            .get_result(&mut c)
-            .unwrap();
-    assert_eq!(roundtrip, Some(hex_to_bytes(ewkb_hex)));
-
-    let zmflag: Option<i16> = diesel::dsl::select(st_zmflag(st_geomfromewkb(
-        diesel::dsl::sql::<diesel::sql_types::Nullable<diesel::sql_types::Binary>>(
-            "X'01010000C0000000000000F03F000000000000004000000000000008400000000000001040'",
-        ),
-    )))
-    .get_result(&mut c)
-    .unwrap();
-    assert_eq!(zmflag, Some(3));
+    let err = diesel::dsl::select(st_asewkb(st_geomfromewkb(ewkb_expr)))
+        .get_result::<Option<Vec<u8>>>(&mut c)
+        .expect_err("ZM payload must be rejected");
+    let msg = format!("{err}");
+    assert!(msg.contains("unsupported coordinate dimensions"), "got: {msg}");
 }
 
 #[$test_attr]
-fn diesel_select_st_geomfromewkb_st_asewkb_preserves_big_endian_zm_payload() {
+fn diesel_select_st_geomfromewkb_rejects_big_endian_zm_payload() {
     use geolite_diesel::functions::*;
 
     let mut c = conn();
-    let ewkb_hex = "00C00000013FF0000000000000400000000000000040080000000000004010000000000000";
     let ewkb_expr = diesel::dsl::sql::<diesel::sql_types::Nullable<diesel::sql_types::Binary>>(
         "X'00C00000013FF0000000000000400000000000000040080000000000004010000000000000'",
     );
 
-    let roundtrip: Option<Vec<u8>> =
-        diesel::dsl::select(st_asewkb(st_geomfromewkb(ewkb_expr)))
-            .get_result(&mut c)
-            .unwrap();
-    assert_eq!(roundtrip, Some(hex_to_bytes(ewkb_hex)));
-
-    let zmflag: Option<i16> = diesel::dsl::select(st_zmflag(st_geomfromewkb(
-        diesel::dsl::sql::<diesel::sql_types::Nullable<diesel::sql_types::Binary>>(
-            "X'00C00000013FF0000000000000400000000000000040080000000000004010000000000000'",
-        ),
-    )))
-    .get_result(&mut c)
-    .unwrap();
-    assert_eq!(zmflag, Some(3));
+    let err = diesel::dsl::select(st_asewkb(st_geomfromewkb(ewkb_expr)))
+        .get_result::<Option<Vec<u8>>>(&mut c)
+        .expect_err("big-endian ZM payload must be rejected");
+    let msg = format!("{err}");
+    assert!(msg.contains("unsupported coordinate dimensions"), "got: {msg}");
 }
 
 #[$test_attr]

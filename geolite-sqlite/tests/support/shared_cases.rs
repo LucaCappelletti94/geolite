@@ -71,27 +71,25 @@ fn ewkb_round_trip() {
 }
 
 #[$test_attr]
-fn ewkb_round_trip_preserves_zm_payload() {
+fn ewkb_round_trip_rejects_zm_payload() {
     let db = ActiveTestDb::open();
-    let hex = db.query_text(
-        "SELECT hex(ST_AsEWKB(ST_GeomFromEWKB(X'01010000C0000000000000F03F000000000000004000000000000008400000000000001040')))",
-    );
-    assert_eq!(
-        hex,
-        "01010000C0000000000000F03F000000000000004000000000000008400000000000001040"
-    );
+    let err = db
+        .try_query_i64(
+            "SELECT length(ST_AsEWKB(ST_GeomFromEWKB(X'01010000C0000000000000F03F000000000000004000000000000008400000000000001040')))",
+        )
+        .expect_err("ZM payload must be rejected");
+    assert!(err.contains("unsupported coordinate dimensions"));
 }
 
 #[$test_attr]
-fn ewkb_round_trip_preserves_big_endian_payload() {
+fn ewkb_round_trip_rejects_big_endian_zm_payload() {
     let db = ActiveTestDb::open();
-    let hex = db.query_text(
-        "SELECT hex(ST_AsEWKB(ST_GeomFromEWKB(X'00C00000013FF0000000000000400000000000000040080000000000004010000000000000')))",
-    );
-    assert_eq!(
-        hex,
-        "00C00000013FF0000000000000400000000000000040080000000000004010000000000000"
-    );
+    let err = db
+        .try_query_i64(
+            "SELECT length(ST_AsEWKB(ST_GeomFromEWKB(X'00C00000013FF0000000000000400000000000000040080000000000004010000000000000')))",
+        )
+        .expect_err("big-endian ZM payload must be rejected");
+    assert!(err.contains("unsupported coordinate dimensions"));
 }
 
 #[$test_attr]
@@ -1600,6 +1598,43 @@ fn spatial_index_rejects_invalid_names() {
     // DropSpatialIndex also validates
     let res = db.try_query_i64("SELECT DropSpatialIndex('ok', 'col name')");
     assert!(res.is_err(), "should reject spaces in col: {res:?}");
+}
+
+#[$test_attr]
+fn spatial_index_null_identifiers_error_instead_of_null() {
+    let db = ActiveTestDb::open();
+
+    let create_null_table = db
+        .try_query_i64("SELECT CreateSpatialIndex(NULL, 'geom')")
+        .expect_err("NULL table must be a hard error");
+    assert!(
+        create_null_table.contains("table name must not be NULL"),
+        "unexpected error message: {create_null_table}"
+    );
+
+    let create_null_column = db
+        .try_query_i64("SELECT CreateSpatialIndex('pts', NULL)")
+        .expect_err("NULL column must be a hard error");
+    assert!(
+        create_null_column.contains("column name must not be NULL"),
+        "unexpected error message: {create_null_column}"
+    );
+
+    let drop_null_table = db
+        .try_query_i64("SELECT DropSpatialIndex(NULL, 'geom')")
+        .expect_err("NULL table must be a hard error");
+    assert!(
+        drop_null_table.contains("table name must not be NULL"),
+        "unexpected error message: {drop_null_table}"
+    );
+
+    let drop_null_column = db
+        .try_query_i64("SELECT DropSpatialIndex('pts', NULL)")
+        .expect_err("NULL column must be a hard error");
+    assert!(
+        drop_null_column.contains("column name must not be NULL"),
+        "unexpected error message: {drop_null_column}"
+    );
 }
 
 #[$test_attr]
