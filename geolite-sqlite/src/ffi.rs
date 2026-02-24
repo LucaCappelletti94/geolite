@@ -91,17 +91,26 @@ unsafe fn get_i32_arg(argv: *mut *mut sqlite3_value, i: usize) -> SqlArg<i32> {
 
 // ── Result-setting helpers ───────────────────────────────────────────────────
 
+fn checked_c_int_len(len: usize) -> Option<c_int> {
+    c_int::try_from(len).ok()
+}
+
+const ERROR_MSG_TOO_LARGE: &str = "internal error: error message too large";
+
 unsafe fn set_blob(ctx: *mut sqlite3_context, data: &[u8]) {
-    sqlite3_result_blob(
-        ctx,
-        data.as_ptr() as _,
-        data.len() as c_int,
-        sqlite_transient(),
-    );
+    let Some(len) = checked_c_int_len(data.len()) else {
+        set_error(ctx, "internal error: BLOB result too large");
+        return;
+    };
+    sqlite3_result_blob(ctx, data.as_ptr().cast(), len, sqlite_transient());
 }
 
 unsafe fn set_text(ctx: *mut sqlite3_context, s: &str) {
-    sqlite3_result_text(ctx, s.as_ptr() as _, s.len() as c_int, sqlite_transient());
+    let Some(len) = checked_c_int_len(s.len()) else {
+        set_error(ctx, "internal error: text result too large");
+        return;
+    };
+    sqlite3_result_text(ctx, s.as_ptr().cast(), len, sqlite_transient());
 }
 
 unsafe fn set_f64(ctx: *mut sqlite3_context, v: f64) {
@@ -118,7 +127,14 @@ unsafe fn set_null(ctx: *mut sqlite3_context) {
 }
 
 unsafe fn set_error(ctx: *mut sqlite3_context, msg: &str) {
-    sqlite3_result_error(ctx, msg.as_ptr() as _, msg.len() as c_int);
+    if let Some(len) = checked_c_int_len(msg.len()) {
+        sqlite3_result_error(ctx, msg.as_ptr().cast(), len);
+        return;
+    }
+
+    let len = c_int::try_from(ERROR_MSG_TOO_LARGE.len())
+        .expect("fallback error length must fit in c_int");
+    sqlite3_result_error(ctx, ERROR_MSG_TOO_LARGE.as_ptr().cast(), len);
 }
 
 unsafe fn require_f64_arg(
@@ -932,44 +948,52 @@ fn validate_identifier(s: &str) -> Option<&str> {
     }
 }
 
+fn sql_to_cstring(sql: &str) -> std::result::Result<CString, std::ffi::NulError> {
+    CString::new(sql)
+}
+
+unsafe fn exec_sql_inner(db: *mut sqlite3, sql: &str, ctx: Option<*mut sqlite3_context>) -> c_int {
+    let c_sql = match sql_to_cstring(sql) {
+        Ok(v) => v,
+        Err(_) => {
+            if let Some(ctx) = ctx {
+                set_error(ctx, "internal error: generated SQL contains NUL byte");
+            }
+            return SQLITE_ERROR;
+        }
+    };
+
+    let mut err_msg: *mut std::ffi::c_char = std::ptr::null_mut();
+    let rc = sqlite3_exec(db, c_sql.as_ptr(), None, std::ptr::null_mut(), &mut err_msg);
+
+    if rc != SQLITE_OK {
+        if let Some(ctx) = ctx {
+            if err_msg.is_null() {
+                set_error(ctx, "exec_sql failed");
+            } else {
+                let msg = CStr::from_ptr(err_msg).to_string_lossy();
+                set_error(ctx, &msg);
+            }
+        }
+    }
+
+    if !err_msg.is_null() {
+        sqlite3_free(err_msg.cast());
+    }
+    rc
+}
+
 /// Run SQL via `sqlite3_exec`, returning `SQLITE_OK` on success.
 /// On failure, sets `sqlite3_result_error` on `ctx` with the error message
 /// from SQLite and frees it via `sqlite3_free`.
 unsafe fn exec_sql(db: *mut sqlite3, ctx: *mut sqlite3_context, sql: &str) -> c_int {
-    let c_sql = match CString::new(sql) {
-        Ok(v) => v,
-        Err(_) => {
-            set_error(ctx, "internal error: generated SQL contains NUL byte");
-            return SQLITE_ERROR;
-        }
-    };
-    let mut err_msg: *mut std::ffi::c_char = std::ptr::null_mut();
-    let rc = sqlite3_exec(db, c_sql.as_ptr(), None, std::ptr::null_mut(), &mut err_msg);
-    if rc != SQLITE_OK {
-        if !err_msg.is_null() {
-            let msg = CStr::from_ptr(err_msg).to_string_lossy();
-            set_error(ctx, &msg);
-            sqlite3_free(err_msg as _);
-        } else {
-            set_error(ctx, "exec_sql failed");
-        }
-    }
-    rc
+    exec_sql_inner(db, sql, Some(ctx))
 }
 
 /// Run SQL via `sqlite3_exec` but never touch sqlite3_result_error.
 /// Used for best-effort rollback paths where the original error should win.
 unsafe fn exec_sql_silent(db: *mut sqlite3, sql: &str) -> c_int {
-    let c_sql = match CString::new(sql) {
-        Ok(v) => v,
-        Err(_) => return SQLITE_ERROR,
-    };
-    let mut err_msg: *mut std::ffi::c_char = std::ptr::null_mut();
-    let rc = sqlite3_exec(db, c_sql.as_ptr(), None, std::ptr::null_mut(), &mut err_msg);
-    if !err_msg.is_null() {
-        sqlite3_free(err_msg as _);
-    }
-    rc
+    exec_sql_inner(db, sql, None)
 }
 
 unsafe fn rollback_savepoint(db: *mut sqlite3, ctx: *mut sqlite3_context, savepoint: &str) {
@@ -1345,4 +1369,33 @@ pub unsafe extern "C" fn sqlite3_geolitesqlite_init(
     p_api: *mut sqlite3_api_routines,
 ) -> c_int {
     sqlite3_geolite_init(db, pz_err_msg, p_api)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn checked_c_int_len_accepts_small_and_boundary_values() {
+        assert_eq!(checked_c_int_len(0), Some(0));
+        assert_eq!(checked_c_int_len(1), Some(1));
+        assert_eq!(checked_c_int_len(c_int::MAX as usize), Some(c_int::MAX));
+    }
+
+    #[test]
+    fn checked_c_int_len_rejects_values_larger_than_c_int() {
+        assert_eq!(checked_c_int_len((c_int::MAX as usize) + 1), None);
+        assert_eq!(checked_c_int_len(usize::MAX), None);
+    }
+
+    #[test]
+    fn sql_to_cstring_accepts_sql_without_nul() {
+        let c_sql = sql_to_cstring("SELECT 1").expect("valid SQL should convert to CString");
+        assert_eq!(c_sql.as_c_str().to_bytes(), b"SELECT 1");
+    }
+
+    #[test]
+    fn sql_to_cstring_rejects_sql_with_nul() {
+        assert!(sql_to_cstring("SELECT\0 1").is_err());
+    }
 }
