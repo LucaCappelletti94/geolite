@@ -14,30 +14,10 @@ use geo::{Geometry, Point, Rect};
 
 use crate::error::{GeoLiteError, Result};
 use crate::ewkb::{ensure_matching_srid, parse_ewkb, parse_ewkb_pair, write_ewkb};
-
-fn geometry_is_empty(geom: &Geometry<f64>) -> bool {
-    match geom {
-        Geometry::Point(p) => p.x().is_nan() && p.y().is_nan(),
-        Geometry::Line(_) => false,
-        Geometry::LineString(ls) => ls.0.is_empty(),
-        Geometry::Polygon(p) => p.exterior().0.is_empty(),
-        Geometry::MultiPoint(mp) => {
-            mp.0.is_empty() || mp.0.iter().all(|p| p.x().is_nan() && p.y().is_nan())
-        }
-        Geometry::MultiLineString(mls) => {
-            mls.0.is_empty() || mls.0.iter().all(|ls| ls.0.is_empty())
-        }
-        Geometry::MultiPolygon(mp) => {
-            mp.0.is_empty() || mp.0.iter().all(|p| p.exterior().0.is_empty())
-        }
-        Geometry::GeometryCollection(gc) => gc.0.is_empty() || gc.0.iter().all(geometry_is_empty),
-        Geometry::Rect(_) => false,
-        Geometry::Triangle(_) => false,
-    }
-}
+use crate::functions::emptiness::is_empty_geometry;
 
 fn require_non_empty_geometry(geom: &Geometry<f64>, fn_name: &str) -> Result<()> {
-    if geometry_is_empty(geom) {
+    if is_empty_geometry(geom) {
         return Err(GeoLiteError::InvalidInput(format!(
             "{fn_name} does not accept empty geometries"
         )));
@@ -201,6 +181,8 @@ pub fn st_point_on_surface(blob: &[u8]) -> Result<Vec<u8>> {
 /// ```
 pub fn st_hausdorff_distance(a: &[u8], b: &[u8]) -> Result<f64> {
     let (ga, gb, _) = parse_ewkb_pair(a, b)?;
+    require_non_empty_geometry(&ga, "ST_HausdorffDistance")?;
+    require_non_empty_geometry(&gb, "ST_HausdorffDistance")?;
     Ok(ga.hausdorff_distance(&gb))
 }
 
@@ -609,6 +591,14 @@ mod tests {
     fn hausdorff_identical_is_zero() {
         let line = geom_from_text("LINESTRING(0 0,1 1,2 0)", None).unwrap();
         assert!(st_hausdorff_distance(&line, &line).unwrap().abs() < 1e-10);
+    }
+
+    #[test]
+    fn st_hausdorff_distance_empty_point_errors() {
+        let empty = geom_from_text("POINT EMPTY", None).unwrap();
+        let pt = st_point(0.0, 0.0, None).unwrap();
+        let err = st_hausdorff_distance(&empty, &pt).expect_err("empty point must error");
+        assert!(format!("{err}").contains("does not accept empty geometries"));
     }
 
     // ── Closest point ──────────────────────────────────────────────

@@ -253,8 +253,7 @@ pub fn st_relate(a: &[u8], b: &[u8]) -> Result<String> {
 /// ```
 pub fn st_relate_match_geoms(a: &[u8], b: &[u8], pattern: &str) -> Result<bool> {
     let (ga, gb, _) = parse_ewkb_pair(a, b)?;
-    validate_de9im_pattern(pattern)?;
-    // Use geo's built-in pattern matching
+    // Use geo's built-in pattern matching; this validates `pattern`.
     ga.relate(&gb)
         .matches(pattern)
         .map_err(|e| GeoLiteError::InvalidInput(format!("invalid DE-9IM pattern: {e}")))
