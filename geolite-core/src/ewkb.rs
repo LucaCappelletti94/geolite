@@ -38,6 +38,25 @@ fn read_f64(bytes: [u8; 8], little_endian: bool) -> f64 {
     }
 }
 
+fn dimensions_label(has_z: bool, has_m: bool) -> &'static str {
+    match (has_z, has_m) {
+        (true, true) => "ZM",
+        (true, false) => "Z",
+        (false, true) => "M",
+        (false, false) => "XY",
+    }
+}
+
+/// Reject Z/M coordinate layouts when the operation can only process XY.
+pub fn ensure_xy_only(has_z: bool, has_m: bool) -> Result<()> {
+    if has_z || has_m {
+        return Err(GeoLiteError::UnsupportedDimensions {
+            dimensions: dimensions_label(has_z, has_m),
+        });
+    }
+    Ok(())
+}
+
 fn point_is_empty_with_header(blob: &[u8], header: &EwkbHeader) -> Result<bool> {
     if header.geom_type != WKB_POINT {
         return Ok(false);
@@ -199,6 +218,7 @@ pub fn ensure_matching_srid(left: Option<i32>, right: Option<i32>) -> Result<Opt
 /// ```
 pub fn parse_ewkb(blob: &[u8]) -> Result<(Geometry<f64>, Option<i32>)> {
     let header = parse_ewkb_header(blob)?;
+    ensure_xy_only(header.has_z, header.has_m)?;
     if point_is_empty_with_header(blob, &header)? {
         return Ok((Geometry::Point(Point::new(f64::NAN, f64::NAN)), header.srid));
     }
@@ -523,7 +543,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_ewkb_with_zm_point_drops_extra_dimensions() {
+    fn parse_ewkb_with_zm_point_is_rejected() {
         let mut blob = vec![0x01];
         let typ = WKB_POINT | EWKB_Z_FLAG | EWKB_M_FLAG;
         blob.extend_from_slice(&typ.to_le_bytes());
@@ -532,9 +552,8 @@ mod tests {
         blob.extend_from_slice(&3.0f64.to_le_bytes()); // Z
         blob.extend_from_slice(&4.0f64.to_le_bytes()); // M
 
-        let (geom, srid) = parse_ewkb(&blob).unwrap();
-        assert_eq!(srid, None);
-        assert_eq!(geom, Geometry::Point(geo::Point::new(1.0, 2.0)));
+        let err = parse_ewkb(&blob).expect_err("Z/M payloads must not be flattened to XY");
+        assert!(format!("{err}").contains("unsupported coordinate dimensions"));
     }
 
     #[test]

@@ -10,7 +10,8 @@ use serde_json::Value;
 
 use crate::error::{GeoLiteError, Result};
 use crate::ewkb::{
-    extract_srid, is_empty_point_blob, parse_ewkb, parse_ewkb_header, write_ewkb, WKB_POINT,
+    ensure_xy_only, extract_srid, is_empty_point_blob, parse_ewkb, parse_ewkb_header, write_ewkb,
+    EWKB_M_FLAG, EWKB_Z_FLAG, WKB_POINT,
 };
 
 const EMPTY_POINT_GEOJSON: &str = r#"{"type":"Point","coordinates":[]}"#;
@@ -46,6 +47,40 @@ fn is_empty_point_geojson(json: &str) -> bool {
         Some(coords) if coords.is_empty()
     );
     is_point && is_empty_coords
+}
+
+fn read_raw_wkb_type(wkb: &[u8]) -> Result<u32> {
+    if wkb.len() < 5 {
+        return Err(GeoLiteError::InvalidEwkb("blob too short"));
+    }
+    let little_endian = match wkb[0] {
+        0x01 => true,
+        0x00 => false,
+        _ => return Err(GeoLiteError::InvalidEwkb("invalid byte order marker")),
+    };
+    let raw_type = if little_endian {
+        u32::from_le_bytes([wkb[1], wkb[2], wkb[3], wkb[4]])
+    } else {
+        u32::from_be_bytes([wkb[1], wkb[2], wkb[3], wkb[4]])
+    };
+    Ok(raw_type)
+}
+
+fn wkb_has_z_or_m(raw_type: u32) -> (bool, bool) {
+    let has_ewkb_z = (raw_type & EWKB_Z_FLAG) != 0;
+    let has_ewkb_m = (raw_type & EWKB_M_FLAG) != 0;
+    if has_ewkb_z || has_ewkb_m {
+        return (has_ewkb_z, has_ewkb_m);
+    }
+
+    // ISO WKB: base+1000 => Z, base+2000 => M, base+3000 => ZM.
+    let dim_code = raw_type / 1000;
+    match dim_code {
+        1 => (true, false),
+        2 => (false, true),
+        3 => (true, true),
+        _ => (false, false),
+    }
 }
 
 // ── Deserialization helpers ───────────────────────────────────────────────────
@@ -86,6 +121,9 @@ pub fn geom_from_text(wkt: &str, srid: Option<i32>) -> Result<Vec<u8>> {
 /// assert_eq!(extract_srid(&restored), Some(4326));
 /// ```
 pub fn geom_from_wkb(wkb: &[u8], srid: Option<i32>) -> Result<Vec<u8>> {
+    let raw_type = read_raw_wkb_type(wkb)?;
+    let (has_z, has_m) = wkb_has_z_or_m(raw_type);
+    ensure_xy_only(has_z, has_m)?;
     if is_empty_point_blob(wkb)? {
         return write_ewkb(&Geometry::Point(Point::new(f64::NAN, f64::NAN)), srid);
     }
@@ -200,6 +238,7 @@ pub fn as_ewkt(blob: &[u8]) -> Result<String> {
 /// ```
 pub fn as_binary(blob: &[u8]) -> Result<Vec<u8>> {
     let header = parse_ewkb_header(blob)?;
+    ensure_xy_only(header.has_z, header.has_m)?;
     if is_empty_point_blob(blob)? {
         let mut out = Vec::with_capacity(21);
         if header.little_endian {
@@ -269,6 +308,18 @@ mod tests {
     }
 
     #[test]
+    fn geom_from_wkb_rejects_z_and_m_dimensions() {
+        let mut wkb = vec![0x01];
+        let typ = WKB_POINT | EWKB_Z_FLAG | EWKB_M_FLAG;
+        wkb.extend_from_slice(&typ.to_le_bytes());
+        wkb.extend_from_slice(&1.0f64.to_le_bytes());
+        wkb.extend_from_slice(&2.0f64.to_le_bytes());
+        wkb.extend_from_slice(&3.0f64.to_le_bytes());
+        wkb.extend_from_slice(&4.0f64.to_le_bytes());
+        assert!(geom_from_wkb(&wkb, None).is_err());
+    }
+
+    #[test]
     fn invalid_geojson_returns_err() {
         assert!(geom_from_geojson("{not json}", None).is_err());
     }
@@ -306,6 +357,18 @@ mod tests {
         let blob = geom_from_text("POINT(1 2)", Some(4326)).unwrap();
         let wkb = as_binary(&blob).unwrap();
         assert_eq!(extract_srid(&wkb), None);
+    }
+
+    #[test]
+    fn as_binary_rejects_z_and_m_dimensions() {
+        let mut ewkb = vec![0x01];
+        let typ = WKB_POINT | EWKB_Z_FLAG | EWKB_M_FLAG;
+        ewkb.extend_from_slice(&typ.to_le_bytes());
+        ewkb.extend_from_slice(&1.0f64.to_le_bytes());
+        ewkb.extend_from_slice(&2.0f64.to_le_bytes());
+        ewkb.extend_from_slice(&3.0f64.to_le_bytes());
+        ewkb.extend_from_slice(&4.0f64.to_le_bytes());
+        assert!(as_binary(&ewkb).is_err());
     }
 
     #[test]

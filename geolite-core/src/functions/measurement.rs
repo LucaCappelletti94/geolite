@@ -134,8 +134,8 @@ pub fn st_distance(a: &[u8], b: &[u8]) -> Result<f64> {
 ///
 /// let poly = geom_from_text("POLYGON((0 0,2 0,2 2,0 2,0 0))", None).unwrap();
 /// let c = st_centroid(&poly).unwrap();
-/// assert!((st_x(&c).unwrap() - 1.0).abs() < 1e-10);
-/// assert!((st_y(&c).unwrap() - 1.0).abs() < 1e-10);
+/// assert!((st_x(&c).unwrap().unwrap() - 1.0).abs() < 1e-10);
+/// assert!((st_y(&c).unwrap().unwrap() - 1.0).abs() < 1e-10);
 /// ```
 pub fn st_centroid(blob: &[u8]) -> Result<Vec<u8>> {
     let (geom, srid) = parse_ewkb(blob)?;
@@ -392,7 +392,7 @@ pub fn st_azimuth(origin: &[u8], target: &[u8]) -> Result<f64> {
 /// // Project 111_000m due north (azimuth=0)
 /// let dest = st_project(&origin, 111_000.0, 0.0).unwrap();
 /// // Should be roughly 1 degree north
-/// assert!((st_y(&dest).unwrap() - 1.0).abs() < 0.1);
+/// assert!((st_y(&dest).unwrap().unwrap() - 1.0).abs() < 0.1);
 /// ```
 pub fn st_project(origin: &[u8], distance: f64, azimuth: f64) -> Result<Vec<u8>> {
     let (go, srid) = parse_ewkb(origin)?;
@@ -415,8 +415,8 @@ pub fn st_project(origin: &[u8], distance: f64, azimuth: f64) -> Result<Vec<u8>>
 /// let line = geom_from_text("LINESTRING(0 0,10 0)", None).unwrap();
 /// let pt = st_point(5.0, 5.0, None).unwrap();
 /// let cp = st_closest_point(&line, &pt).unwrap();
-/// assert!((st_x(&cp).unwrap() - 5.0).abs() < 1e-10);
-/// assert!((st_y(&cp).unwrap() - 0.0).abs() < 1e-10);
+/// assert!((st_x(&cp).unwrap().unwrap() - 5.0).abs() < 1e-10);
+/// assert!((st_y(&cp).unwrap().unwrap() - 0.0).abs() < 1e-10);
 /// ```
 pub fn st_closest_point(a: &[u8], b: &[u8]) -> Result<Vec<u8>> {
     let (ga, gb, srid) = parse_ewkb_pair(a, b)?;
@@ -608,8 +608,8 @@ mod tests {
         let line = geom_from_text("LINESTRING(0 0,10 0)", None).unwrap();
         let pt = st_point(5.0, 3.0, None).unwrap();
         let cp = st_closest_point(&line, &pt).unwrap();
-        assert!((st_x(&cp).unwrap() - 5.0).abs() < 1e-10);
-        assert!((st_y(&cp).unwrap() - 0.0).abs() < 1e-10);
+        assert!((st_x(&cp).unwrap().unwrap() - 5.0).abs() < 1e-10);
+        assert!((st_y(&cp).unwrap().unwrap() - 0.0).abs() < 1e-10);
     }
 
     // ── Bounding box ───────────────────────────────────────────────
@@ -666,12 +666,12 @@ mod tests {
         let poly = geom_from_text("POLYGON((0 0,2 0,2 2,0 2,0 0))", Some(4326)).unwrap();
 
         let centroid = st_centroid(&poly).unwrap();
-        assert!((st_x(&centroid).unwrap() - 1.0).abs() < 1e-10);
-        assert!((st_y(&centroid).unwrap() - 1.0).abs() < 1e-10);
+        assert!((st_x(&centroid).unwrap().unwrap() - 1.0).abs() < 1e-10);
+        assert!((st_y(&centroid).unwrap().unwrap() - 1.0).abs() < 1e-10);
 
         let pos = st_point_on_surface(&poly).unwrap();
-        assert!(st_x(&pos).unwrap() >= 0.0);
-        assert!(st_y(&pos).unwrap() >= 0.0);
+        assert!(st_x(&pos).unwrap().unwrap() >= 0.0);
+        assert!(st_y(&pos).unwrap().unwrap() >= 0.0);
     }
 
     #[test]
@@ -696,7 +696,7 @@ mod tests {
         assert!(azimuth.abs() < 0.01);
 
         let dest = st_project(&origin, 111_000.0, 0.0).unwrap();
-        assert!((st_y(&dest).unwrap() - 1.0).abs() < 0.2);
+        assert!((st_y(&dest).unwrap().unwrap() - 1.0).abs() < 0.2);
         assert_eq!(crate::functions::accessors::st_srid(&dest).unwrap(), 4326);
     }
 

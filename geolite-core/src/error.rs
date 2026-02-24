@@ -11,6 +11,9 @@ pub enum GeoLiteError {
     #[error("geometry is not a {0}")]
     WrongType(&'static str),
 
+    #[error("unsupported coordinate dimensions: {dimensions} (operation would drop coordinates)")]
+    UnsupportedDimensions { dimensions: &'static str },
+
     #[error("index out of bounds: {index} (len {len})")]
     OutOfBounds { index: i32, len: usize },
 

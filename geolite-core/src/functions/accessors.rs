@@ -10,16 +10,23 @@
 
 use geo::algorithm::Validation;
 use geo::{BoundingRect, Geometry};
+use geozero::wkb::Ewkb;
+use geozero::ToGeo;
 
 use crate::error::{GeoLiteError, Result};
 use crate::ewkb::{
-    geom_type_name, parse_ewkb, parse_ewkb_header, set_srid, write_ewkb, EwkbHeader,
+    geom_type_name, is_empty_point_blob, parse_ewkb, parse_ewkb_header, set_srid, write_ewkb,
+    EwkbHeader,
 };
 use crate::functions::emptiness::{is_empty_geometry, is_empty_point};
 
 fn validated_header(blob: &[u8]) -> Result<EwkbHeader> {
     let header = parse_ewkb_header(blob)?;
-    let _ = parse_ewkb(blob)?;
+    if !is_empty_point_blob(blob)? {
+        // Validate the full payload (including truncated/malformed blobs) without
+        // converting to an XY geometry through `parse_ewkb`.
+        let _: Geometry<f64> = Ewkb(blob).to_geo()?;
+    }
     Ok(header)
 }
 
@@ -169,12 +176,13 @@ pub fn st_mem_size(blob: &[u8]) -> Result<i64> {
 /// use geolite_core::functions::io::geom_from_text;
 ///
 /// let blob = geom_from_text("POINT(3.5 7.2)", None).unwrap();
-/// assert!((st_x(&blob).unwrap() - 3.5).abs() < 1e-10);
+/// assert_eq!(st_x(&blob).unwrap(), Some(3.5));
 /// ```
-pub fn st_x(blob: &[u8]) -> Result<f64> {
+pub fn st_x(blob: &[u8]) -> Result<Option<f64>> {
     let (geom, _) = parse_ewkb(blob)?;
     match geom {
-        Geometry::Point(p) => Ok(p.x()),
+        Geometry::Point(p) if is_empty_point(&p) => Ok(None),
+        Geometry::Point(p) => Ok(Some(p.x())),
         _ => Err(GeoLiteError::WrongType("Point")),
     }
 }
@@ -188,12 +196,13 @@ pub fn st_x(blob: &[u8]) -> Result<f64> {
 /// use geolite_core::functions::io::geom_from_text;
 ///
 /// let blob = geom_from_text("POINT(3.5 7.2)", None).unwrap();
-/// assert!((st_y(&blob).unwrap() - 7.2).abs() < 1e-10);
+/// assert_eq!(st_y(&blob).unwrap(), Some(7.2));
 /// ```
-pub fn st_y(blob: &[u8]) -> Result<f64> {
+pub fn st_y(blob: &[u8]) -> Result<Option<f64>> {
     let (geom, _) = parse_ewkb(blob)?;
     match geom {
-        Geometry::Point(p) => Ok(p.y()),
+        Geometry::Point(p) if is_empty_point(&p) => Ok(None),
+        Geometry::Point(p) => Ok(Some(p.y())),
         _ => Err(GeoLiteError::WrongType("Point")),
     }
 }
@@ -329,8 +338,8 @@ pub fn st_num_rings(blob: &[u8]) -> Result<i32> {
 ///
 /// let blob = geom_from_text("LINESTRING(0 0,1 1,2 2)", None).unwrap();
 /// let pt = st_point_n(&blob, 2, None).unwrap();
-/// assert!((st_x(&pt).unwrap() - 1.0).abs() < 1e-10);
-/// assert!((st_y(&pt).unwrap() - 1.0).abs() < 1e-10);
+/// assert!((st_x(&pt).unwrap().unwrap() - 1.0).abs() < 1e-10);
+/// assert!((st_y(&pt).unwrap().unwrap() - 1.0).abs() < 1e-10);
 /// ```
 pub fn st_point_n(blob: &[u8], n: i32, srid: Option<i32>) -> Result<Vec<u8>> {
     let (geom, src_srid) = parse_ewkb(blob)?;
@@ -365,7 +374,7 @@ pub fn st_point_n(blob: &[u8], n: i32, srid: Option<i32>) -> Result<Vec<u8>> {
 ///
 /// let blob = geom_from_text("LINESTRING(10 20,30 40)", None).unwrap();
 /// let pt = st_start_point(&blob).unwrap();
-/// assert!((st_x(&pt).unwrap() - 10.0).abs() < 1e-10);
+/// assert!((st_x(&pt).unwrap().unwrap() - 10.0).abs() < 1e-10);
 /// ```
 pub fn st_start_point(blob: &[u8]) -> Result<Vec<u8>> {
     st_point_n(blob, 1, None)
@@ -381,7 +390,7 @@ pub fn st_start_point(blob: &[u8]) -> Result<Vec<u8>> {
 ///
 /// let blob = geom_from_text("LINESTRING(10 20,30 40)", None).unwrap();
 /// let pt = st_end_point(&blob).unwrap();
-/// assert!((st_x(&pt).unwrap() - 30.0).abs() < 1e-10);
+/// assert!((st_x(&pt).unwrap().unwrap() - 30.0).abs() < 1e-10);
 /// ```
 pub fn st_end_point(blob: &[u8]) -> Result<Vec<u8>> {
     let (geom, srid) = parse_ewkb(blob)?;
@@ -625,6 +634,13 @@ mod tests {
     }
 
     #[test]
+    fn st_x_y_on_point_empty_return_none() {
+        let empty = geom_from_text("POINT EMPTY", None).unwrap();
+        assert_eq!(st_x(&empty).unwrap(), None);
+        assert_eq!(st_y(&empty).unwrap(), None);
+    }
+
+    #[test]
     fn st_num_points_on_non_linestring() {
         let pt = geom_from_text("POINT(0 0)", None).unwrap();
         assert!(st_num_points(&pt).is_err());
@@ -685,7 +701,7 @@ mod tests {
         let pt = geom_from_text("POINT(1 2)", None).unwrap();
         // index 1 on a single geometry returns self
         let sub = st_geometry_n(&pt, 1).unwrap();
-        assert!((st_x(&sub).unwrap() - 1.0).abs() < 1e-10);
+        assert!((st_x(&sub).unwrap().unwrap() - 1.0).abs() < 1e-10);
     }
 
     #[test]
@@ -940,18 +956,18 @@ mod tests {
         let line = geom_from_text("LINESTRING(10 20,30 40,50 60)", Some(4326)).unwrap();
 
         let second = st_point_n(&line, 2, None).unwrap();
-        assert!((st_x(&second).unwrap() - 30.0).abs() < 1e-10);
-        assert!((st_y(&second).unwrap() - 40.0).abs() < 1e-10);
+        assert!((st_x(&second).unwrap().unwrap() - 30.0).abs() < 1e-10);
+        assert!((st_y(&second).unwrap().unwrap() - 40.0).abs() < 1e-10);
         assert_eq!(st_srid(&second).unwrap(), 4326);
 
         let override_srid = st_point_n(&line, 2, Some(3857)).unwrap();
         assert_eq!(st_srid(&override_srid).unwrap(), 3857);
 
         let start = st_start_point(&line).unwrap();
-        assert!((st_x(&start).unwrap() - 10.0).abs() < 1e-10);
+        assert!((st_x(&start).unwrap().unwrap() - 10.0).abs() < 1e-10);
 
         let end = st_end_point(&line).unwrap();
-        assert!((st_x(&end).unwrap() - 50.0).abs() < 1e-10);
+        assert!((st_x(&end).unwrap().unwrap() - 50.0).abs() < 1e-10);
 
         let empty = geom_from_text("LINESTRING EMPTY", None).unwrap();
         assert!(st_end_point(&empty).is_err());

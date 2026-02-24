@@ -17,8 +17,8 @@ use crate::ewkb::{parse_ewkb, parse_ewkb_pair, write_ewkb};
 /// use geolite_core::functions::accessors::{st_x, st_y, st_srid};
 ///
 /// let blob = st_point(1.5, 2.5, Some(4326)).unwrap();
-/// assert!((st_x(&blob).unwrap() - 1.5).abs() < 1e-10);
-/// assert!((st_y(&blob).unwrap() - 2.5).abs() < 1e-10);
+/// assert!((st_x(&blob).unwrap().unwrap() - 1.5).abs() < 1e-10);
+/// assert!((st_y(&blob).unwrap().unwrap() - 2.5).abs() < 1e-10);
 /// assert_eq!(st_srid(&blob).unwrap(), 4326);
 /// ```
 pub fn st_point(x: f64, y: f64, srid: Option<i32>) -> Result<Vec<u8>> {
@@ -240,8 +240,8 @@ mod tests {
     fn st_point_without_srid() {
         let blob = st_point(1.0, 2.0, None).unwrap();
         assert_eq!(extract_srid(&blob), None);
-        assert!((st_x(&blob).unwrap() - 1.0).abs() < 1e-10);
-        assert!((st_y(&blob).unwrap() - 2.0).abs() < 1e-10);
+        assert!((st_x(&blob).unwrap().unwrap() - 1.0).abs() < 1e-10);
+        assert!((st_y(&blob).unwrap().unwrap() - 2.0).abs() < 1e-10);
     }
 
     #[test]

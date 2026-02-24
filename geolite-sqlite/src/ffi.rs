@@ -270,8 +270,8 @@ macro_rules! xfunc_blob2 {
     };
 }
 
-/// 1 blob → Result<f64>, where NaN is mapped to SQL NULL.
-macro_rules! xfunc_blob_nan_null_f64 {
+/// 1 blob → Result<Option<f64>>, where `None` maps to SQL NULL.
+macro_rules! xfunc_blob_opt_f64 {
     ($name:ident, $label:expr, $func:expr) => {
         unsafe extern "C" fn $name(
             ctx: *mut sqlite3_context,
@@ -283,8 +283,8 @@ macro_rules! xfunc_blob_nan_null_f64 {
                 return;
             };
             match $func(blob) {
-                Ok(v) if v.is_nan() => set_null(ctx),
-                Ok(v) => set_f64(ctx, v),
+                Ok(Some(v)) => set_f64(ctx, v),
+                Ok(None) => set_null(ctx),
                 Err(e) => set_error(ctx, &format!(concat!($label, ": {}"), e)),
             }
         }
@@ -732,8 +732,8 @@ xfunc_blob!(st_coorddim_xfunc, "ST_CoordDim", st_coord_dim, set_i32);
 xfunc_blob!(st_zmflag_xfunc, "ST_Zmflag", st_zmflag, set_i32);
 xfunc_blob!(st_isempty_xfunc, "ST_IsEmpty", st_is_empty, set_bool);
 xfunc_blob!(st_memsize_xfunc, "ST_MemSize", st_mem_size, set_i64);
-xfunc_blob_nan_null_f64!(st_x_xfunc, "ST_X", st_x);
-xfunc_blob_nan_null_f64!(st_y_xfunc, "ST_Y", st_y);
+xfunc_blob_opt_f64!(st_x_xfunc, "ST_X", st_x);
+xfunc_blob_opt_f64!(st_y_xfunc, "ST_Y", st_y);
 
 xfunc_blob!(st_numpoints_xfunc, "ST_NumPoints", st_num_points, set_i32);
 xfunc_blob!(st_npoints_xfunc, "ST_NPoints", st_npoints, set_i32);
