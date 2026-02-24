@@ -8,6 +8,7 @@ use geo::{Geometry, MultiPolygon};
 
 use crate::error::{GeoLiteError, Result};
 use crate::ewkb::{parse_ewkb, parse_ewkb_pair, write_ewkb};
+use crate::functions::emptiness::is_empty_geometry;
 
 /// Extract a Polygon or MultiPolygon from a geometry, converting single
 /// Polygons into MultiPolygon for uniform BooleanOps handling.
@@ -119,7 +120,7 @@ pub fn st_sym_difference(a: &[u8], b: &[u8]) -> Result<Vec<u8>> {
 /// ```
 pub fn st_buffer(blob: &[u8], distance: f64) -> Result<Vec<u8>> {
     let (geom, srid) = parse_ewkb(blob)?;
-    if crate::functions::accessors::st_is_empty(blob)? {
+    if is_empty_geometry(&geom) {
         let empty = Geometry::Polygon(geo::Polygon::new(geo::LineString::new(vec![]), vec![]));
         return write_ewkb(&empty, srid);
     }
@@ -222,6 +223,14 @@ mod tests {
     #[test]
     fn buffer_empty_polygon_returns_empty_polygon() {
         let empty = geom_from_text("POLYGON EMPTY", None).unwrap();
+        let buffered = st_buffer(&empty, 1.0).unwrap();
+        assert_eq!(st_geometry_type(&buffered).unwrap(), "ST_Polygon");
+        assert!(st_is_empty(&buffered).unwrap());
+    }
+
+    #[test]
+    fn buffer_empty_point_returns_empty_polygon() {
+        let empty = geom_from_text("POINT EMPTY", None).unwrap();
         let buffered = st_buffer(&empty, 1.0).unwrap();
         assert_eq!(st_geometry_type(&buffered).unwrap(), "ST_Polygon");
         assert!(st_is_empty(&buffered).unwrap());
