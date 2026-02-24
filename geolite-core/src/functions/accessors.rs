@@ -164,6 +164,7 @@ pub fn st_is_empty(blob: &[u8]) -> Result<bool> {
 /// assert_eq!(st_mem_size(&blob).unwrap(), blob.len() as i64);
 /// ```
 pub fn st_mem_size(blob: &[u8]) -> Result<i64> {
+    let _ = validated_header(blob)?;
     Ok(blob.len() as i64)
 }
 
@@ -869,6 +870,12 @@ mod tests {
     fn st_mem_size_matches_blob_length() {
         let blob = geom_from_text("POINT(1 2)", Some(4326)).unwrap();
         assert_eq!(st_mem_size(&blob).unwrap(), blob.len() as i64);
+    }
+
+    #[test]
+    fn st_mem_size_rejects_malformed_ewkb() {
+        let malformed = [0x01, 0x02];
+        assert!(st_mem_size(&malformed).is_err());
     }
 
     #[test]

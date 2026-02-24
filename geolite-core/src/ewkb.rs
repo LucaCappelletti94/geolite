@@ -331,6 +331,11 @@ pub fn write_ewkb(geom: &Geometry<f64>, srid: Option<i32>) -> Result<Vec<u8>> {
 /// ```
 pub fn set_srid(blob: &[u8], new_srid: i32) -> Result<Vec<u8>> {
     let header = parse_ewkb_header(blob)?;
+    if !point_is_empty_with_header(blob, &header)? {
+        // Validate full payload before rewriting header bytes so malformed EWKB
+        // cannot be silently "fixed" by adding/replacing an SRID.
+        let _: Geometry<f64> = Ewkb(blob).to_geo()?;
+    }
 
     let mut out = Vec::with_capacity(blob.len() + 4);
     out.push(if header.little_endian { 0x01 } else { 0x00 });
@@ -500,6 +505,42 @@ mod tests {
         let blob = geom_from_text("POINT(1 2)", None).unwrap();
         let updated = set_srid(&blob, 4326).unwrap();
         assert_eq!(extract_srid(&updated), Some(4326));
+    }
+
+    #[test]
+    fn set_srid_rejects_truncated_point_payload() {
+        // byte-order + Point type + only one coordinate (x), missing y
+        let mut truncated = vec![0x01];
+        truncated.extend_from_slice(&WKB_POINT.to_le_bytes());
+        truncated.extend_from_slice(&1.0f64.to_le_bytes());
+
+        set_srid(&truncated, 4326).expect_err("truncated payload must error");
+    }
+
+    #[test]
+    fn set_srid_rejects_malformed_non_empty_payload() {
+        // byte-order + LineString type + point count, but no coordinate payload
+        let mut malformed = vec![0x01];
+        malformed.extend_from_slice(&WKB_LINESTRING.to_le_bytes());
+        malformed.extend_from_slice(&1u32.to_le_bytes());
+
+        set_srid(&malformed, 3857).expect_err("malformed payload must error");
+    }
+
+    #[test]
+    fn set_srid_allows_valid_empty_point_blob() {
+        let empty = geom_from_text("POINT EMPTY", None).unwrap();
+        let updated = set_srid(&empty, 4326).unwrap();
+
+        let (geom, srid) = parse_ewkb(&updated).unwrap();
+        assert_eq!(srid, Some(4326));
+        match geom {
+            Geometry::Point(p) => {
+                assert!(p.x().is_nan());
+                assert!(p.y().is_nan());
+            }
+            other => panic!("expected Point, got {other:?}"),
+        }
     }
 
     #[test]
