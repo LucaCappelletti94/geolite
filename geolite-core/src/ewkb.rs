@@ -587,6 +587,12 @@ mod tests {
     }
 
     #[test]
+    fn ensure_matching_srid_treats_unknown_and_zero_as_compatible() {
+        assert_eq!(ensure_matching_srid(None, Some(0)).unwrap(), Some(0));
+        assert_eq!(ensure_matching_srid(Some(0), None).unwrap(), Some(0));
+    }
+
+    #[test]
     fn ensure_matching_srid_rejects_mismatch() {
         assert!(ensure_matching_srid(Some(4326), Some(3857)).is_err());
         assert!(ensure_matching_srid(Some(4326), None).is_err());
@@ -600,6 +606,14 @@ mod tests {
 
         let mixed = crate::functions::io::geom_from_text("POINT(1 1)", Some(3857)).unwrap();
         assert!(parse_ewkb_pair(&a, &mixed).is_err());
+    }
+
+    #[test]
+    fn parse_ewkb_pair_accepts_unknown_and_zero_srid() {
+        let a = crate::functions::io::geom_from_text("POINT(0 0)", None).unwrap();
+        let b = crate::functions::io::geom_from_text("POINT(1 1)", Some(0)).unwrap();
+        let pair = parse_ewkb_pair(&a, &b).expect("None and SRID=0 should be compatible");
+        assert_eq!(pair.2, Some(0));
     }
 
     #[test]
