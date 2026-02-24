@@ -192,14 +192,18 @@ pub fn extract_srid(blob: &[u8]) -> Option<i32> {
 ///
 /// Returns the shared SRID when both inputs are compatible.
 pub fn ensure_matching_srid(left: Option<i32>, right: Option<i32>) -> Result<Option<i32>> {
-    if left == right {
-        Ok(left)
-    } else {
-        let l = left.unwrap_or(0);
-        let r = right.unwrap_or(0);
-        Err(GeoLiteError::InvalidInput(format!(
+    let l = left.unwrap_or(0);
+    let r = right.unwrap_or(0);
+    if l != r {
+        return Err(GeoLiteError::InvalidInput(format!(
             "operation on mixed SRID geometries ({l} != {r})"
-        )))
+        )));
+    }
+
+    if left.is_none() && right.is_none() {
+        Ok(None)
+    } else {
+        Ok(Some(l))
     }
 }
 
