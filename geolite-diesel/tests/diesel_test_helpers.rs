@@ -616,5 +616,132 @@ fn spatial_index_correctness() {
     assert_eq!(ids, expected, "spatial index query returned wrong points");
 }
 
+// ── Alias SQL functions ───────────────────────────────────────────────────────
+// Verify that every name alias registered in the SQLite extension is also
+// reachable through a Diesel connection (raw SQL path).
+
+#[$test_attr]
+fn st_makepoint_alias_works_via_sql() {
+    let mut c = conn();
+    let result: TextResult =
+        diesel::sql_query("SELECT ST_AsText(ST_MakePoint(3.0, 4.0)) AS val")
+            .get_result(&mut c)
+            .unwrap();
+    let wkt = result.val.unwrap();
+    assert!(wkt.contains("POINT"), "ST_MakePoint WKT = {wkt}");
+}
+
+#[$test_attr]
+fn geometry_type_alias_works_via_sql() {
+    let mut c = conn();
+    let result: TextResult =
+        diesel::sql_query("SELECT GeometryType(ST_GeomFromText('POLYGON((0 0,1 0,1 1,0 1,0 0))')) AS val")
+            .get_result(&mut c)
+            .unwrap();
+    assert_eq!(result.val.unwrap(), "ST_Polygon");
+}
+
+#[$test_attr]
+fn st_numinteriorring_alias_works_via_sql() {
+    let mut c = conn();
+    let result: I32Result = diesel::sql_query(
+        "SELECT ST_NumInteriorRing(\
+            ST_GeomFromText('POLYGON((0 0,10 0,10 10,0 10,0 0),(1 1,2 1,2 2,1 2,1 1))')\
+         ) AS val",
+    )
+    .get_result(&mut c)
+    .unwrap();
+    assert_eq!(result.val, Some(1));
+}
+
+#[$test_attr]
+fn st_length2d_alias_works_via_sql() {
+    let mut c = conn();
+    let result: F64Result =
+        diesel::sql_query("SELECT ST_Length2D(ST_GeomFromText('LINESTRING(0 0,3 4)')) AS val")
+            .get_result(&mut c)
+            .unwrap();
+    let len = result.val.unwrap();
+    assert!((len - 5.0).abs() < 1e-10, "ST_Length2D = {len}");
+}
+
+#[$test_attr]
+fn st_perimeter2d_alias_works_via_sql() {
+    let mut c = conn();
+    let result: F64Result = diesel::sql_query(
+        "SELECT ST_Perimeter2D(ST_GeomFromText('POLYGON((0 0,1 0,1 1,0 1,0 0))')) AS val",
+    )
+    .get_result(&mut c)
+    .unwrap();
+    let perim = result.val.unwrap();
+    assert!((perim - 4.0).abs() < 1e-10, "ST_Perimeter2D = {perim}");
+}
+
+// ── Typed Diesel alias functions ──────────────────────────────────────────────
+// These use the declared Diesel SQL functions (not raw SQL), verifying that
+// the type-system wrappers are wired to the correct SQL names.
+
+#[$test_attr]
+fn st_makepoint_typed_diesel_function() {
+    use geolite_diesel::functions::st_makepoint;
+    let mut c = conn();
+    let wkt: Option<String> = diesel::dsl::select(
+        geolite_diesel::functions::st_astext(st_makepoint(1.5_f64, 2.5_f64).nullable()),
+    )
+    .get_result(&mut c)
+    .unwrap();
+    let wkt = wkt.unwrap();
+    assert!(wkt.contains("POINT") && wkt.contains("1.5"), "got: {wkt}");
+}
+
+#[$test_attr]
+fn geometry_type_typed_diesel_function() {
+    use geolite_diesel::functions::{geometry_type, st_geomfromtext};
+    let mut c = conn();
+    let val: Option<String> = diesel::dsl::select(geometry_type(
+        st_geomfromtext("POLYGON((0 0,1 0,1 1,0 1,0 0))"),
+    ))
+    .get_result(&mut c)
+    .unwrap();
+    assert_eq!(val.unwrap(), "ST_Polygon");
+}
+
+#[$test_attr]
+fn st_numinteriorring_typed_diesel_function() {
+    use geolite_diesel::functions::{st_geomfromtext, st_numinteriorring};
+    let mut c = conn();
+    let val: Option<i32> = diesel::dsl::select(st_numinteriorring(
+        st_geomfromtext("POLYGON((0 0,10 0,10 10,0 10,0 0),(1 1,2 1,2 2,1 2,1 1))"),
+    ))
+    .get_result(&mut c)
+    .unwrap();
+    assert_eq!(val, Some(1));
+}
+
+#[$test_attr]
+fn st_length2d_typed_diesel_function() {
+    use geolite_diesel::functions::{st_geomfromtext, st_length2d};
+    let mut c = conn();
+    let len: Option<f64> =
+        diesel::dsl::select(st_length2d(st_geomfromtext("LINESTRING(0 0,3 4)")))
+            .get_result(&mut c)
+            .unwrap();
+    let len = len.unwrap();
+    assert!((len - 5.0).abs() < 1e-10, "ST_Length2D = {len}");
+}
+
+#[$test_attr]
+fn st_perimeter2d_typed_diesel_function() {
+    use geolite_diesel::functions::{st_geomfromtext, st_perimeter2d};
+    let mut c = conn();
+    let perim: Option<f64> = diesel::dsl::select(st_perimeter2d(st_geomfromtext(
+        "POLYGON((0 0,1 0,1 1,0 1,0 0))",
+    )))
+    .get_result(&mut c)
+    .unwrap();
+    let perim = perim.unwrap();
+    assert!((perim - 4.0).abs() < 1e-10, "ST_Perimeter2D = {perim}");
+}
+
     }; // end macro
 }
