@@ -14,6 +14,7 @@ include!("support/shared_cases.rs");
 define_shared_cases!(test);
 
 #[test]
+#[cfg(target_os = "linux")]
 fn exports_default_sqlite_entrypoint_symbol() {
     let dylib: PathBuf = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
