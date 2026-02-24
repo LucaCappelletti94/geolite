@@ -1393,6 +1393,82 @@ fn spatial_index_create_query_drop() {
 }
 
 #[$test_attr]
+fn spatial_index_create_idempotent() {
+    let db = ActiveTestDb::open();
+    db.exec("CREATE TABLE pts (id INTEGER PRIMARY KEY, geom BLOB)");
+    db.exec(
+        "INSERT INTO pts (geom) VALUES (ST_Point(1, 2)), (ST_Point(3, 4)), (ST_Point(5, 6))",
+    );
+
+    let rc = db.query_i64("SELECT CreateSpatialIndex('pts', 'geom')");
+    assert_eq!(rc, 1);
+    let rc = db.query_i64("SELECT CreateSpatialIndex('pts', 'geom')");
+    assert_eq!(rc, 1);
+
+    // No duplicate rows after repeated create.
+    let count = db.query_i64("SELECT COUNT(*) FROM pts_geom_rtree");
+    assert_eq!(count, 3);
+}
+
+#[$test_attr]
+fn spatial_index_create_rolls_back_when_population_fails() {
+    let db = ActiveTestDb::open();
+    db.exec("CREATE TABLE broken (id INTEGER PRIMARY KEY, geom INTEGER)");
+    db.exec("INSERT INTO broken (geom) VALUES (42)");
+
+    let err = db
+        .try_query_i64("SELECT CreateSpatialIndex('broken', 'geom')")
+        .expect_err("index creation should fail for invalid geometry payloads");
+    assert!(
+        err.contains("invalid EWKB"),
+        "unexpected error message: {err}"
+    );
+    assert!(
+        !err.to_ascii_uppercase().contains("ROLLBACK"),
+        "original populate error should not be overwritten by rollback errors: {err}"
+    );
+
+    let rtree_exists = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'broken_geom_rtree'",
+    );
+    assert_eq!(rtree_exists, 0, "failed create should not leave rtree table");
+
+    let trigger_count = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'broken_geom_%'",
+    );
+    assert_eq!(trigger_count, 0, "failed create should not leave triggers");
+}
+
+#[$test_attr]
+fn spatial_index_drop_rolls_back_when_drop_table_fails() {
+    let db = ActiveTestDb::open();
+    db.exec("CREATE TABLE broken (id INTEGER PRIMARY KEY, geom BLOB)");
+
+    // Simulate an unexpected schema shape: object exists with the expected rtree name,
+    // but it is a VIEW, so DROP TABLE will fail after trigger drops.
+    db.exec("CREATE VIEW broken_geom_rtree AS SELECT 1 AS id, 0.0 AS xmin, 0.0 AS xmax, 0.0 AS ymin, 0.0 AS ymax");
+    db.exec("CREATE TRIGGER broken_geom_insert AFTER INSERT ON broken BEGIN SELECT 1; END");
+    db.exec("CREATE TRIGGER broken_geom_update AFTER UPDATE OF geom ON broken BEGIN SELECT 1; END");
+    db.exec("CREATE TRIGGER broken_geom_delete AFTER DELETE ON broken BEGIN SELECT 1; END");
+
+    let err = db
+        .try_query_i64("SELECT DropSpatialIndex('broken', 'geom')")
+        .expect_err("dropping a view with DROP TABLE should fail");
+    assert!(err.contains("DROP VIEW"), "unexpected error message: {err}");
+
+    // Rollback should preserve pre-existing objects on failure.
+    let trigger_count = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'broken_geom_%'",
+    );
+    assert_eq!(trigger_count, 3, "all triggers should remain after rollback");
+
+    let view_exists = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'view' AND name = 'broken_geom_rtree'",
+    );
+    assert_eq!(view_exists, 1, "view should remain after rollback");
+}
+
+#[$test_attr]
 fn spatial_index_rtree_plus_exact_predicate() {
     let db = ActiveTestDb::open();
     db.exec("CREATE TABLE polys (id INTEGER PRIMARY KEY, geom BLOB)");

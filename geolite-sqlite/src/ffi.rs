@@ -193,6 +193,21 @@ unsafe fn any_arg_is_null(argv: *mut *mut sqlite3_value, arg_count: usize) -> bo
     false
 }
 
+unsafe fn optional_srid_arg(
+    ctx: *mut sqlite3_context,
+    argv: *mut *mut sqlite3_value,
+    with_srid: bool,
+    index: usize,
+    fn_name: &str,
+) -> Option<Option<i32>> {
+    if with_srid {
+        let srid = require_i32_arg(ctx, argv, index, fn_name, "srid")?;
+        Some(Some(srid))
+    } else {
+        Some(None)
+    }
+}
+
 // ── Convenience setter wrappers ──────────────────────────────────────────────
 
 unsafe fn set_bool(ctx: *mut sqlite3_context, v: bool) {
@@ -293,6 +308,131 @@ macro_rules! xfunc_blob_i32_blob {
             };
             match ($func)(b, n) {
                 Ok(v) => set_blob(ctx, &v),
+                Err(e) => set_error(ctx, &format!(concat!($label, ": {}"), e)),
+            }
+        }
+    };
+}
+
+/// blob + numeric arg → Result<Vec<u8>>.
+macro_rules! xfunc_blob_f64_blob {
+    ($name:ident, $label:expr, $arg_name:expr, $func:expr) => {
+        unsafe extern "C" fn $name(
+            ctx: *mut sqlite3_context,
+            _n: c_int,
+            argv: *mut *mut sqlite3_value,
+        ) {
+            let Some(b) = get_blob(argv, 0) else {
+                set_null(ctx);
+                return;
+            };
+            let Some(v) = require_f64_arg(ctx, argv, 1, $label, $arg_name) else {
+                return;
+            };
+            match ($func)(b, v) {
+                Ok(out) => set_blob(ctx, &out),
+                Err(e) => set_error(ctx, &format!(concat!($label, ": {}"), e)),
+            }
+        }
+    };
+}
+
+/// blob + numeric arg + numeric arg → Result<Vec<u8>>.
+macro_rules! xfunc_blob_f64_f64_blob {
+    ($name:ident, $label:expr, $arg1_name:expr, $arg2_name:expr, $func:expr) => {
+        unsafe extern "C" fn $name(
+            ctx: *mut sqlite3_context,
+            _n: c_int,
+            argv: *mut *mut sqlite3_value,
+        ) {
+            let Some(b) = get_blob(argv, 0) else {
+                set_null(ctx);
+                return;
+            };
+            let Some(v1) = require_f64_arg(ctx, argv, 1, $label, $arg1_name) else {
+                return;
+            };
+            let Some(v2) = require_f64_arg(ctx, argv, 2, $label, $arg2_name) else {
+                return;
+            };
+            match ($func)(b, v1, v2) {
+                Ok(out) => set_blob(ctx, &out),
+                Err(e) => set_error(ctx, &format!(concat!($label, ": {}"), e)),
+            }
+        }
+    };
+}
+
+/// 2 blobs + numeric arg → Result<bool>.
+macro_rules! xfunc_blob2_f64_bool {
+    ($name:ident, $label:expr, $arg_name:expr, $func:expr) => {
+        unsafe extern "C" fn $name(
+            ctx: *mut sqlite3_context,
+            _n: c_int,
+            argv: *mut *mut sqlite3_value,
+        ) {
+            let Some(a) = get_blob(argv, 0) else {
+                set_null(ctx);
+                return;
+            };
+            let Some(b) = get_blob(argv, 1) else {
+                set_null(ctx);
+                return;
+            };
+            let Some(v) = require_f64_arg(ctx, argv, 2, $label, $arg_name) else {
+                return;
+            };
+            match ($func)(a, b, v) {
+                Ok(out) => set_bool(ctx, out),
+                Err(e) => set_error(ctx, &format!(concat!($label, ": {}"), e)),
+            }
+        }
+    };
+}
+
+/// 2 blobs + text arg → Result<bool>.
+macro_rules! xfunc_blob2_text_bool {
+    ($name:ident, $label:expr, $arg_name:expr, $func:expr) => {
+        unsafe extern "C" fn $name(
+            ctx: *mut sqlite3_context,
+            _n: c_int,
+            argv: *mut *mut sqlite3_value,
+        ) {
+            let Some(a) = get_blob(argv, 0) else {
+                set_null(ctx);
+                return;
+            };
+            let Some(b) = get_blob(argv, 1) else {
+                set_null(ctx);
+                return;
+            };
+            let Some(v) = require_text_arg(ctx, argv, 2, $label, $arg_name) else {
+                return;
+            };
+            match ($func)(a, b, v) {
+                Ok(out) => set_bool(ctx, out),
+                Err(e) => set_error(ctx, &format!(concat!($label, ": {}"), e)),
+            }
+        }
+    };
+}
+
+/// 2 text args → Result<bool>.
+macro_rules! xfunc_text2_bool {
+    ($name:ident, $label:expr, $arg1_name:expr, $arg2_name:expr, $func:expr) => {
+        unsafe extern "C" fn $name(
+            ctx: *mut sqlite3_context,
+            _n: c_int,
+            argv: *mut *mut sqlite3_value,
+        ) {
+            let Some(a) = require_text_arg(ctx, argv, 0, $label, $arg1_name) else {
+                return;
+            };
+            let Some(b) = require_text_arg(ctx, argv, 1, $label, $arg2_name) else {
+                return;
+            };
+            match ($func)(a, b) {
+                Ok(out) => set_bool(ctx, out),
                 Err(e) => set_error(ctx, &format!(concat!($label, ": {}"), e)),
             }
         }
@@ -432,13 +572,8 @@ unsafe fn st_point_impl(ctx: *mut sqlite3_context, argv: *mut *mut sqlite3_value
     let Some(y) = require_f64_arg(ctx, argv, 1, "ST_Point", "y") else {
         return;
     };
-    let srid = if with_srid {
-        let Some(srid) = require_i32_arg(ctx, argv, 2, "ST_Point", "srid") else {
-            return;
-        };
-        Some(srid)
-    } else {
-        None
+    let Some(srid) = optional_srid_arg(ctx, argv, with_srid, 2, "ST_Point") else {
+        return;
     };
 
     match st_point(x, y, srid) {
@@ -499,13 +634,8 @@ unsafe fn st_makeenvelope_impl(
     let Some(ymax) = require_f64_arg(ctx, argv, 3, "ST_MakeEnvelope", "ymax") else {
         return;
     };
-    let srid = if with_srid {
-        let Some(srid) = require_i32_arg(ctx, argv, 4, "ST_MakeEnvelope", "srid") else {
-            return;
-        };
-        Some(srid)
-    } else {
-        None
+    let Some(srid) = optional_srid_arg(ctx, argv, with_srid, 4, "ST_MakeEnvelope") else {
+        return;
     };
 
     match st_make_envelope(xmin, ymin, xmax, ymax, srid) {
@@ -713,26 +843,13 @@ xfunc_blob!(
 );
 xfunc_blob2!(st_azimuth_xfunc, "ST_Azimuth", st_azimuth, set_f64);
 
-unsafe extern "C" fn st_project_xfunc(
-    ctx: *mut sqlite3_context,
-    _n: c_int,
-    argv: *mut *mut sqlite3_value,
-) {
-    let Some(origin) = get_blob(argv, 0) else {
-        set_null(ctx);
-        return;
-    };
-    let Some(distance) = require_f64_arg(ctx, argv, 1, "ST_Project", "distance") else {
-        return;
-    };
-    let Some(azimuth) = require_f64_arg(ctx, argv, 2, "ST_Project", "azimuth") else {
-        return;
-    };
-    match st_project(origin, distance, azimuth) {
-        Ok(v) => set_blob(ctx, &v),
-        Err(e) => set_error(ctx, &format!("ST_Project: {e}")),
-    }
-}
+xfunc_blob_f64_f64_blob!(
+    st_project_xfunc,
+    "ST_Project",
+    "distance",
+    "azimuth",
+    st_project
+);
 
 xfunc_blob2!(
     st_closestpoint_xfunc,
@@ -763,23 +880,7 @@ xfunc_blob2!(
     set_blob_owned
 );
 
-unsafe extern "C" fn st_buffer_xfunc(
-    ctx: *mut sqlite3_context,
-    _n: c_int,
-    argv: *mut *mut sqlite3_value,
-) {
-    let Some(b) = get_blob(argv, 0) else {
-        set_null(ctx);
-        return;
-    };
-    let Some(distance) = require_f64_arg(ctx, argv, 1, "ST_Buffer", "distance") else {
-        return;
-    };
-    match st_buffer(b, distance) {
-        Ok(v) => set_blob(ctx, &v),
-        Err(e) => set_error(ctx, &format!("ST_Buffer: {e}")),
-    }
-}
+xfunc_blob_f64_blob!(st_buffer_xfunc, "ST_Buffer", "distance", st_buffer);
 
 // ── Predicate callbacks ──────────────────────────────────────────────────────
 
@@ -793,27 +894,7 @@ xfunc_blob2!(st_contains_xfunc, "ST_Contains", st_contains, set_bool);
 xfunc_blob2!(st_within_xfunc, "ST_Within", st_within, set_bool);
 xfunc_blob2!(st_disjoint_xfunc, "ST_Disjoint", st_disjoint, set_bool);
 
-unsafe extern "C" fn st_dwithin_xfunc(
-    ctx: *mut sqlite3_context,
-    _n: c_int,
-    argv: *mut *mut sqlite3_value,
-) {
-    let Some(a) = get_blob(argv, 0) else {
-        set_null(ctx);
-        return;
-    };
-    let Some(b) = get_blob(argv, 1) else {
-        set_null(ctx);
-        return;
-    };
-    let Some(d) = require_f64_arg(ctx, argv, 2, "ST_DWithin", "distance") else {
-        return;
-    };
-    match st_dwithin(a, b, d) {
-        Ok(v) => set_i32(ctx, v as i32),
-        Err(e) => set_error(ctx, &format!("ST_DWithin: {e}")),
-    }
-}
+xfunc_blob2_f64_bool!(st_dwithin_xfunc, "ST_DWithin", "distance", st_dwithin);
 
 xfunc_blob2!(st_covers_xfunc, "ST_Covers", st_covers, set_bool);
 xfunc_blob2!(st_coveredby_xfunc, "ST_CoveredBy", st_covered_by, set_bool);
@@ -824,44 +905,19 @@ xfunc_blob2!(st_overlaps_xfunc, "ST_Overlaps", st_overlaps, set_bool);
 
 xfunc_blob2!(st_relate_2_xfunc, "ST_Relate", st_relate, set_text_owned);
 
-unsafe extern "C" fn st_relate_3_xfunc(
-    ctx: *mut sqlite3_context,
-    _n: c_int,
-    argv: *mut *mut sqlite3_value,
-) {
-    let Some(a) = get_blob(argv, 0) else {
-        set_null(ctx);
-        return;
-    };
-    let Some(b) = get_blob(argv, 1) else {
-        set_null(ctx);
-        return;
-    };
-    let Some(pattern) = require_text_arg(ctx, argv, 2, "ST_Relate", "pattern") else {
-        return;
-    };
-    match st_relate_match_geoms(a, b, pattern) {
-        Ok(v) => set_i32(ctx, v as i32),
-        Err(e) => set_error(ctx, &format!("ST_Relate: {e}")),
-    }
-}
-
-unsafe extern "C" fn st_relatematch_xfunc(
-    ctx: *mut sqlite3_context,
-    _n: c_int,
-    argv: *mut *mut sqlite3_value,
-) {
-    let Some(matrix) = require_text_arg(ctx, argv, 0, "ST_RelateMatch", "matrix") else {
-        return;
-    };
-    let Some(pattern) = require_text_arg(ctx, argv, 1, "ST_RelateMatch", "pattern") else {
-        return;
-    };
-    match st_relate_match(matrix, pattern) {
-        Ok(v) => set_i32(ctx, v as i32),
-        Err(e) => set_error(ctx, &format!("ST_RelateMatch: {e}")),
-    }
-}
+xfunc_blob2_text_bool!(
+    st_relate_3_xfunc,
+    "ST_Relate",
+    "pattern",
+    st_relate_match_geoms
+);
+xfunc_text2_bool!(
+    st_relatematch_xfunc,
+    "ST_RelateMatch",
+    "matrix",
+    "pattern",
+    st_relate_match
+);
 
 // ── Spatial index helpers ─────────────────────────────────────────────────────
 
@@ -899,6 +955,27 @@ unsafe fn exec_sql(db: *mut sqlite3, ctx: *mut sqlite3_context, sql: &str) -> c_
         }
     }
     rc
+}
+
+/// Run SQL via `sqlite3_exec` but never touch sqlite3_result_error.
+/// Used for best-effort rollback paths where the original error should win.
+unsafe fn exec_sql_silent(db: *mut sqlite3, sql: &str) -> c_int {
+    let c_sql = match CString::new(sql) {
+        Ok(v) => v,
+        Err(_) => return SQLITE_ERROR,
+    };
+    let mut err_msg: *mut std::ffi::c_char = std::ptr::null_mut();
+    let rc = sqlite3_exec(db, c_sql.as_ptr(), None, std::ptr::null_mut(), &mut err_msg);
+    if !err_msg.is_null() {
+        sqlite3_free(err_msg as _);
+    }
+    rc
+}
+
+unsafe fn rollback_savepoint(db: *mut sqlite3, ctx: *mut sqlite3_context, savepoint: &str) {
+    let _ = ctx;
+    let _ = exec_sql_silent(db, &format!("ROLLBACK TO {savepoint}"));
+    let _ = exec_sql_silent(db, &format!("RELEASE {savepoint}"));
 }
 
 // ── Spatial index callbacks ──────────────────────────────────────────────────
@@ -966,14 +1043,28 @@ unsafe extern "C" fn create_spatial_index_xfunc(
 
     let db = sqlite3_context_db_handle(ctx);
     let rtree = format!("{table}_{column}_rtree");
+    let savepoint = "geolite_create_spatial_index";
 
-    // 1. Create R-tree virtual table
-    let sql = format!("CREATE VIRTUAL TABLE [{rtree}] USING rtree(id, xmin, xmax, ymin, ymax)");
-    if exec_sql(db, ctx, &sql) != SQLITE_OK {
+    if exec_sql(db, ctx, &format!("SAVEPOINT {savepoint}")) != SQLITE_OK {
         return;
     }
 
-    // 2. Populate from existing data
+    // 1. Create the R-tree virtual table if missing.
+    let sql = format!(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS [{rtree}] USING rtree(id, xmin, xmax, ymin, ymax)"
+    );
+    if exec_sql(db, ctx, &sql) != SQLITE_OK {
+        rollback_savepoint(db, ctx, savepoint);
+        return;
+    }
+
+    // 2. Rebuild index contents from the base table (idempotent on repeated calls).
+    let sql = format!("DELETE FROM [{rtree}]");
+    if exec_sql(db, ctx, &sql) != SQLITE_OK {
+        rollback_savepoint(db, ctx, savepoint);
+        return;
+    }
+
     let sql = format!(
         "INSERT INTO [{rtree}] \
          SELECT rowid, ST_XMin([{column}]), ST_XMax([{column}]), \
@@ -981,15 +1072,14 @@ unsafe extern "C" fn create_spatial_index_xfunc(
          FROM [{table}] WHERE [{column}] IS NOT NULL AND ST_IsEmpty([{column}]) = 0"
     );
     if exec_sql(db, ctx, &sql) != SQLITE_OK {
-        // Cleanup: drop the R-tree we just created
-        let _ = exec_sql(db, ctx, &format!("DROP TABLE IF EXISTS [{rtree}]"));
+        rollback_savepoint(db, ctx, savepoint);
         return;
     }
 
     // 3. AFTER INSERT trigger
     let trigger_insert = format!("{table}_{column}_insert");
     let sql = format!(
-        "CREATE TRIGGER [{trigger_insert}] AFTER INSERT ON [{table}] \
+        "CREATE TRIGGER IF NOT EXISTS [{trigger_insert}] AFTER INSERT ON [{table}] \
          WHEN NEW.[{column}] IS NOT NULL AND ST_IsEmpty(NEW.[{column}]) = 0 \
          BEGIN \
            INSERT INTO [{rtree}] VALUES ( \
@@ -1000,14 +1090,14 @@ unsafe extern "C" fn create_spatial_index_xfunc(
          END"
     );
     if exec_sql(db, ctx, &sql) != SQLITE_OK {
-        let _ = exec_sql(db, ctx, &format!("DROP TABLE IF EXISTS [{rtree}]"));
+        rollback_savepoint(db, ctx, savepoint);
         return;
     }
 
     // 4. AFTER UPDATE trigger
     let trigger_update = format!("{table}_{column}_update");
     let sql = format!(
-        "CREATE TRIGGER [{trigger_update}] AFTER UPDATE OF [{column}] ON [{table}] \
+        "CREATE TRIGGER IF NOT EXISTS [{trigger_update}] AFTER UPDATE OF [{column}] ON [{table}] \
          BEGIN \
            DELETE FROM [{rtree}] WHERE id = OLD.rowid; \
            INSERT INTO [{rtree}] \
@@ -1018,35 +1108,24 @@ unsafe extern "C" fn create_spatial_index_xfunc(
          END"
     );
     if exec_sql(db, ctx, &sql) != SQLITE_OK {
-        let _ = exec_sql(
-            db,
-            ctx,
-            &format!("DROP TRIGGER IF EXISTS [{trigger_insert}]"),
-        );
-        let _ = exec_sql(db, ctx, &format!("DROP TABLE IF EXISTS [{rtree}]"));
+        rollback_savepoint(db, ctx, savepoint);
         return;
     }
 
     // 5. AFTER DELETE trigger
     let trigger_delete = format!("{table}_{column}_delete");
     let sql = format!(
-        "CREATE TRIGGER [{trigger_delete}] AFTER DELETE ON [{table}] \
+        "CREATE TRIGGER IF NOT EXISTS [{trigger_delete}] AFTER DELETE ON [{table}] \
          BEGIN \
            DELETE FROM [{rtree}] WHERE id = OLD.rowid; \
          END"
     );
     if exec_sql(db, ctx, &sql) != SQLITE_OK {
-        let _ = exec_sql(
-            db,
-            ctx,
-            &format!("DROP TRIGGER IF EXISTS [{trigger_update}]"),
-        );
-        let _ = exec_sql(
-            db,
-            ctx,
-            &format!("DROP TRIGGER IF EXISTS [{trigger_insert}]"),
-        );
-        let _ = exec_sql(db, ctx, &format!("DROP TABLE IF EXISTS [{rtree}]"));
+        rollback_savepoint(db, ctx, savepoint);
+        return;
+    }
+
+    if exec_sql(db, ctx, &format!("RELEASE {savepoint}")) != SQLITE_OK {
         return;
     }
 
@@ -1063,17 +1142,28 @@ unsafe extern "C" fn drop_spatial_index_xfunc(
     };
 
     let db = sqlite3_context_db_handle(ctx);
+    let savepoint = "geolite_drop_spatial_index";
+
+    if exec_sql(db, ctx, &format!("SAVEPOINT {savepoint}")) != SQLITE_OK {
+        return;
+    }
 
     // Drop triggers first, then the R-tree table
     let prefix = format!("{table}_{column}");
     for suffix in &["_insert", "_update", "_delete"] {
         let sql = format!("DROP TRIGGER IF EXISTS [{prefix}{suffix}]");
         if exec_sql(db, ctx, &sql) != SQLITE_OK {
+            rollback_savepoint(db, ctx, savepoint);
             return;
         }
     }
     let sql = format!("DROP TABLE IF EXISTS [{prefix}_rtree]");
     if exec_sql(db, ctx, &sql) != SQLITE_OK {
+        rollback_savepoint(db, ctx, savepoint);
+        return;
+    }
+
+    if exec_sql(db, ctx, &format!("RELEASE {savepoint}")) != SQLITE_OK {
         return;
     }
 
