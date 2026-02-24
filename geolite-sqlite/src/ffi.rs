@@ -9,6 +9,9 @@ use crate::sqlite_compat::*;
 use std::ffi::{CStr, CString};
 use std::os::raw::c_int;
 
+use geolite_core::function_catalog::{
+    SQLITE_DETERMINISTIC_FUNCTIONS, SQLITE_DIRECT_ONLY_FUNCTIONS,
+};
 use geolite_core::functions::accessors::*;
 use geolite_core::functions::constructors::*;
 use geolite_core::functions::io::*;
@@ -96,6 +99,7 @@ fn checked_c_int_len(len: usize) -> Option<c_int> {
 }
 
 const ERROR_MSG_TOO_LARGE: &str = "internal error: error message too large";
+const PANIC_IN_CALLBACK_MSG: &str = "panic in SQLite callback";
 
 unsafe fn set_blob(ctx: *mut sqlite3_context, data: &[u8]) {
     let Some(len) = checked_c_int_len(data.len()) else {
@@ -135,6 +139,16 @@ unsafe fn set_error(ctx: *mut sqlite3_context, msg: &str) {
     let len = c_int::try_from(ERROR_MSG_TOO_LARGE.len())
         .expect("fallback error length must fit in c_int");
     sqlite3_result_error(ctx, ERROR_MSG_TOO_LARGE.as_ptr().cast(), len);
+}
+
+unsafe fn xfunc_guard<F>(ctx: *mut sqlite3_context, label: &str, f: F)
+where
+    F: FnOnce(),
+{
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+    if result.is_err() {
+        set_error(ctx, &format!("{label}: {PANIC_IN_CALLBACK_MSG}"));
+    }
 }
 
 unsafe fn require_f64_arg(
@@ -250,14 +264,16 @@ macro_rules! xfunc_blob {
             _n: c_int,
             argv: *mut *mut sqlite3_value,
         ) {
-            let Some(b) = get_blob(argv, 0) else {
-                set_null(ctx);
-                return;
-            };
-            match $func(b) {
-                Ok(v) => $set(ctx, v),
-                Err(e) => set_error(ctx, &format!(concat!($label, ": {}"), e)),
-            }
+            xfunc_guard(ctx, $label, || {
+                let Some(b) = get_blob(argv, 0) else {
+                    set_null(ctx);
+                    return;
+                };
+                match $func(b) {
+                    Ok(v) => $set(ctx, v),
+                    Err(e) => set_error(ctx, &format!(concat!($label, ": {}"), e)),
+                }
+            });
         }
     };
 }
@@ -270,18 +286,20 @@ macro_rules! xfunc_blob2 {
             _n: c_int,
             argv: *mut *mut sqlite3_value,
         ) {
-            let Some(a) = get_blob(argv, 0) else {
-                set_null(ctx);
-                return;
-            };
-            let Some(b) = get_blob(argv, 1) else {
-                set_null(ctx);
-                return;
-            };
-            match $func(a, b) {
-                Ok(v) => $set(ctx, v),
-                Err(e) => set_error(ctx, &format!(concat!($label, ": {}"), e)),
-            }
+            xfunc_guard(ctx, $label, || {
+                let Some(a) = get_blob(argv, 0) else {
+                    set_null(ctx);
+                    return;
+                };
+                let Some(b) = get_blob(argv, 1) else {
+                    set_null(ctx);
+                    return;
+                };
+                match $func(a, b) {
+                    Ok(v) => $set(ctx, v),
+                    Err(e) => set_error(ctx, &format!(concat!($label, ": {}"), e)),
+                }
+            });
         }
     };
 }
@@ -294,15 +312,17 @@ macro_rules! xfunc_blob_opt_f64 {
             _n: c_int,
             argv: *mut *mut sqlite3_value,
         ) {
-            let Some(blob) = get_blob(argv, 0) else {
-                set_null(ctx);
-                return;
-            };
-            match $func(blob) {
-                Ok(Some(v)) => set_f64(ctx, v),
-                Ok(None) => set_null(ctx),
-                Err(e) => set_error(ctx, &format!(concat!($label, ": {}"), e)),
-            }
+            xfunc_guard(ctx, $label, || {
+                let Some(blob) = get_blob(argv, 0) else {
+                    set_null(ctx);
+                    return;
+                };
+                match $func(blob) {
+                    Ok(Some(v)) => set_f64(ctx, v),
+                    Ok(None) => set_null(ctx),
+                    Err(e) => set_error(ctx, &format!(concat!($label, ": {}"), e)),
+                }
+            });
         }
     };
 }
@@ -315,17 +335,19 @@ macro_rules! xfunc_blob_i32_blob {
             _n: c_int,
             argv: *mut *mut sqlite3_value,
         ) {
-            let Some(b) = get_blob(argv, 0) else {
-                set_null(ctx);
-                return;
-            };
-            let Some(n) = require_i32_arg(ctx, argv, 1, $label, $arg_name) else {
-                return;
-            };
-            match ($func)(b, n) {
-                Ok(v) => set_blob(ctx, &v),
-                Err(e) => set_error(ctx, &format!(concat!($label, ": {}"), e)),
-            }
+            xfunc_guard(ctx, $label, || {
+                let Some(b) = get_blob(argv, 0) else {
+                    set_null(ctx);
+                    return;
+                };
+                let Some(n) = require_i32_arg(ctx, argv, 1, $label, $arg_name) else {
+                    return;
+                };
+                match ($func)(b, n) {
+                    Ok(v) => set_blob(ctx, &v),
+                    Err(e) => set_error(ctx, &format!(concat!($label, ": {}"), e)),
+                }
+            });
         }
     };
 }
@@ -338,17 +360,19 @@ macro_rules! xfunc_blob_f64_blob {
             _n: c_int,
             argv: *mut *mut sqlite3_value,
         ) {
-            let Some(b) = get_blob(argv, 0) else {
-                set_null(ctx);
-                return;
-            };
-            let Some(v) = require_f64_arg(ctx, argv, 1, $label, $arg_name) else {
-                return;
-            };
-            match ($func)(b, v) {
-                Ok(out) => set_blob(ctx, &out),
-                Err(e) => set_error(ctx, &format!(concat!($label, ": {}"), e)),
-            }
+            xfunc_guard(ctx, $label, || {
+                let Some(b) = get_blob(argv, 0) else {
+                    set_null(ctx);
+                    return;
+                };
+                let Some(v) = require_f64_arg(ctx, argv, 1, $label, $arg_name) else {
+                    return;
+                };
+                match ($func)(b, v) {
+                    Ok(out) => set_blob(ctx, &out),
+                    Err(e) => set_error(ctx, &format!(concat!($label, ": {}"), e)),
+                }
+            });
         }
     };
 }
@@ -361,20 +385,22 @@ macro_rules! xfunc_blob_f64_f64_blob {
             _n: c_int,
             argv: *mut *mut sqlite3_value,
         ) {
-            let Some(b) = get_blob(argv, 0) else {
-                set_null(ctx);
-                return;
-            };
-            let Some(v1) = require_f64_arg(ctx, argv, 1, $label, $arg1_name) else {
-                return;
-            };
-            let Some(v2) = require_f64_arg(ctx, argv, 2, $label, $arg2_name) else {
-                return;
-            };
-            match ($func)(b, v1, v2) {
-                Ok(out) => set_blob(ctx, &out),
-                Err(e) => set_error(ctx, &format!(concat!($label, ": {}"), e)),
-            }
+            xfunc_guard(ctx, $label, || {
+                let Some(b) = get_blob(argv, 0) else {
+                    set_null(ctx);
+                    return;
+                };
+                let Some(v1) = require_f64_arg(ctx, argv, 1, $label, $arg1_name) else {
+                    return;
+                };
+                let Some(v2) = require_f64_arg(ctx, argv, 2, $label, $arg2_name) else {
+                    return;
+                };
+                match ($func)(b, v1, v2) {
+                    Ok(out) => set_blob(ctx, &out),
+                    Err(e) => set_error(ctx, &format!(concat!($label, ": {}"), e)),
+                }
+            });
         }
     };
 }
@@ -387,21 +413,23 @@ macro_rules! xfunc_blob2_f64_bool {
             _n: c_int,
             argv: *mut *mut sqlite3_value,
         ) {
-            let Some(a) = get_blob(argv, 0) else {
-                set_null(ctx);
-                return;
-            };
-            let Some(b) = get_blob(argv, 1) else {
-                set_null(ctx);
-                return;
-            };
-            let Some(v) = require_f64_arg(ctx, argv, 2, $label, $arg_name) else {
-                return;
-            };
-            match ($func)(a, b, v) {
-                Ok(out) => set_bool(ctx, out),
-                Err(e) => set_error(ctx, &format!(concat!($label, ": {}"), e)),
-            }
+            xfunc_guard(ctx, $label, || {
+                let Some(a) = get_blob(argv, 0) else {
+                    set_null(ctx);
+                    return;
+                };
+                let Some(b) = get_blob(argv, 1) else {
+                    set_null(ctx);
+                    return;
+                };
+                let Some(v) = require_f64_arg(ctx, argv, 2, $label, $arg_name) else {
+                    return;
+                };
+                match ($func)(a, b, v) {
+                    Ok(out) => set_bool(ctx, out),
+                    Err(e) => set_error(ctx, &format!(concat!($label, ": {}"), e)),
+                }
+            });
         }
     };
 }
@@ -414,21 +442,23 @@ macro_rules! xfunc_blob2_text_bool {
             _n: c_int,
             argv: *mut *mut sqlite3_value,
         ) {
-            let Some(a) = get_blob(argv, 0) else {
-                set_null(ctx);
-                return;
-            };
-            let Some(b) = get_blob(argv, 1) else {
-                set_null(ctx);
-                return;
-            };
-            let Some(v) = require_text_arg(ctx, argv, 2, $label, $arg_name) else {
-                return;
-            };
-            match ($func)(a, b, v) {
-                Ok(out) => set_bool(ctx, out),
-                Err(e) => set_error(ctx, &format!(concat!($label, ": {}"), e)),
-            }
+            xfunc_guard(ctx, $label, || {
+                let Some(a) = get_blob(argv, 0) else {
+                    set_null(ctx);
+                    return;
+                };
+                let Some(b) = get_blob(argv, 1) else {
+                    set_null(ctx);
+                    return;
+                };
+                let Some(v) = require_text_arg(ctx, argv, 2, $label, $arg_name) else {
+                    return;
+                };
+                match ($func)(a, b, v) {
+                    Ok(out) => set_bool(ctx, out),
+                    Err(e) => set_error(ctx, &format!(concat!($label, ": {}"), e)),
+                }
+            });
         }
     };
 }
@@ -441,16 +471,18 @@ macro_rules! xfunc_text2_bool {
             _n: c_int,
             argv: *mut *mut sqlite3_value,
         ) {
-            let Some(a) = require_text_arg(ctx, argv, 0, $label, $arg1_name) else {
-                return;
-            };
-            let Some(b) = require_text_arg(ctx, argv, 1, $label, $arg2_name) else {
-                return;
-            };
-            match ($func)(a, b) {
-                Ok(out) => set_bool(ctx, out),
-                Err(e) => set_error(ctx, &format!(concat!($label, ": {}"), e)),
-            }
+            xfunc_guard(ctx, $label, || {
+                let Some(a) = require_text_arg(ctx, argv, 0, $label, $arg1_name) else {
+                    return;
+                };
+                let Some(b) = require_text_arg(ctx, argv, 1, $label, $arg2_name) else {
+                    return;
+                };
+                match ($func)(a, b) {
+                    Ok(out) => set_bool(ctx, out),
+                    Err(e) => set_error(ctx, &format!(concat!($label, ": {}"), e)),
+                }
+            });
         }
     };
 }
@@ -465,29 +497,33 @@ macro_rules! xfunc_text_optsrid_blob {
             _n: c_int,
             argv: *mut *mut sqlite3_value,
         ) {
-            let Some(t) = require_text_arg(ctx, argv, 0, $label, "wkt") else {
-                return;
-            };
-            match $func(t, None) {
-                Ok(v) => set_blob(ctx, &v),
-                Err(e) => set_error(ctx, &format!(concat!($label, ": {}"), e)),
-            }
+            xfunc_guard(ctx, $label, || {
+                let Some(t) = require_text_arg(ctx, argv, 0, $label, "wkt") else {
+                    return;
+                };
+                match $func(t, None) {
+                    Ok(v) => set_blob(ctx, &v),
+                    Err(e) => set_error(ctx, &format!(concat!($label, ": {}"), e)),
+                }
+            });
         }
         unsafe extern "C" fn $name2(
             ctx: *mut sqlite3_context,
             _n: c_int,
             argv: *mut *mut sqlite3_value,
         ) {
-            let Some(t) = require_text_arg(ctx, argv, 0, $label, "wkt") else {
-                return;
-            };
-            let Some(srid) = require_i32_arg(ctx, argv, 1, $label, "srid") else {
-                return;
-            };
-            match $func(t, Some(srid)) {
-                Ok(v) => set_blob(ctx, &v),
-                Err(e) => set_error(ctx, &format!(concat!($label, ": {}"), e)),
-            }
+            xfunc_guard(ctx, $label, || {
+                let Some(t) = require_text_arg(ctx, argv, 0, $label, "wkt") else {
+                    return;
+                };
+                let Some(srid) = require_i32_arg(ctx, argv, 1, $label, "srid") else {
+                    return;
+                };
+                match $func(t, Some(srid)) {
+                    Ok(v) => set_blob(ctx, &v),
+                    Err(e) => set_error(ctx, &format!(concat!($label, ": {}"), e)),
+                }
+            });
         }
     };
 }
@@ -500,31 +536,35 @@ macro_rules! xfunc_blob_optsrid_blob {
             _n: c_int,
             argv: *mut *mut sqlite3_value,
         ) {
-            let Some(b) = get_blob(argv, 0) else {
-                set_null(ctx);
-                return;
-            };
-            match $func(b, None) {
-                Ok(v) => set_blob(ctx, &v),
-                Err(e) => set_error(ctx, &format!(concat!($label, ": {}"), e)),
-            }
+            xfunc_guard(ctx, $label, || {
+                let Some(b) = get_blob(argv, 0) else {
+                    set_null(ctx);
+                    return;
+                };
+                match $func(b, None) {
+                    Ok(v) => set_blob(ctx, &v),
+                    Err(e) => set_error(ctx, &format!(concat!($label, ": {}"), e)),
+                }
+            });
         }
         unsafe extern "C" fn $name2(
             ctx: *mut sqlite3_context,
             _n: c_int,
             argv: *mut *mut sqlite3_value,
         ) {
-            let Some(b) = get_blob(argv, 0) else {
-                set_null(ctx);
-                return;
-            };
-            let Some(srid) = require_i32_arg(ctx, argv, 1, $label, "srid") else {
-                return;
-            };
-            match $func(b, Some(srid)) {
-                Ok(v) => set_blob(ctx, &v),
-                Err(e) => set_error(ctx, &format!(concat!($label, ": {}"), e)),
-            }
+            xfunc_guard(ctx, $label, || {
+                let Some(b) = get_blob(argv, 0) else {
+                    set_null(ctx);
+                    return;
+                };
+                let Some(srid) = require_i32_arg(ctx, argv, 1, $label, "srid") else {
+                    return;
+                };
+                match $func(b, Some(srid)) {
+                    Ok(v) => set_blob(ctx, &v),
+                    Err(e) => set_error(ctx, &format!(concat!($label, ": {}"), e)),
+                }
+            });
         }
     };
 }
@@ -553,13 +593,15 @@ unsafe extern "C" fn st_geomfromgeojson_xfunc(
     _n: c_int,
     argv: *mut *mut sqlite3_value,
 ) {
-    let Some(json) = require_text_arg(ctx, argv, 0, "ST_GeomFromGeoJSON", "json") else {
-        return;
-    };
-    match geom_from_geojson(json, None) {
-        Ok(v) => set_blob(ctx, &v),
-        Err(e) => set_error(ctx, &format!("ST_GeomFromGeoJSON: {e}")),
-    }
+    xfunc_guard(ctx, "ST_GeomFromGeoJSON", || {
+        let Some(json) = require_text_arg(ctx, argv, 0, "ST_GeomFromGeoJSON", "json") else {
+            return;
+        };
+        match geom_from_geojson(json, None) {
+            Ok(v) => set_blob(ctx, &v),
+            Err(e) => set_error(ctx, &format!("ST_GeomFromGeoJSON: {e}")),
+        }
+    });
 }
 
 xfunc_blob!(st_astext_xfunc, "ST_AsText", as_text, set_text_owned);
@@ -603,7 +645,9 @@ unsafe extern "C" fn st_point_2_xfunc(
     _n: c_int,
     argv: *mut *mut sqlite3_value,
 ) {
-    st_point_impl(ctx, argv, false);
+    xfunc_guard(ctx, "ST_Point", || {
+        st_point_impl(ctx, argv, false);
+    });
 }
 
 unsafe extern "C" fn st_point_3_xfunc(
@@ -611,7 +655,9 @@ unsafe extern "C" fn st_point_3_xfunc(
     _n: c_int,
     argv: *mut *mut sqlite3_value,
 ) {
-    st_point_impl(ctx, argv, true);
+    xfunc_guard(ctx, "ST_Point", || {
+        st_point_impl(ctx, argv, true);
+    });
 }
 
 xfunc_blob2!(
@@ -665,7 +711,9 @@ unsafe extern "C" fn st_makeenvelope_4_xfunc(
     _n: c_int,
     argv: *mut *mut sqlite3_value,
 ) {
-    st_makeenvelope_impl(ctx, argv, false);
+    xfunc_guard(ctx, "ST_MakeEnvelope", || {
+        st_makeenvelope_impl(ctx, argv, false);
+    });
 }
 
 unsafe extern "C" fn st_makeenvelope_5_xfunc(
@@ -673,7 +721,9 @@ unsafe extern "C" fn st_makeenvelope_5_xfunc(
     _n: c_int,
     argv: *mut *mut sqlite3_value,
 ) {
-    st_makeenvelope_impl(ctx, argv, true);
+    xfunc_guard(ctx, "ST_MakeEnvelope", || {
+        st_makeenvelope_impl(ctx, argv, true);
+    });
 }
 
 xfunc_blob2!(st_collect_xfunc, "ST_Collect", st_collect, set_blob_owned);
@@ -683,36 +733,38 @@ unsafe extern "C" fn st_tileenvelope_xfunc(
     _n: c_int,
     argv: *mut *mut sqlite3_value,
 ) {
-    let Some(zoom_i32) = require_i32_arg(ctx, argv, 0, "ST_TileEnvelope", "zoom") else {
-        return;
-    };
-    let Some(tile_x_i32) = require_i32_arg(ctx, argv, 1, "ST_TileEnvelope", "tile x") else {
-        return;
-    };
-    let Some(tile_y_i32) = require_i32_arg(ctx, argv, 2, "ST_TileEnvelope", "tile y") else {
-        return;
-    };
+    xfunc_guard(ctx, "ST_TileEnvelope", || {
+        let Some(zoom_i32) = require_i32_arg(ctx, argv, 0, "ST_TileEnvelope", "zoom") else {
+            return;
+        };
+        let Some(tile_x_i32) = require_i32_arg(ctx, argv, 1, "ST_TileEnvelope", "tile x") else {
+            return;
+        };
+        let Some(tile_y_i32) = require_i32_arg(ctx, argv, 2, "ST_TileEnvelope", "tile y") else {
+            return;
+        };
 
-    if zoom_i32 < 0 {
-        set_error(ctx, "ST_TileEnvelope: zoom must be non-negative");
-        return;
-    }
-    if tile_x_i32 < 0 {
-        set_error(ctx, "ST_TileEnvelope: tile x must be non-negative");
-        return;
-    }
-    if tile_y_i32 < 0 {
-        set_error(ctx, "ST_TileEnvelope: tile y must be non-negative");
-        return;
-    }
+        if zoom_i32 < 0 {
+            set_error(ctx, "ST_TileEnvelope: zoom must be non-negative");
+            return;
+        }
+        if tile_x_i32 < 0 {
+            set_error(ctx, "ST_TileEnvelope: tile x must be non-negative");
+            return;
+        }
+        if tile_y_i32 < 0 {
+            set_error(ctx, "ST_TileEnvelope: tile y must be non-negative");
+            return;
+        }
 
-    let zoom = zoom_i32 as u32;
-    let tile_x = tile_x_i32 as u32;
-    let tile_y = tile_y_i32 as u32;
-    match st_tile_envelope(zoom, tile_x, tile_y) {
-        Ok(v) => set_blob(ctx, &v),
-        Err(e) => set_error(ctx, &format!("ST_TileEnvelope: {e}")),
-    }
+        let zoom = zoom_i32 as u32;
+        let tile_x = tile_x_i32 as u32;
+        let tile_y = tile_y_i32 as u32;
+        match st_tile_envelope(zoom, tile_x, tile_y) {
+            Ok(v) => set_blob(ctx, &v),
+            Err(e) => set_error(ctx, &format!("ST_TileEnvelope: {e}")),
+        }
+    });
 }
 
 // ── Accessor callbacks ───────────────────────────────────────────────────────
@@ -724,17 +776,19 @@ unsafe extern "C" fn st_setsrid_xfunc(
     _n: c_int,
     argv: *mut *mut sqlite3_value,
 ) {
-    let Some(b) = get_blob(argv, 0) else {
-        set_null(ctx);
-        return;
-    };
-    let Some(srid) = require_i32_arg(ctx, argv, 1, "ST_SetSRID", "srid") else {
-        return;
-    };
-    match st_set_srid(b, srid) {
-        Ok(v) => set_blob(ctx, &v),
-        Err(e) => set_error(ctx, &format!("ST_SetSRID: {e}")),
-    }
+    xfunc_guard(ctx, "ST_SetSRID", || {
+        let Some(b) = get_blob(argv, 0) else {
+            set_null(ctx);
+            return;
+        };
+        let Some(srid) = require_i32_arg(ctx, argv, 1, "ST_SetSRID", "srid") else {
+            return;
+        };
+        match st_set_srid(b, srid) {
+            Ok(v) => set_blob(ctx, &v),
+            Err(e) => set_error(ctx, &format!("ST_SetSRID: {e}")),
+        }
+    });
 }
 
 xfunc_blob!(
@@ -1061,99 +1115,101 @@ unsafe extern "C" fn create_spatial_index_xfunc(
     _n: c_int,
     argv: *mut *mut sqlite3_value,
 ) {
-    let Some((table, column)) = get_table_column(ctx, argv, "CreateSpatialIndex") else {
-        return;
-    };
+    xfunc_guard(ctx, "CreateSpatialIndex", || {
+        let Some((table, column)) = get_table_column(ctx, argv, "CreateSpatialIndex") else {
+            return;
+        };
 
-    let db = sqlite3_context_db_handle(ctx);
-    let rtree = format!("{table}_{column}_rtree");
-    let savepoint = "geolite_create_spatial_index";
+        let db = sqlite3_context_db_handle(ctx);
+        let rtree = format!("{table}_{column}_rtree");
+        let savepoint = "geolite_create_spatial_index";
 
-    if exec_sql(db, ctx, &format!("SAVEPOINT {savepoint}")) != SQLITE_OK {
-        return;
-    }
+        if exec_sql(db, ctx, &format!("SAVEPOINT {savepoint}")) != SQLITE_OK {
+            return;
+        }
 
-    // 1. Create the R-tree virtual table if missing.
-    let sql = format!(
-        "CREATE VIRTUAL TABLE IF NOT EXISTS [{rtree}] USING rtree(id, xmin, xmax, ymin, ymax)"
-    );
-    if exec_sql(db, ctx, &sql) != SQLITE_OK {
-        rollback_savepoint(db, ctx, savepoint);
-        return;
-    }
+        // 1. Create the R-tree virtual table if missing.
+        let sql = format!(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS [{rtree}] USING rtree(id, xmin, xmax, ymin, ymax)"
+        );
+        if exec_sql(db, ctx, &sql) != SQLITE_OK {
+            rollback_savepoint(db, ctx, savepoint);
+            return;
+        }
 
-    // 2. Rebuild index contents from the base table (idempotent on repeated calls).
-    let sql = format!("DELETE FROM [{rtree}]");
-    if exec_sql(db, ctx, &sql) != SQLITE_OK {
-        rollback_savepoint(db, ctx, savepoint);
-        return;
-    }
+        // 2. Rebuild index contents from the base table (idempotent on repeated calls).
+        let sql = format!("DELETE FROM [{rtree}]");
+        if exec_sql(db, ctx, &sql) != SQLITE_OK {
+            rollback_savepoint(db, ctx, savepoint);
+            return;
+        }
 
-    let sql = format!(
-        "INSERT INTO [{rtree}] \
-         SELECT rowid, ST_XMin([{column}]), ST_XMax([{column}]), \
-         ST_YMin([{column}]), ST_YMax([{column}]) \
-         FROM [{table}] WHERE [{column}] IS NOT NULL AND ST_IsEmpty([{column}]) = 0"
-    );
-    if exec_sql(db, ctx, &sql) != SQLITE_OK {
-        rollback_savepoint(db, ctx, savepoint);
-        return;
-    }
+        let sql = format!(
+            "INSERT INTO [{rtree}] \
+             SELECT rowid, ST_XMin([{column}]), ST_XMax([{column}]), \
+             ST_YMin([{column}]), ST_YMax([{column}]) \
+             FROM [{table}] WHERE [{column}] IS NOT NULL AND ST_IsEmpty([{column}]) = 0"
+        );
+        if exec_sql(db, ctx, &sql) != SQLITE_OK {
+            rollback_savepoint(db, ctx, savepoint);
+            return;
+        }
 
-    // 3. AFTER INSERT trigger
-    let trigger_insert = format!("{table}_{column}_insert");
-    let sql = format!(
-        "CREATE TRIGGER IF NOT EXISTS [{trigger_insert}] AFTER INSERT ON [{table}] \
-         WHEN NEW.[{column}] IS NOT NULL AND ST_IsEmpty(NEW.[{column}]) = 0 \
-         BEGIN \
-           INSERT INTO [{rtree}] VALUES ( \
-             NEW.rowid, \
-             ST_XMin(NEW.[{column}]), ST_XMax(NEW.[{column}]), \
-             ST_YMin(NEW.[{column}]), ST_YMax(NEW.[{column}]) \
-           ); \
-         END"
-    );
-    if exec_sql(db, ctx, &sql) != SQLITE_OK {
-        rollback_savepoint(db, ctx, savepoint);
-        return;
-    }
+        // 3. AFTER INSERT trigger
+        let trigger_insert = format!("{table}_{column}_insert");
+        let sql = format!(
+            "CREATE TRIGGER IF NOT EXISTS [{trigger_insert}] AFTER INSERT ON [{table}] \
+             WHEN NEW.[{column}] IS NOT NULL AND ST_IsEmpty(NEW.[{column}]) = 0 \
+             BEGIN \
+               INSERT INTO [{rtree}] VALUES ( \
+                 NEW.rowid, \
+                 ST_XMin(NEW.[{column}]), ST_XMax(NEW.[{column}]), \
+                 ST_YMin(NEW.[{column}]), ST_YMax(NEW.[{column}]) \
+               ); \
+             END"
+        );
+        if exec_sql(db, ctx, &sql) != SQLITE_OK {
+            rollback_savepoint(db, ctx, savepoint);
+            return;
+        }
 
-    // 4. AFTER UPDATE trigger
-    let trigger_update = format!("{table}_{column}_update");
-    let sql = format!(
-        "CREATE TRIGGER IF NOT EXISTS [{trigger_update}] AFTER UPDATE OF [{column}] ON [{table}] \
-         BEGIN \
-           DELETE FROM [{rtree}] WHERE id = OLD.rowid; \
-           INSERT INTO [{rtree}] \
-             SELECT NEW.rowid, \
-               ST_XMin(NEW.[{column}]), ST_XMax(NEW.[{column}]), \
-               ST_YMin(NEW.[{column}]), ST_YMax(NEW.[{column}]) \
-             WHERE NEW.[{column}] IS NOT NULL AND ST_IsEmpty(NEW.[{column}]) = 0; \
-         END"
-    );
-    if exec_sql(db, ctx, &sql) != SQLITE_OK {
-        rollback_savepoint(db, ctx, savepoint);
-        return;
-    }
+        // 4. AFTER UPDATE trigger
+        let trigger_update = format!("{table}_{column}_update");
+        let sql = format!(
+            "CREATE TRIGGER IF NOT EXISTS [{trigger_update}] AFTER UPDATE OF [{column}] ON [{table}] \
+             BEGIN \
+               DELETE FROM [{rtree}] WHERE id = OLD.rowid; \
+               INSERT INTO [{rtree}] \
+                 SELECT NEW.rowid, \
+                   ST_XMin(NEW.[{column}]), ST_XMax(NEW.[{column}]), \
+                   ST_YMin(NEW.[{column}]), ST_YMax(NEW.[{column}]) \
+                 WHERE NEW.[{column}] IS NOT NULL AND ST_IsEmpty(NEW.[{column}]) = 0; \
+             END"
+        );
+        if exec_sql(db, ctx, &sql) != SQLITE_OK {
+            rollback_savepoint(db, ctx, savepoint);
+            return;
+        }
 
-    // 5. AFTER DELETE trigger
-    let trigger_delete = format!("{table}_{column}_delete");
-    let sql = format!(
-        "CREATE TRIGGER IF NOT EXISTS [{trigger_delete}] AFTER DELETE ON [{table}] \
-         BEGIN \
-           DELETE FROM [{rtree}] WHERE id = OLD.rowid; \
-         END"
-    );
-    if exec_sql(db, ctx, &sql) != SQLITE_OK {
-        rollback_savepoint(db, ctx, savepoint);
-        return;
-    }
+        // 5. AFTER DELETE trigger
+        let trigger_delete = format!("{table}_{column}_delete");
+        let sql = format!(
+            "CREATE TRIGGER IF NOT EXISTS [{trigger_delete}] AFTER DELETE ON [{table}] \
+             BEGIN \
+               DELETE FROM [{rtree}] WHERE id = OLD.rowid; \
+             END"
+        );
+        if exec_sql(db, ctx, &sql) != SQLITE_OK {
+            rollback_savepoint(db, ctx, savepoint);
+            return;
+        }
 
-    if exec_sql(db, ctx, &format!("RELEASE {savepoint}")) != SQLITE_OK {
-        return;
-    }
+        if exec_sql(db, ctx, &format!("RELEASE {savepoint}")) != SQLITE_OK {
+            return;
+        }
 
-    set_i32(ctx, 1);
+        set_i32(ctx, 1);
+    });
 }
 
 unsafe extern "C" fn drop_spatial_index_xfunc(
@@ -1161,37 +1217,39 @@ unsafe extern "C" fn drop_spatial_index_xfunc(
     _n: c_int,
     argv: *mut *mut sqlite3_value,
 ) {
-    let Some((table, column)) = get_table_column(ctx, argv, "DropSpatialIndex") else {
-        return;
-    };
+    xfunc_guard(ctx, "DropSpatialIndex", || {
+        let Some((table, column)) = get_table_column(ctx, argv, "DropSpatialIndex") else {
+            return;
+        };
 
-    let db = sqlite3_context_db_handle(ctx);
-    let savepoint = "geolite_drop_spatial_index";
+        let db = sqlite3_context_db_handle(ctx);
+        let savepoint = "geolite_drop_spatial_index";
 
-    if exec_sql(db, ctx, &format!("SAVEPOINT {savepoint}")) != SQLITE_OK {
-        return;
-    }
+        if exec_sql(db, ctx, &format!("SAVEPOINT {savepoint}")) != SQLITE_OK {
+            return;
+        }
 
-    // Drop triggers first, then the R-tree table
-    let prefix = format!("{table}_{column}");
-    for suffix in &["_insert", "_update", "_delete"] {
-        let sql = format!("DROP TRIGGER IF EXISTS [{prefix}{suffix}]");
+        // Drop triggers first, then the R-tree table
+        let prefix = format!("{table}_{column}");
+        for suffix in &["_insert", "_update", "_delete"] {
+            let sql = format!("DROP TRIGGER IF EXISTS [{prefix}{suffix}]");
+            if exec_sql(db, ctx, &sql) != SQLITE_OK {
+                rollback_savepoint(db, ctx, savepoint);
+                return;
+            }
+        }
+        let sql = format!("DROP TABLE IF EXISTS [{prefix}_rtree]");
         if exec_sql(db, ctx, &sql) != SQLITE_OK {
             rollback_savepoint(db, ctx, savepoint);
             return;
         }
-    }
-    let sql = format!("DROP TABLE IF EXISTS [{prefix}_rtree]");
-    if exec_sql(db, ctx, &sql) != SQLITE_OK {
-        rollback_savepoint(db, ctx, savepoint);
-        return;
-    }
 
-    if exec_sql(db, ctx, &format!("RELEASE {savepoint}")) != SQLITE_OK {
-        return;
-    }
+        if exec_sql(db, ctx, &format!("RELEASE {savepoint}")) != SQLITE_OK {
+            return;
+        }
 
-    set_i32(ctx, 1);
+        set_i32(ctx, 1);
+    });
 }
 
 // ── Registration ─────────────────────────────────────────────────────────────
@@ -1229,114 +1287,125 @@ unsafe fn reg(
 pub unsafe fn register_functions(db: *mut sqlite3) -> c_int {
     type XFunc = unsafe extern "C" fn(*mut sqlite3_context, c_int, *mut *mut sqlite3_value);
 
-    let deterministic: &[(&str, c_int, XFunc)] = &[
+    let deterministic_callbacks: &[XFunc] = &[
         // I/O
-        ("ST_GeomFromText", 1, st_geomfromtext_1_xfunc),
-        ("ST_GeomFromText", 2, st_geomfromtext_2_xfunc),
-        ("ST_GeomFromWKB", 1, st_geomfromwkb_1_xfunc),
-        ("ST_GeomFromWKB", 2, st_geomfromwkb_2_xfunc),
-        ("ST_GeomFromEWKB", 1, st_geomfromewkb_xfunc),
-        ("ST_GeomFromGeoJSON", 1, st_geomfromgeojson_xfunc),
-        ("ST_AsText", 1, st_astext_xfunc),
-        ("ST_AsEWKT", 1, st_asewkt_xfunc),
-        ("ST_AsBinary", 1, st_asbinary_xfunc),
-        ("ST_AsEWKB", 1, st_asewkb_xfunc),
-        ("ST_AsGeoJSON", 1, st_asgeojson_xfunc),
+        st_geomfromtext_1_xfunc,
+        st_geomfromtext_2_xfunc,
+        st_geomfromwkb_1_xfunc,
+        st_geomfromwkb_2_xfunc,
+        st_geomfromewkb_xfunc,
+        st_geomfromgeojson_xfunc,
+        st_astext_xfunc,
+        st_asewkt_xfunc,
+        st_asbinary_xfunc,
+        st_asewkb_xfunc,
+        st_asgeojson_xfunc,
         // Constructors
-        ("ST_Point", 2, st_point_2_xfunc),
-        ("ST_Point", 3, st_point_3_xfunc),
-        ("ST_MakePoint", 2, st_point_2_xfunc),
-        ("ST_MakeLine", 2, st_makeline_xfunc),
-        ("ST_MakePolygon", 1, st_makepolygon_xfunc),
-        ("ST_MakeEnvelope", 4, st_makeenvelope_4_xfunc),
-        ("ST_MakeEnvelope", 5, st_makeenvelope_5_xfunc),
-        ("ST_Collect", 2, st_collect_xfunc),
-        ("ST_TileEnvelope", 3, st_tileenvelope_xfunc),
+        st_point_2_xfunc,
+        st_point_3_xfunc,
+        st_point_2_xfunc, // ST_MakePoint alias
+        st_makeline_xfunc,
+        st_makepolygon_xfunc,
+        st_makeenvelope_4_xfunc,
+        st_makeenvelope_5_xfunc,
+        st_collect_xfunc,
+        st_tileenvelope_xfunc,
         // Accessors
-        ("ST_SRID", 1, st_srid_xfunc),
-        ("ST_SetSRID", 2, st_setsrid_xfunc),
-        ("ST_GeometryType", 1, st_geometrytype_xfunc),
-        ("GeometryType", 1, st_geometrytype_xfunc),
-        ("ST_NDims", 1, st_ndims_xfunc),
-        ("ST_CoordDim", 1, st_coorddim_xfunc),
-        ("ST_Zmflag", 1, st_zmflag_xfunc),
-        ("ST_IsEmpty", 1, st_isempty_xfunc),
-        ("ST_MemSize", 1, st_memsize_xfunc),
-        ("ST_X", 1, st_x_xfunc),
-        ("ST_Y", 1, st_y_xfunc),
-        ("ST_NumPoints", 1, st_numpoints_xfunc),
-        ("ST_NPoints", 1, st_npoints_xfunc),
-        ("ST_NumGeometries", 1, st_numgeometries_xfunc),
-        ("ST_NumInteriorRings", 1, st_numinteriorrings_xfunc),
-        ("ST_NumInteriorRing", 1, st_numinteriorrings_xfunc),
-        ("ST_NumRings", 1, st_numrings_xfunc),
-        ("ST_PointN", 2, st_pointn_xfunc),
-        ("ST_StartPoint", 1, st_startpoint_xfunc),
-        ("ST_EndPoint", 1, st_endpoint_xfunc),
-        ("ST_ExteriorRing", 1, st_exteriorring_xfunc),
-        ("ST_InteriorRingN", 2, st_interiorringn_xfunc),
-        ("ST_GeometryN", 2, st_geometryn_xfunc),
-        ("ST_Dimension", 1, st_dimension_xfunc),
-        ("ST_Envelope", 1, st_envelope_xfunc),
-        ("ST_IsValid", 1, st_isvalid_xfunc),
-        ("ST_IsValidReason", 1, st_isvalidreason_xfunc),
+        st_srid_xfunc,
+        st_setsrid_xfunc,
+        st_geometrytype_xfunc,
+        st_geometrytype_xfunc, // GeometryType alias
+        st_ndims_xfunc,
+        st_coorddim_xfunc,
+        st_zmflag_xfunc,
+        st_isempty_xfunc,
+        st_memsize_xfunc,
+        st_x_xfunc,
+        st_y_xfunc,
+        st_numpoints_xfunc,
+        st_npoints_xfunc,
+        st_numgeometries_xfunc,
+        st_numinteriorrings_xfunc,
+        st_numinteriorrings_xfunc, // ST_NumInteriorRing alias
+        st_numrings_xfunc,
+        st_pointn_xfunc,
+        st_startpoint_xfunc,
+        st_endpoint_xfunc,
+        st_exteriorring_xfunc,
+        st_interiorringn_xfunc,
+        st_geometryn_xfunc,
+        st_dimension_xfunc,
+        st_envelope_xfunc,
+        st_isvalid_xfunc,
+        st_isvalidreason_xfunc,
         // Measurement
-        ("ST_Area", 1, st_area_xfunc),
-        ("ST_Length", 1, st_length_xfunc),
-        ("ST_Length2D", 1, st_length_xfunc),
-        ("ST_Perimeter", 1, st_perimeter_xfunc),
-        ("ST_Perimeter2D", 1, st_perimeter_xfunc),
-        ("ST_Distance", 2, st_distance_xfunc),
-        ("ST_Centroid", 1, st_centroid_xfunc),
-        ("ST_PointOnSurface", 1, st_pointonsurface_xfunc),
-        ("ST_HausdorffDistance", 2, st_hausdorffdistance_xfunc),
-        ("ST_XMin", 1, st_xmin_xfunc),
-        ("ST_XMax", 1, st_xmax_xfunc),
-        ("ST_YMin", 1, st_ymin_xfunc),
-        ("ST_YMax", 1, st_ymax_xfunc),
-        ("ST_DistanceSphere", 2, st_distancesphere_xfunc),
-        ("ST_DistanceSpheroid", 2, st_distancespheroid_xfunc),
-        ("ST_LengthSphere", 1, st_lengthsphere_xfunc),
-        ("ST_Azimuth", 2, st_azimuth_xfunc),
-        ("ST_Project", 3, st_project_xfunc),
-        ("ST_ClosestPoint", 2, st_closestpoint_xfunc),
+        st_area_xfunc,
+        st_length_xfunc,
+        st_length_xfunc, // ST_Length2D alias
+        st_perimeter_xfunc,
+        st_perimeter_xfunc, // ST_Perimeter2D alias
+        st_distance_xfunc,
+        st_centroid_xfunc,
+        st_pointonsurface_xfunc,
+        st_hausdorffdistance_xfunc,
+        st_xmin_xfunc,
+        st_xmax_xfunc,
+        st_ymin_xfunc,
+        st_ymax_xfunc,
+        st_distancesphere_xfunc,
+        st_distancespheroid_xfunc,
+        st_lengthsphere_xfunc,
+        st_azimuth_xfunc,
+        st_project_xfunc,
+        st_closestpoint_xfunc,
         // Operations
-        ("ST_Union", 2, st_union_xfunc),
-        ("ST_Intersection", 2, st_intersection_xfunc),
-        ("ST_Difference", 2, st_difference_xfunc),
-        ("ST_SymDifference", 2, st_symdifference_xfunc),
-        ("ST_Buffer", 2, st_buffer_xfunc),
+        st_union_xfunc,
+        st_intersection_xfunc,
+        st_difference_xfunc,
+        st_symdifference_xfunc,
+        st_buffer_xfunc,
         // Predicates
-        ("ST_Intersects", 2, st_intersects_xfunc),
-        ("ST_Contains", 2, st_contains_xfunc),
-        ("ST_Within", 2, st_within_xfunc),
-        ("ST_Disjoint", 2, st_disjoint_xfunc),
-        ("ST_DWithin", 3, st_dwithin_xfunc),
-        ("ST_Covers", 2, st_covers_xfunc),
-        ("ST_CoveredBy", 2, st_coveredby_xfunc),
-        ("ST_Equals", 2, st_equals_xfunc),
-        ("ST_Touches", 2, st_touches_xfunc),
-        ("ST_Crosses", 2, st_crosses_xfunc),
-        ("ST_Overlaps", 2, st_overlaps_xfunc),
-        ("ST_Relate", 2, st_relate_2_xfunc),
-        ("ST_Relate", 3, st_relate_3_xfunc),
-        ("ST_RelateMatch", 2, st_relatematch_xfunc),
+        st_intersects_xfunc,
+        st_contains_xfunc,
+        st_within_xfunc,
+        st_disjoint_xfunc,
+        st_dwithin_xfunc,
+        st_covers_xfunc,
+        st_coveredby_xfunc,
+        st_equals_xfunc,
+        st_touches_xfunc,
+        st_crosses_xfunc,
+        st_overlaps_xfunc,
+        st_relate_2_xfunc,
+        st_relate_3_xfunc,
+        st_relatematch_xfunc,
     ];
 
-    for (name, n_arg, xfunc) in deterministic {
-        let rc = reg(db, name, *n_arg, DET, *xfunc);
+    if deterministic_callbacks.len() != SQLITE_DETERMINISTIC_FUNCTIONS.len() {
+        return SQLITE_ERROR;
+    }
+
+    for (spec, xfunc) in SQLITE_DETERMINISTIC_FUNCTIONS
+        .iter()
+        .zip(deterministic_callbacks.iter())
+    {
+        let rc = reg(db, spec.name, spec.n_arg as c_int, DET, *xfunc);
         if rc != SQLITE_OK {
             return rc;
         }
     }
 
-    let direct_only: &[(&str, c_int, XFunc)] = &[
-        ("CreateSpatialIndex", 2, create_spatial_index_xfunc),
-        ("DropSpatialIndex", 2, drop_spatial_index_xfunc),
-    ];
+    let direct_only_callbacks: &[XFunc] = &[create_spatial_index_xfunc, drop_spatial_index_xfunc];
 
-    for (name, n_arg, xfunc) in direct_only {
-        let rc = reg(db, name, *n_arg, DIRECT, *xfunc);
+    if direct_only_callbacks.len() != SQLITE_DIRECT_ONLY_FUNCTIONS.len() {
+        return SQLITE_ERROR;
+    }
+
+    for (spec, xfunc) in SQLITE_DIRECT_ONLY_FUNCTIONS
+        .iter()
+        .zip(direct_only_callbacks.iter())
+    {
+        let rc = reg(db, spec.name, spec.n_arg as c_int, DIRECT, *xfunc);
         if rc != SQLITE_OK {
             return rc;
         }
@@ -1356,7 +1425,10 @@ pub unsafe extern "C" fn sqlite3_geolite_init(
     _pz_err_msg: *mut *mut std::ffi::c_char,
     _p_api: *mut sqlite3_api_routines,
 ) -> c_int {
-    register_functions(db)
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| register_functions(db))) {
+        Ok(rc) => rc,
+        Err(_) => SQLITE_ERROR,
+    }
 }
 
 /// Compatibility entry point name expected by SQLite's default loader rules for
@@ -1374,6 +1446,64 @@ pub unsafe extern "C" fn sqlite3_geolitesqlite_init(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::{CStr, CString};
+    use std::ptr;
+
+    unsafe extern "C" fn guarded_constant_xfunc(
+        ctx: *mut sqlite3_context,
+        _n: c_int,
+        _argv: *mut *mut sqlite3_value,
+    ) {
+        xfunc_guard(ctx, "GuardedConstant", || {
+            set_i32(ctx, 7);
+        });
+    }
+
+    unsafe extern "C" fn guarded_panic_xfunc(
+        ctx: *mut sqlite3_context,
+        _n: c_int,
+        _argv: *mut *mut sqlite3_value,
+    ) {
+        xfunc_guard(ctx, "GuardedPanic", || {
+            panic!("boom");
+        });
+    }
+
+    unsafe fn open_db() -> *mut sqlite3 {
+        let mut db = ptr::null_mut();
+        let path = CString::new(":memory:").expect("valid sqlite path");
+        assert_eq!(sqlite3_open(path.as_ptr(), &mut db), SQLITE_OK);
+        db
+    }
+
+    unsafe fn close_db(db: *mut sqlite3) {
+        assert_eq!(sqlite3_close(db), SQLITE_OK);
+    }
+
+    unsafe fn query_i64(db: *mut sqlite3, sql: &str) -> Result<i64, String> {
+        let sql_c = CString::new(sql).expect("valid SQL");
+        let mut stmt = ptr::null_mut();
+        let rc = sqlite3_prepare_v2(db, sql_c.as_ptr(), -1, &mut stmt, ptr::null_mut());
+        if rc != SQLITE_OK {
+            let err = CStr::from_ptr(sqlite3_errmsg(db))
+                .to_string_lossy()
+                .into_owned();
+            return Err(err);
+        }
+
+        let step = sqlite3_step(stmt);
+        if step != SQLITE_ROW {
+            sqlite3_finalize(stmt);
+            let err = CStr::from_ptr(sqlite3_errmsg(db))
+                .to_string_lossy()
+                .into_owned();
+            return Err(err);
+        }
+
+        let value = sqlite3_column_int64(stmt, 0);
+        sqlite3_finalize(stmt);
+        Ok(value)
+    }
 
     #[test]
     fn checked_c_int_len_accepts_small_and_boundary_values() {
@@ -1397,5 +1527,61 @@ mod tests {
     #[test]
     fn sql_to_cstring_rejects_sql_with_nul() {
         assert!(sql_to_cstring("SELECT\0 1").is_err());
+    }
+
+    #[test]
+    fn xfunc_guard_allows_normal_execution() {
+        unsafe {
+            let db = open_db();
+
+            let func_name = CString::new("GuardedConstant").expect("valid function name");
+            let rc = sqlite3_create_function_v2(
+                db,
+                func_name.as_ptr(),
+                0,
+                SQLITE_UTF8,
+                ptr::null_mut(),
+                Some(guarded_constant_xfunc),
+                None,
+                None,
+                None,
+            );
+            assert_eq!(rc, SQLITE_OK, "function registration should succeed");
+
+            let value = query_i64(db, "SELECT GuardedConstant()").expect("query should succeed");
+            assert_eq!(value, 7);
+
+            close_db(db);
+        }
+    }
+
+    #[test]
+    fn xfunc_guard_converts_panic_into_sqlite_error() {
+        unsafe {
+            let db = open_db();
+
+            let func_name = CString::new("GuardedPanic").expect("valid function name");
+            let rc = sqlite3_create_function_v2(
+                db,
+                func_name.as_ptr(),
+                0,
+                SQLITE_UTF8,
+                ptr::null_mut(),
+                Some(guarded_panic_xfunc),
+                None,
+                None,
+                None,
+            );
+            assert_eq!(rc, SQLITE_OK, "function registration should succeed");
+
+            let err = query_i64(db, "SELECT GuardedPanic()")
+                .expect_err("panic should be surfaced as SQL error");
+            assert!(
+                err.contains("panic in SQLite callback"),
+                "unexpected error message: {err}"
+            );
+
+            close_db(db);
+        }
     }
 }
