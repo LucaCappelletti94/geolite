@@ -1650,5 +1650,116 @@ fn spatial_index_drop_idempotent() {
     let rc = db.query_i64("SELECT DropSpatialIndex('pts', 'geom')");
     assert_eq!(rc, 1);
 }
+
+// ── Boolean operations ────────────────────────────────────────────────────────
+
+#[$test_attr]
+fn st_union_overlapping_polygons() {
+    let db = ActiveTestDb::open();
+    // Two 2×2 squares overlapping by 1×2 strip → union area = 6
+    let area = db.query_f64(
+        "SELECT ST_Area(ST_Union(\
+            ST_GeomFromText('POLYGON((0 0,2 0,2 2,0 2,0 0))'),\
+            ST_GeomFromText('POLYGON((1 0,3 0,3 2,1 2,1 0))')\
+         ))",
+    );
+    assert!((area - 6.0).abs() < 1e-10, "ST_Union area = {area}");
+}
+
+#[$test_attr]
+fn st_union_disjoint_returns_combined_area() {
+    let db = ActiveTestDb::open();
+    let area = db.query_f64(
+        "SELECT ST_Area(ST_Union(\
+            ST_GeomFromText('POLYGON((0 0,1 0,1 1,0 1,0 0))'),\
+            ST_GeomFromText('POLYGON((5 5,6 5,6 6,5 6,5 5))')\
+         ))",
+    );
+    assert!((area - 2.0).abs() < 1e-10, "ST_Union disjoint area = {area}");
+}
+
+#[$test_attr]
+fn st_intersection_overlapping_polygons() {
+    let db = ActiveTestDb::open();
+    // Intersection of the same two squares = 1×2 strip → area = 2
+    let area = db.query_f64(
+        "SELECT ST_Area(ST_Intersection(\
+            ST_GeomFromText('POLYGON((0 0,2 0,2 2,0 2,0 0))'),\
+            ST_GeomFromText('POLYGON((1 0,3 0,3 2,1 2,1 0))')\
+         ))",
+    );
+    assert!((area - 2.0).abs() < 1e-10, "ST_Intersection area = {area}");
+}
+
+#[$test_attr]
+fn st_intersection_disjoint_is_empty() {
+    let db = ActiveTestDb::open();
+    let is_empty = db.query_i64(
+        "SELECT ST_IsEmpty(ST_Intersection(\
+            ST_GeomFromText('POLYGON((0 0,1 0,1 1,0 1,0 0))'),\
+            ST_GeomFromText('POLYGON((5 5,6 5,6 6,5 6,5 5))')\
+         ))",
+    );
+    assert_eq!(is_empty, 1, "disjoint intersection should be empty");
+}
+
+#[$test_attr]
+fn st_difference_overlapping_polygons() {
+    let db = ActiveTestDb::open();
+    // A(2×2) minus overlap(1×2) = left strip, area = 2
+    let area = db.query_f64(
+        "SELECT ST_Area(ST_Difference(\
+            ST_GeomFromText('POLYGON((0 0,2 0,2 2,0 2,0 0))'),\
+            ST_GeomFromText('POLYGON((1 0,3 0,3 2,1 2,1 0))')\
+         ))",
+    );
+    assert!((area - 2.0).abs() < 1e-10, "ST_Difference area = {area}");
+}
+
+#[$test_attr]
+fn st_symdifference_overlapping_polygons() {
+    let db = ActiveTestDb::open();
+    // SymDiff of two 2×2 overlapping by 1×2 = 2 + 2 = 4
+    let area = db.query_f64(
+        "SELECT ST_Area(ST_SymDifference(\
+            ST_GeomFromText('POLYGON((0 0,2 0,2 2,0 2,0 0))'),\
+            ST_GeomFromText('POLYGON((1 0,3 0,3 2,1 2,1 0))')\
+         ))",
+    );
+    assert!((area - 4.0).abs() < 1e-10, "ST_SymDifference area = {area}");
+}
+
+#[$test_attr]
+fn st_buffer_point_has_positive_area() {
+    let db = ActiveTestDb::open();
+    let area = db.query_f64(
+        "SELECT ST_Area(ST_Buffer(ST_GeomFromText('POINT(0 0)'), 1.0))",
+    );
+    // Area of a radius-1 circle ≈ π ≈ 3.14159
+    assert!(
+        (area - std::f64::consts::PI).abs() < 0.1,
+        "ST_Buffer(point,1) area = {area}"
+    );
+}
+
+#[$test_attr]
+fn st_buffer_polygon_grows_area() {
+    let db = ActiveTestDb::open();
+    let area = db.query_f64(
+        "SELECT ST_Area(ST_Buffer(ST_GeomFromText('POLYGON((0 0,4 0,4 4,0 4,0 0))'), 1.0))",
+    );
+    // Buffered square is larger than the original 4×4 = 16
+    assert!(area > 16.0, "buffered polygon area ({area}) should exceed original");
+}
+
+#[$test_attr]
+fn st_buffer_empty_returns_empty_polygon() {
+    let db = ActiveTestDb::open();
+    let is_empty = db.query_i64(
+        "SELECT ST_IsEmpty(ST_Buffer(ST_GeomFromText('POINT EMPTY'), 1.0))",
+    );
+    assert_eq!(is_empty, 1, "buffer of empty geometry should be empty");
+}
+
     };
 }
