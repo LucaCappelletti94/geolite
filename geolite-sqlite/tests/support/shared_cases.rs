@@ -1832,5 +1832,21 @@ fn st_perimeter2d_is_alias_for_st_perimeter() {
     assert!((via_2d - 4.0).abs() < 1e-10, "ST_Perimeter2D = {via_2d}");
     assert!((via_2d - via_plain).abs() < 1e-10, "ST_Perimeter2D must equal ST_Perimeter");
 }
+
+// ── Group 1 correctness ───────────────────────────────────────────────────────
+
+#[$test_attr]
+fn st_num_rings_empty_polygon() {
+    let db = ActiveTestDb::open();
+    let n = db.query_i64("SELECT ST_NumRings(ST_GeomFromText('POLYGON EMPTY'))");
+    assert_eq!(n, 0);
+}
+
+#[$test_attr]
+fn st_make_envelope_inverted_coords_errors() {
+    let db = ActiveTestDb::open();
+    db.try_query_i64("SELECT ST_MakeEnvelope(10, 0, 5, 5, 4326)")
+        .expect_err("inverted xmin/xmax should return an error");
+}
     };
 }

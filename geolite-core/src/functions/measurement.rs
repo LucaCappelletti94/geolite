@@ -13,7 +13,9 @@ use geo::Closest;
 use geo::{Geometry, Point, Rect};
 
 use crate::error::{GeoLiteError, Result};
-use crate::ewkb::{ensure_matching_srid, parse_ewkb, parse_ewkb_pair, write_ewkb};
+use crate::ewkb::{
+    ensure_matching_srid, geometry_type_name, parse_ewkb, parse_ewkb_pair, write_ewkb,
+};
 use crate::functions::emptiness::is_empty_geometry;
 
 fn require_non_empty_geometry(geom: &Geometry<f64>, fn_name: &str) -> Result<()> {
@@ -66,7 +68,12 @@ pub fn st_length(blob: &[u8]) -> Result<f64> {
     let len = match &geom {
         Geometry::LineString(ls) => Euclidean.length(ls),
         Geometry::MultiLineString(mls) => mls.0.iter().map(|ls| Euclidean.length(ls)).sum(),
-        _ => return Err(GeoLiteError::WrongType("LineString or MultiLineString")),
+        other => {
+            return Err(GeoLiteError::WrongType {
+                expected: "LineString or MultiLineString",
+                actual: geometry_type_name(other),
+            })
+        }
     };
     Ok(len)
 }
@@ -94,7 +101,12 @@ pub fn st_perimeter(blob: &[u8]) -> Result<f64> {
     let perim = match &geom {
         Geometry::Polygon(p) => poly_perimeter(p),
         Geometry::MultiPolygon(mp) => mp.0.iter().map(poly_perimeter).sum(),
-        _ => return Err(GeoLiteError::WrongType("Polygon or MultiPolygon")),
+        other => {
+            return Err(GeoLiteError::WrongType {
+                expected: "Polygon or MultiPolygon",
+                actual: geometry_type_name(other),
+            })
+        }
     };
     Ok(perim)
 }
@@ -139,9 +151,10 @@ pub fn st_distance(a: &[u8], b: &[u8]) -> Result<f64> {
 /// ```
 pub fn st_centroid(blob: &[u8]) -> Result<Vec<u8>> {
     let (geom, srid) = parse_ewkb(blob)?;
-    let c = geom
-        .centroid()
-        .ok_or(GeoLiteError::WrongType("non-empty geometry"))?;
+    let c = geom.centroid().ok_or_else(|| GeoLiteError::WrongType {
+        expected: "non-empty geometry",
+        actual: geometry_type_name(&geom),
+    })?;
     write_ewkb(&Geometry::Point(c), srid)
 }
 
@@ -163,7 +176,10 @@ pub fn st_point_on_surface(blob: &[u8]) -> Result<Vec<u8>> {
     let (geom, srid) = parse_ewkb(blob)?;
     let p = geom
         .interior_point()
-        .ok_or(GeoLiteError::WrongType("non-empty geometry"))?;
+        .ok_or_else(|| GeoLiteError::WrongType {
+            expected: "non-empty geometry",
+            actual: geometry_type_name(&geom),
+        })?;
     write_ewkb(&Geometry::Point(p), srid)
 }
 
@@ -254,8 +270,10 @@ pub fn st_ymax(blob: &[u8]) -> Result<f64> {
 
 fn bbox(blob: &[u8]) -> Result<Rect<f64>> {
     let (geom, _) = parse_ewkb(blob)?;
-    geom.bounding_rect()
-        .ok_or(GeoLiteError::WrongType("non-empty geometry"))
+    geom.bounding_rect().ok_or_else(|| GeoLiteError::WrongType {
+        expected: "non-empty geometry",
+        actual: geometry_type_name(&geom),
+    })
 }
 
 // ── Spherical / geodetic variants ─────────────────────────────────────────────
@@ -263,7 +281,10 @@ fn bbox(blob: &[u8]) -> Result<Rect<f64>> {
 fn require_point(g: Geometry<f64>) -> Result<Point<f64>> {
     match g {
         Geometry::Point(p) => Ok(p),
-        _ => Err(GeoLiteError::WrongType("Point")),
+        other => Err(GeoLiteError::WrongType {
+            expected: "Point",
+            actual: geometry_type_name(&other),
+        }),
     }
 }
 
@@ -356,7 +377,10 @@ pub fn st_length_sphere(blob: &[u8]) -> Result<f64> {
     match &geom {
         Geometry::LineString(ls) => Ok(Haversine.length(ls)),
         Geometry::MultiLineString(mls) => Ok(mls.0.iter().map(|ls| Haversine.length(ls)).sum()),
-        _ => Err(GeoLiteError::WrongType("LineString or MultiLineString")),
+        other => Err(GeoLiteError::WrongType {
+            expected: "LineString or MultiLineString",
+            actual: geometry_type_name(other),
+        }),
     }
 }
 
@@ -425,7 +449,11 @@ pub fn st_closest_point(a: &[u8], b: &[u8]) -> Result<Vec<u8>> {
     let cp = ga.closest_point(&pb);
     let pt = match cp {
         Closest::Intersection(p) | Closest::SinglePoint(p) => p,
-        Closest::Indeterminate => return Err(GeoLiteError::WrongType("non-empty geometry")),
+        Closest::Indeterminate => {
+            return Err(GeoLiteError::InvalidInput(
+                "ST_ClosestPoint: unable to determine closest point".to_string(),
+            ))
+        }
     };
     write_ewkb(&Geometry::Point(pt), srid)
 }

@@ -6,7 +6,7 @@
 use geo::{Coord, Geometry, LineString, Point, Polygon, Rect};
 
 use crate::error::{GeoLiteError, Result};
-use crate::ewkb::{parse_ewkb, parse_ewkb_pair, write_ewkb};
+use crate::ewkb::{geometry_type_name, parse_ewkb, parse_ewkb_pair, write_ewkb};
 
 /// ST_Point / ST_MakePoint (2D) — construct a Point geometry.
 ///
@@ -42,17 +42,27 @@ pub fn st_make_line(a: &[u8], b: &[u8]) -> Result<Vec<u8>> {
     let (ga, gb, srid) = parse_ewkb_pair(a, b)?;
     let pa = match ga {
         Geometry::Point(p) => p,
-        _ => return Err(GeoLiteError::WrongType("Point")),
+        other => {
+            return Err(GeoLiteError::WrongType {
+                expected: "Point",
+                actual: geometry_type_name(&other),
+            })
+        }
     };
     let pb = match gb {
         Geometry::Point(p) => p,
-        _ => return Err(GeoLiteError::WrongType("Point")),
+        other => {
+            return Err(GeoLiteError::WrongType {
+                expected: "Point",
+                actual: geometry_type_name(&other),
+            })
+        }
     };
     let ls = LineString::from(vec![Coord::from(pa), Coord::from(pb)]);
     write_ewkb(&Geometry::LineString(ls), srid)
 }
 
-/// ST_MakePolygon — construct a Polygon from a shell LineString and optional holes.
+/// ST_MakePolygon — construct a Polygon from a closed shell LineString.
 ///
 /// # Example
 ///
@@ -69,7 +79,12 @@ pub fn st_make_polygon(shell: &[u8]) -> Result<Vec<u8>> {
     let (gs, srid) = parse_ewkb(shell)?;
     let exterior = match gs {
         Geometry::LineString(ls) => ls,
-        _ => return Err(GeoLiteError::WrongType("LineString")),
+        other => {
+            return Err(GeoLiteError::WrongType {
+                expected: "LineString",
+                actual: geometry_type_name(&other),
+            })
+        }
     };
 
     if exterior.0.len() < 4 {
@@ -105,6 +120,16 @@ pub fn st_make_envelope(
     ymax: f64,
     srid: Option<i32>,
 ) -> Result<Vec<u8>> {
+    if !xmin.is_finite() || !ymin.is_finite() || !xmax.is_finite() || !ymax.is_finite() {
+        return Err(GeoLiteError::InvalidInput(
+            "coordinates must be finite".to_string(),
+        ));
+    }
+    if xmin > xmax || ymin > ymax {
+        return Err(GeoLiteError::InvalidInput(format!(
+            "xmin ({xmin}) must be <= xmax ({xmax}) and ymin ({ymin}) must be <= ymax ({ymax})"
+        )));
+    }
     let rect = Rect::new(Coord { x: xmin, y: ymin }, Coord { x: xmax, y: ymax });
     write_ewkb(&Geometry::Rect(rect), srid)
 }
@@ -249,6 +274,28 @@ mod tests {
         let blob = st_make_envelope(0.0, 0.0, 1.0, 1.0, Some(4326)).unwrap();
         // st_make_envelope produces a Rect which is serialized as a geometry
         assert_eq!(extract_srid(&blob), Some(4326));
+    }
+
+    #[test]
+    fn st_make_envelope_rejects_inverted_x() {
+        assert!(st_make_envelope(10.0, 0.0, 5.0, 5.0, None).is_err());
+    }
+
+    #[test]
+    fn st_make_envelope_rejects_inverted_y() {
+        assert!(st_make_envelope(0.0, 10.0, 5.0, 3.0, None).is_err());
+    }
+
+    #[test]
+    fn st_make_envelope_rejects_nan() {
+        assert!(st_make_envelope(f64::NAN, 0.0, 5.0, 5.0, None).is_err());
+    }
+
+    #[test]
+    fn st_make_envelope_degenerate_accepts_equal_coords() {
+        // A degenerate envelope (line or point) is valid — xmin==xmax is allowed
+        assert!(st_make_envelope(1.0, 1.0, 1.0, 2.0, None).is_ok());
+        assert!(st_make_envelope(0.0, 0.0, 0.0, 0.0, None).is_ok());
     }
 
     #[test]

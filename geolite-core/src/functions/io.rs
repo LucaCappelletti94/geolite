@@ -51,12 +51,19 @@ fn is_empty_point_geojson(json: &str) -> bool {
 
 fn read_raw_wkb_type(wkb: &[u8]) -> Result<u32> {
     if wkb.len() < 5 {
-        return Err(GeoLiteError::InvalidEwkb("blob too short"));
+        return Err(GeoLiteError::InvalidEwkb(format!(
+            "blob too short: got {} bytes, need at least 5",
+            wkb.len()
+        )));
     }
     let little_endian = match wkb[0] {
         0x01 => true,
         0x00 => false,
-        _ => return Err(GeoLiteError::InvalidEwkb("invalid byte order marker")),
+        _ => {
+            return Err(GeoLiteError::InvalidEwkb(
+                "invalid byte order marker".to_string(),
+            ))
+        }
     };
     let raw_type = if little_endian {
         u32::from_le_bytes([wkb[1], wkb[2], wkb[3], wkb[4]])
@@ -290,6 +297,43 @@ pub fn as_geojson(blob: &[u8]) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn geom_from_wkb_rejects_iso_wkb_z_point() {
+        // Type 1001 = POINT Z in ISO WKB (little-endian: base 1 + 1000)
+        let mut wkb = vec![0x01u8];
+        wkb.extend_from_slice(&1001u32.to_le_bytes());
+        wkb.extend_from_slice(&1.0f64.to_le_bytes()); // x
+        wkb.extend_from_slice(&2.0f64.to_le_bytes()); // y
+        wkb.extend_from_slice(&3.0f64.to_le_bytes()); // z
+        let err = geom_from_wkb(&wkb, None).unwrap_err();
+        assert!(
+            err.to_string().contains("unsupported"),
+            "expected unsupported error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn geom_from_wkb_rejects_iso_wkb_m_point() {
+        // Type 2001 = POINT M in ISO WKB
+        let mut wkb = vec![0x01u8];
+        wkb.extend_from_slice(&2001u32.to_le_bytes());
+        wkb.extend_from_slice(&1.0f64.to_le_bytes());
+        wkb.extend_from_slice(&2.0f64.to_le_bytes());
+        wkb.extend_from_slice(&3.0f64.to_le_bytes());
+        assert!(geom_from_wkb(&wkb, None).is_err());
+    }
+
+    #[test]
+    fn geom_from_wkb_rejects_iso_wkb_zm_point() {
+        // Type 3001 = POINT ZM in ISO WKB
+        let mut wkb = vec![0x01u8];
+        wkb.extend_from_slice(&3001u32.to_le_bytes());
+        for _ in 0..4 {
+            wkb.extend_from_slice(&1.0f64.to_le_bytes());
+        }
+        assert!(geom_from_wkb(&wkb, None).is_err());
+    }
 
     #[test]
     fn invalid_wkt_returns_err() {

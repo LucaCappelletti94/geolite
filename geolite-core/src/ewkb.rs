@@ -65,7 +65,10 @@ fn point_is_empty_with_header(blob: &[u8], header: &EwkbHeader) -> Result<bool> 
     let dims = 2 + usize::from(header.has_z) + usize::from(header.has_m);
     let needed = header.data_offset + 8 * dims;
     if blob.len() < needed {
-        return Err(GeoLiteError::InvalidEwkb("point payload truncated"));
+        return Err(GeoLiteError::InvalidEwkb(format!(
+            "point payload truncated: got {} bytes",
+            blob.len()
+        )));
     }
 
     let mut x_bytes = [0u8; 8];
@@ -135,13 +138,20 @@ pub struct EwkbHeader {
 /// ```
 pub fn parse_ewkb_header(blob: &[u8]) -> Result<EwkbHeader> {
     if blob.len() < 5 {
-        return Err(GeoLiteError::InvalidEwkb("blob too short"));
+        return Err(GeoLiteError::InvalidEwkb(format!(
+            "blob too short: got {} bytes, need at least 5",
+            blob.len()
+        )));
     }
 
     let little_endian = match blob[0] {
         0x01 => true,
         0x00 => false,
-        _ => return Err(GeoLiteError::InvalidEwkb("invalid byte order marker")),
+        _ => {
+            return Err(GeoLiteError::InvalidEwkb(
+                "invalid byte order marker".to_string(),
+            ))
+        }
     };
 
     let read_u32 = |bytes: [u8; 4]| {
@@ -169,7 +179,7 @@ pub fn parse_ewkb_header(blob: &[u8]) -> Result<EwkbHeader> {
     let srid = if has_srid {
         if blob.len() < 9 {
             return Err(GeoLiteError::InvalidEwkb(
-                "SRID flag set but blob too short",
+                "SRID flag set but blob too short".to_string(),
             ));
         }
         let s = read_i32([blob[5], blob[6], blob[7], blob[8]]);
@@ -261,12 +271,18 @@ pub fn parse_ewkb_pair(a: &[u8], b: &[u8]) -> Result<(Geometry<f64>, Geometry<f6
 
 fn patch_wkb_with_srid(iso_wkb: &[u8], srid_val: i32) -> Result<Vec<u8>> {
     if iso_wkb.len() < 5 {
-        return Err(GeoLiteError::InvalidEwkb("WKB output too short"));
+        return Err(GeoLiteError::InvalidEwkb(
+            "WKB output too short".to_string(),
+        ));
     }
     let little_endian = match iso_wkb[0] {
         0x01 => true,
         0x00 => false,
-        _ => return Err(GeoLiteError::InvalidEwkb("invalid byte order marker")),
+        _ => {
+            return Err(GeoLiteError::InvalidEwkb(
+                "invalid byte order marker".to_string(),
+            ))
+        }
     };
     let raw_type = if little_endian {
         u32::from_le_bytes([iso_wkb[1], iso_wkb[2], iso_wkb[3], iso_wkb[4]])
@@ -373,6 +389,22 @@ pub fn set_srid(blob: &[u8], new_srid: i32) -> Result<Vec<u8>> {
     // Skip old SRID bytes if they were present, copy remaining payload
     out.extend_from_slice(&blob[header.data_offset..]);
     Ok(out)
+}
+
+/// Return a static string naming the variant of a `geo::Geometry` value (for diagnostics).
+pub fn geometry_type_name(geom: &Geometry<f64>) -> &'static str {
+    match geom {
+        Geometry::Point(_) => "Point",
+        Geometry::Line(_) => "Line",
+        Geometry::LineString(_) => "LineString",
+        Geometry::Polygon(_) => "Polygon",
+        Geometry::MultiPoint(_) => "MultiPoint",
+        Geometry::MultiLineString(_) => "MultiLineString",
+        Geometry::MultiPolygon(_) => "MultiPolygon",
+        Geometry::GeometryCollection(_) => "GeometryCollection",
+        Geometry::Rect(_) => "Rect",
+        Geometry::Triangle(_) => "Triangle",
+    }
 }
 
 /// Return a human-readable geometry type name (PostGIS convention).
