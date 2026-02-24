@@ -1334,3 +1334,15 @@ pub unsafe extern "C" fn sqlite3_geolite_init(
 ) -> c_int {
     register_functions(db)
 }
+
+/// Compatibility entry point name expected by SQLite's default loader rules for
+/// libraries named like `libgeolite_sqlite`.
+#[cfg(not(target_arch = "wasm32"))]
+#[no_mangle]
+pub unsafe extern "C" fn sqlite3_geolitesqlite_init(
+    db: *mut sqlite3,
+    pz_err_msg: *mut *mut std::ffi::c_char,
+    p_api: *mut sqlite3_api_routines,
+) -> c_int {
+    sqlite3_geolite_init(db, pz_err_msg, p_api)
+}

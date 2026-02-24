@@ -31,6 +31,8 @@ cargo build --release -p geolite-sqlite
 
 ```sql
 SELECT load_extension('./target/release/libgeolite_sqlite');
+-- If your SQLite build requires an explicit entrypoint:
+-- SELECT load_extension('./target/release/libgeolite_sqlite', 'sqlite3_geolite_init');
 SELECT ST_AsText(ST_Buffer(ST_Point(0, 0), 1.0));
 SELECT ST_Distance(ST_GeomFromText('POINT(0 0)'), ST_GeomFromText('POINT(3 4)'));
 ```

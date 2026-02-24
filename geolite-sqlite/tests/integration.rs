@@ -19,6 +19,7 @@ fn exports_default_sqlite_entrypoint_symbol() {
         .join("..")
         .join("target")
         .join("debug")
+        .join("deps")
         .join("libgeolite_sqlite.so");
     assert!(
         dylib.exists(),
