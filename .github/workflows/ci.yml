@@ -206,6 +206,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@cargo-llvm-cov
+      - run: cargo build -p geolite-sqlite
       - run: cargo llvm-cov --workspace --lcov --output-path lcov.info
       - run: cargo llvm-cov --no-clean -p geolite-diesel --features sqlite --lcov --output-path lcov-diesel.info
       - run: cargo llvm-cov --no-clean -p geolite-diesel --features postgres --test postgres_integration --lcov --output-path lcov-postgres.info
