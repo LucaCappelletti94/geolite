@@ -180,6 +180,11 @@ pub trait GeometryExpressionMethods: Expression<SqlType = Nullable<Geometry>> + 
         functions::st_numinteriorrings(self)
     }
 
+    /// Alias for `st_numinteriorrings`: return the number of interior rings in a Polygon.
+    fn st_numinteriorring(self) -> functions::st_numinteriorring<Self> {
+        functions::st_numinteriorring(self)
+    }
+
     /// Return the total number of rings in a Polygon.
     fn st_numrings(self) -> functions::st_numrings<Self> {
         functions::st_numrings(self)
@@ -266,9 +271,19 @@ pub trait GeometryExpressionMethods: Expression<SqlType = Nullable<Geometry>> + 
         functions::st_length(self)
     }
 
+    /// Alias for `st_length`: return the planar length of a linestring geometry.
+    fn st_length2d(self) -> functions::st_length2d<Self> {
+        functions::st_length2d(self)
+    }
+
     /// Return the planar perimeter of a polygon geometry.
     fn st_perimeter(self) -> functions::st_perimeter<Self> {
         functions::st_perimeter(self)
+    }
+
+    /// Alias for `st_perimeter`: return the planar perimeter of a polygon geometry.
+    fn st_perimeter2d(self) -> functions::st_perimeter2d<Self> {
+        functions::st_perimeter2d(self)
     }
 
     /// Return the minimum Euclidean distance to another geometry.

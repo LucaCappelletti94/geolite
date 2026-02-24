@@ -470,3 +470,36 @@ diesel::define_sql_function! {
     /// Closest point on geometry A to point B.
     fn st_closestpoint(a: Nullable<Geometry>, b: Nullable<Geometry>) -> Nullable<Geometry>;
 }
+
+// ── Aliases ───────────────────────────────────────────────────────────────────
+// PostGIS-compatible alias names registered alongside their canonical forms.
+
+diesel::define_sql_function! {
+    /// Alias for `ST_Point`: construct a Point geometry from X and Y coordinates.
+    #[sql_name = "ST_MakePoint"]
+    fn st_makepoint(x: Double, y: Double) -> Geometry;
+}
+
+diesel::define_sql_function! {
+    /// Alias for `ST_GeometryType`: return the OGC geometry type name (e.g. `ST_Point`).
+    #[sql_name = "GeometryType"]
+    fn geometry_type(geom: Nullable<Geometry>) -> Nullable<Text>;
+}
+
+diesel::define_sql_function! {
+    /// Alias for `ST_NumInteriorRings`: return the number of interior rings in a Polygon.
+    #[sql_name = "ST_NumInteriorRing"]
+    fn st_numinteriorring(geom: Nullable<Geometry>) -> Nullable<Integer>;
+}
+
+diesel::define_sql_function! {
+    /// Alias for `ST_Length`: return the planar length of a linestring geometry.
+    #[sql_name = "ST_Length2D"]
+    fn st_length2d(geom: Nullable<Geometry>) -> Nullable<Double>;
+}
+
+diesel::define_sql_function! {
+    /// Alias for `ST_Perimeter`: return the planar perimeter of a polygon geometry.
+    #[sql_name = "ST_Perimeter2D"]
+    fn st_perimeter2d(geom: Nullable<Geometry>) -> Nullable<Double>;
+}
