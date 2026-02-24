@@ -5,6 +5,7 @@
 
 use diesel::dsl::select;
 use diesel::sql_types::{Integer, Nullable};
+use geolite_core::function_catalog::SQLITE_DETERMINISTIC_FUNCTIONS;
 use geolite_diesel::prelude::*;
 use std::collections::BTreeSet;
 
@@ -109,6 +110,38 @@ fn geometry_expression_methods(src: &str) -> BTreeSet<String> {
         .collect()
 }
 
+fn sql_name_override(block: &str) -> Option<String> {
+    for line in block.lines() {
+        let trimmed = line.trim();
+        if !trimmed.starts_with("#[sql_name") {
+            continue;
+        }
+        let first_quote = trimmed.find('"')?;
+        let rest = &trimmed[first_quote + 1..];
+        let second_quote = rest.find('"')?;
+        return Some(rest[..second_quote].to_string());
+    }
+    None
+}
+
+fn diesel_sql_signatures(src: &str) -> BTreeSet<(String, usize)> {
+    src.split("diesel::define_sql_function! {")
+        .skip(1)
+        .filter_map(|block| {
+            let fn_idx = block.find("fn ")?;
+            let fn_start = fn_idx + "fn ".len();
+            let (fn_name, args) = parse_name_and_args_after_fn(block, fn_start)?;
+            let sql_name = sql_name_override(block).unwrap_or(fn_name);
+            let arg_count = if args.trim().is_empty() {
+                0
+            } else {
+                args.split(',').filter(|arg| !arg.trim().is_empty()).count()
+            };
+            Some((sql_name.to_ascii_uppercase(), arg_count))
+        })
+        .collect()
+}
+
 #[test]
 fn diesel_functions_and_methods_surface_parity() {
     let sql_surface = geometry_first_sql_functions(include_str!("../src/functions.rs"));
@@ -124,6 +157,25 @@ fn diesel_functions_and_methods_surface_parity() {
     assert!(
         extra_methods.is_empty(),
         "method wrappers without matching SQL function declarations: {extra_methods:?}"
+    );
+}
+
+#[test]
+fn diesel_sql_functions_are_backed_by_sqlite_catalog() {
+    let diesel_signatures = diesel_sql_signatures(include_str!("../src/functions.rs"));
+    let catalog_signatures: BTreeSet<(String, usize)> = SQLITE_DETERMINISTIC_FUNCTIONS
+        .iter()
+        .map(|spec| (spec.name.to_ascii_uppercase(), spec.n_arg as usize))
+        .collect();
+
+    let missing_catalog_entries: Vec<_> = diesel_signatures
+        .difference(&catalog_signatures)
+        .cloned()
+        .collect();
+
+    assert!(
+        missing_catalog_entries.is_empty(),
+        "diesel SQL functions missing from canonical SQLite catalog: {missing_catalog_entries:?}"
     );
 }
 

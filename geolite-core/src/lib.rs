@@ -3,6 +3,7 @@
 
 pub mod error;
 pub mod ewkb;
+pub mod function_catalog;
 pub mod functions;
 
 pub use error::{GeoLiteError, Result};
