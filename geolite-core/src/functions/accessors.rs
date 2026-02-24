@@ -10,24 +10,15 @@
 
 use geo::algorithm::Validation;
 use geo::{BoundingRect, Geometry};
-use geozero::wkb::Ewkb;
-use geozero::ToGeo;
 
 use crate::error::{GeoLiteError, Result};
 use crate::ewkb::{
-    geom_type_name, is_empty_point_blob, parse_ewkb, parse_ewkb_header, set_srid, write_ewkb,
-    EwkbHeader,
+    geom_type_name, parse_ewkb, set_srid, validate_ewkb_payload, write_ewkb, EwkbHeader,
 };
 use crate::functions::emptiness::{is_empty_geometry, is_empty_point};
 
 fn validated_header(blob: &[u8]) -> Result<EwkbHeader> {
-    let header = parse_ewkb_header(blob)?;
-    if !is_empty_point_blob(blob)? {
-        // Validate the full payload (including truncated/malformed blobs) without
-        // converting to an XY geometry through `parse_ewkb`.
-        let _: Geometry<f64> = Ewkb(blob).to_geo()?;
-    }
-    Ok(header)
+    validate_ewkb_payload(blob)
 }
 
 /// ST_SRID — return the SRID stored in the EWKB header.
@@ -825,6 +816,33 @@ mod tests {
         let zm = point_blob(EWKB_Z_FLAG | EWKB_M_FLAG);
         assert_eq!(st_ndims(&zm).unwrap(), 4);
         assert_eq!(st_zmflag(&zm).unwrap(), 3);
+    }
+
+    #[test]
+    fn st_is_empty_rejects_zm_payload() {
+        let mut blob = vec![0x01];
+        let typ = WKB_POINT | EWKB_Z_FLAG | EWKB_M_FLAG;
+        blob.extend_from_slice(&typ.to_le_bytes());
+        blob.extend_from_slice(&1.0f64.to_le_bytes());
+        blob.extend_from_slice(&2.0f64.to_le_bytes());
+        blob.extend_from_slice(&3.0f64.to_le_bytes());
+        blob.extend_from_slice(&4.0f64.to_le_bytes());
+
+        let err = st_is_empty(&blob).expect_err("Z/M payloads must be rejected");
+        assert!(format!("{err}").contains("unsupported coordinate dimensions"));
+    }
+
+    #[test]
+    fn st_is_valid_rejects_zm_payload() {
+        let mut blob = vec![0x01];
+        let typ = WKB_POINT | EWKB_Z_FLAG;
+        blob.extend_from_slice(&typ.to_le_bytes());
+        blob.extend_from_slice(&1.0f64.to_le_bytes());
+        blob.extend_from_slice(&2.0f64.to_le_bytes());
+        blob.extend_from_slice(&3.0f64.to_le_bytes());
+
+        let err = st_is_valid(&blob).expect_err("Z payloads must be rejected");
+        assert!(format!("{err}").contains("unsupported coordinate dimensions"));
     }
 
     #[test]

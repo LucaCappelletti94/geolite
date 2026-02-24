@@ -84,6 +84,25 @@ pub fn is_empty_point_blob(blob: &[u8]) -> Result<bool> {
     point_is_empty_with_header(blob, &header)
 }
 
+/// Validate EWKB header + payload without forcing XY-only dimensions.
+///
+/// This helper is intended for metadata-oriented functions that must verify
+/// wire correctness but do not need to deserialize into an XY geometry.
+pub fn validate_ewkb_payload(blob: &[u8]) -> Result<EwkbHeader> {
+    let header = parse_ewkb_header(blob)?;
+    if !point_is_empty_with_header(blob, &header)? {
+        let _: Geometry<f64> = Ewkb(blob).to_geo()?;
+    }
+    Ok(header)
+}
+
+/// Validate EWKB header + payload and enforce XY-only coordinate dimensions.
+pub fn validate_xy_ewkb_payload(blob: &[u8]) -> Result<EwkbHeader> {
+    let header = validate_ewkb_payload(blob)?;
+    ensure_xy_only(header.has_z, header.has_m)?;
+    Ok(header)
+}
+
 /// Parsed EWKB header metadata.
 #[derive(Debug, Clone)]
 pub struct EwkbHeader {
@@ -330,12 +349,9 @@ pub fn write_ewkb(geom: &Geometry<f64>, srid: Option<i32>) -> Result<Vec<u8>> {
 /// assert_eq!(extract_srid(&updated), Some(3857));
 /// ```
 pub fn set_srid(blob: &[u8], new_srid: i32) -> Result<Vec<u8>> {
-    let header = parse_ewkb_header(blob)?;
-    if !point_is_empty_with_header(blob, &header)? {
-        // Validate full payload before rewriting header bytes so malformed EWKB
-        // cannot be silently "fixed" by adding/replacing an SRID.
-        let _: Geometry<f64> = Ewkb(blob).to_geo()?;
-    }
+    // Validate full payload before rewriting header bytes so malformed EWKB
+    // cannot be silently "fixed" by adding/replacing an SRID.
+    let header = validate_ewkb_payload(blob)?;
 
     let mut out = Vec::with_capacity(blob.len() + 4);
     out.push(if header.little_endian { 0x01 } else { 0x00 });
@@ -710,5 +726,38 @@ mod tests {
     #[test]
     fn patch_wkb_with_srid_rejects_short_input() {
         assert!(patch_wkb_with_srid(&[0x01], 4326).is_err());
+    }
+
+    #[test]
+    fn validate_ewkb_payload_accepts_valid_blob() {
+        let blob = crate::functions::io::geom_from_text("LINESTRING(0 0,1 1)", Some(4326))
+            .expect("valid EWKB");
+        let header = validate_ewkb_payload(&blob).expect("valid payload");
+        assert_eq!(header.geom_type, WKB_LINESTRING);
+        assert_eq!(header.srid, Some(4326));
+    }
+
+    #[test]
+    fn validate_ewkb_payload_rejects_malformed_non_empty_blob() {
+        // byte-order + LineString type + point count, but no coordinate payload
+        let mut malformed = vec![0x01];
+        malformed.extend_from_slice(&WKB_LINESTRING.to_le_bytes());
+        malformed.extend_from_slice(&1u32.to_le_bytes());
+
+        validate_ewkb_payload(&malformed).expect_err("malformed payload must error");
+    }
+
+    #[test]
+    fn validate_xy_ewkb_payload_rejects_zm_blob() {
+        let mut blob = vec![0x01];
+        let typ = WKB_POINT | EWKB_Z_FLAG | EWKB_M_FLAG;
+        blob.extend_from_slice(&typ.to_le_bytes());
+        blob.extend_from_slice(&1.0f64.to_le_bytes());
+        blob.extend_from_slice(&2.0f64.to_le_bytes());
+        blob.extend_from_slice(&3.0f64.to_le_bytes());
+        blob.extend_from_slice(&4.0f64.to_le_bytes());
+
+        let err = validate_xy_ewkb_payload(&blob).expect_err("Z/M payload must be rejected");
+        assert!(format!("{err}").contains("unsupported coordinate dimensions"));
     }
 }

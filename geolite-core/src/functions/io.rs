@@ -10,8 +10,8 @@ use serde_json::Value;
 
 use crate::error::{GeoLiteError, Result};
 use crate::ewkb::{
-    ensure_xy_only, extract_srid, is_empty_point_blob, parse_ewkb, parse_ewkb_header, write_ewkb,
-    EWKB_M_FLAG, EWKB_Z_FLAG, WKB_POINT,
+    ensure_xy_only, extract_srid, is_empty_point_blob, parse_ewkb, parse_ewkb_header,
+    validate_xy_ewkb_payload, write_ewkb, EWKB_M_FLAG, EWKB_Z_FLAG, WKB_POINT,
 };
 
 const EMPTY_POINT_GEOJSON: &str = r#"{"type":"Point","coordinates":[]}"#;
@@ -143,13 +143,7 @@ pub fn geom_from_wkb(wkb: &[u8], srid: Option<i32>) -> Result<Vec<u8>> {
 /// assert_eq!(blob, passthrough);
 /// ```
 pub fn geom_from_ewkb(ewkb: &[u8]) -> Result<Vec<u8>> {
-    // Header validation (byte order/type flags/SRID layout)
-    let _ = parse_ewkb_header(ewkb)?;
-    if is_empty_point_blob(ewkb)? {
-        return Ok(ewkb.to_vec());
-    }
-    // Full geometry payload validation
-    let _: Geometry<f64> = Ewkb(ewkb).to_geo()?;
+    let _ = validate_xy_ewkb_payload(ewkb)?;
     Ok(ewkb.to_vec())
 }
 
@@ -417,23 +411,19 @@ mod tests {
     }
 
     #[test]
-    fn geom_from_ewkb_preserves_z_dimension_payload() {
+    fn geom_from_ewkb_rejects_z_dimension_payload() {
         let mut blob = vec![0x01];
         let typ = crate::ewkb::EWKB_Z_FLAG | crate::ewkb::WKB_POINT;
         blob.extend_from_slice(&typ.to_le_bytes());
         blob.extend_from_slice(&1.0f64.to_le_bytes());
         blob.extend_from_slice(&2.0f64.to_le_bytes());
         blob.extend_from_slice(&3.0f64.to_le_bytes());
-        let passthrough = geom_from_ewkb(&blob).unwrap();
-        assert_eq!(passthrough, blob);
-
-        let hdr = crate::ewkb::parse_ewkb_header(&passthrough).unwrap();
-        assert!(hdr.has_z);
-        assert!(!hdr.has_m);
+        let err = geom_from_ewkb(&blob).expect_err("Z payload must be rejected");
+        assert!(format!("{err}").contains("unsupported coordinate dimensions"));
     }
 
     #[test]
-    fn geom_from_ewkb_preserves_big_endian_payload() {
+    fn geom_from_ewkb_rejects_big_endian_zm_payload() {
         let mut blob = vec![0x00];
         let typ = crate::ewkb::EWKB_Z_FLAG | crate::ewkb::EWKB_M_FLAG | crate::ewkb::WKB_POINT;
         blob.extend_from_slice(&typ.to_be_bytes());
@@ -442,13 +432,8 @@ mod tests {
         blob.extend_from_slice(&3.0f64.to_be_bytes());
         blob.extend_from_slice(&4.0f64.to_be_bytes());
 
-        let passthrough = geom_from_ewkb(&blob).unwrap();
-        assert_eq!(passthrough, blob);
-
-        let hdr = crate::ewkb::parse_ewkb_header(&passthrough).unwrap();
-        assert!(!hdr.little_endian);
-        assert!(hdr.has_z);
-        assert!(hdr.has_m);
+        let err = geom_from_ewkb(&blob).expect_err("ZM payload must be rejected");
+        assert!(format!("{err}").contains("unsupported coordinate dimensions"));
     }
 
     #[test]
