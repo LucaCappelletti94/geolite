@@ -6,6 +6,7 @@
 use diesel::dsl::select;
 use diesel::sql_types::{Integer, Nullable};
 use geolite_diesel::prelude::*;
+use std::collections::BTreeSet;
 
 /// Geometry literal helper (not Clone, so create fresh each time via macro).
 macro_rules! g {
@@ -41,6 +42,89 @@ macro_rules! assert_method_eq_func {
             diesel::debug_query::<diesel::sqlite::Sqlite, _>(&select($func_expr)).to_string();
         assert_eq!(method_sql, func_sql);
     }};
+}
+
+fn parse_name_and_args_after_fn(src: &str, fn_start: usize) -> Option<(String, String)> {
+    let rest = &src[fn_start..];
+    let open_paren = rest.find('(')?;
+    let name = rest[..open_paren].trim().to_string();
+
+    let mut depth = 1usize;
+    let mut idx = open_paren + 1;
+    let bytes = rest.as_bytes();
+    while idx < rest.len() {
+        match bytes[idx] {
+            b'(' => depth += 1,
+            b')' => {
+                depth -= 1;
+                if depth == 0 {
+                    let args = rest[open_paren + 1..idx].trim().to_string();
+                    return Some((name, args));
+                }
+            }
+            _ => {}
+        }
+        idx += 1;
+    }
+    None
+}
+
+fn normalize_fn_name(name: &str) -> String {
+    name.split('<').next().unwrap_or(name).trim().to_string()
+}
+
+fn geometry_first_sql_functions(src: &str) -> BTreeSet<String> {
+    src.split("diesel::define_sql_function! {")
+        .skip(1)
+        .filter_map(|block| {
+            let fn_idx = block.find("fn st_")?;
+            let fn_start = fn_idx + "fn ".len();
+            let (name, args) = parse_name_and_args_after_fn(block, fn_start)?;
+            let first_arg = args.split(',').next()?.trim();
+            if first_arg.contains("Nullable<Geometry>") {
+                Some(normalize_fn_name(&name))
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn geometry_expression_methods(src: &str) -> BTreeSet<String> {
+    let trait_start = src
+        .find("pub trait GeometryExpressionMethods")
+        .expect("GeometryExpressionMethods trait must exist");
+    let impl_start = src
+        .find("impl<E> GeometryExpressionMethods for E")
+        .unwrap_or(src.len());
+    let trait_body = &src[trait_start..impl_start];
+
+    trait_body
+        .match_indices("fn st_")
+        .filter_map(|(idx, _)| {
+            let fn_start = idx + "fn ".len();
+            parse_name_and_args_after_fn(trait_body, fn_start)
+                .map(|(name, _)| normalize_fn_name(&name))
+        })
+        .collect()
+}
+
+#[test]
+fn diesel_functions_and_methods_surface_parity() {
+    let sql_surface = geometry_first_sql_functions(include_str!("../src/functions.rs"));
+    let method_surface = geometry_expression_methods(include_str!("../src/expression_methods.rs"));
+
+    let missing_methods: Vec<_> = sql_surface.difference(&method_surface).cloned().collect();
+    let extra_methods: Vec<_> = method_surface.difference(&sql_surface).cloned().collect();
+
+    assert!(
+        missing_methods.is_empty(),
+        "missing method wrappers for SQL functions: {missing_methods:?}"
+    );
+    assert!(
+        extra_methods.is_empty(),
+        "method wrappers without matching SQL function declarations: {extra_methods:?}"
+    );
 }
 
 // ── I/O ─────────────────────────────────────────────────────────────────────
