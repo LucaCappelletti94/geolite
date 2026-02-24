@@ -1761,5 +1761,76 @@ fn st_buffer_empty_returns_empty_polygon() {
     assert_eq!(is_empty, 1, "buffer of empty geometry should be empty");
 }
 
+// ── Alias functions ───────────────────────────────────────────────────────────
+
+#[$test_attr]
+fn st_makepoint_is_alias_for_st_point() {
+    let db = ActiveTestDb::open();
+    let wkt = db.query_text("SELECT ST_AsText(ST_MakePoint(3.0, 4.0))");
+    assert!(wkt.contains("POINT"), "ST_MakePoint WKT = {wkt}");
+    assert!(wkt.contains("3"), "ST_MakePoint WKT = {wkt}");
+    assert!(wkt.contains("4"), "ST_MakePoint WKT = {wkt}");
+
+    // Coordinates must match ST_Point exactly
+    let x = db.query_f64("SELECT ST_X(ST_MakePoint(1.5, 2.5))");
+    assert!((x - 1.5).abs() < 1e-10, "ST_MakePoint X = {x}");
+}
+
+#[$test_attr]
+fn geometry_type_is_alias_for_st_geometrytype() {
+    let db = ActiveTestDb::open();
+    let via_alias = db.query_text(
+        "SELECT GeometryType(ST_GeomFromText('POLYGON((0 0,1 0,1 1,0 1,0 0))'))",
+    );
+    let via_st = db.query_text(
+        "SELECT ST_GeometryType(ST_GeomFromText('POLYGON((0 0,1 0,1 1,0 1,0 0))'))",
+    );
+    assert_eq!(via_alias, via_st, "GeometryType must match ST_GeometryType");
+    assert_eq!(via_alias, "ST_Polygon");
+}
+
+#[$test_attr]
+fn st_numinteriorring_is_alias_for_st_numinteriorrings() {
+    let db = ActiveTestDb::open();
+    // Polygon with one hole
+    let via_singular = db.query_i64(
+        "SELECT ST_NumInteriorRing(\
+            ST_GeomFromText('POLYGON((0 0,10 0,10 10,0 10,0 0),(1 1,2 1,2 2,1 2,1 1))')\
+         )",
+    );
+    let via_plural = db.query_i64(
+        "SELECT ST_NumInteriorRings(\
+            ST_GeomFromText('POLYGON((0 0,10 0,10 10,0 10,0 0),(1 1,2 1,2 2,1 2,1 1))')\
+         )",
+    );
+    assert_eq!(via_singular, 1);
+    assert_eq!(via_singular, via_plural, "ST_NumInteriorRing must equal ST_NumInteriorRings");
+}
+
+#[$test_attr]
+fn st_length2d_is_alias_for_st_length() {
+    let db = ActiveTestDb::open();
+    let via_2d = db.query_f64(
+        "SELECT ST_Length2D(ST_GeomFromText('LINESTRING(0 0,3 4)'))",
+    );
+    let via_plain = db.query_f64(
+        "SELECT ST_Length(ST_GeomFromText('LINESTRING(0 0,3 4)'))",
+    );
+    assert!((via_2d - 5.0).abs() < 1e-10, "ST_Length2D = {via_2d}");
+    assert!((via_2d - via_plain).abs() < 1e-10, "ST_Length2D must equal ST_Length");
+}
+
+#[$test_attr]
+fn st_perimeter2d_is_alias_for_st_perimeter() {
+    let db = ActiveTestDb::open();
+    let via_2d = db.query_f64(
+        "SELECT ST_Perimeter2D(ST_GeomFromText('POLYGON((0 0,1 0,1 1,0 1,0 0))'))",
+    );
+    let via_plain = db.query_f64(
+        "SELECT ST_Perimeter(ST_GeomFromText('POLYGON((0 0,1 0,1 1,0 1,0 0))'))",
+    );
+    assert!((via_2d - 4.0).abs() < 1e-10, "ST_Perimeter2D = {via_2d}");
+    assert!((via_2d - via_plain).abs() < 1e-10, "ST_Perimeter2D must equal ST_Perimeter");
+}
     };
 }
