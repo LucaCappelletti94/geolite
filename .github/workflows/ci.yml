@@ -114,6 +114,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --workspace
       - run: cargo check -p geolite-diesel --features sqlite
+      - run: cargo check -p geolite-diesel --features postgres
 
   check-cross-platform:
     name: Check (${{ matrix.os }})
@@ -163,6 +164,28 @@ jobs:
           CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner
           WASM_BINDGEN_TEST_TIMEOUT: 120
 
+  docs:
+    name: Docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo doc --workspace --no-deps
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+
+  audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo install cargo-audit --quiet
+      - run: cargo audit
+
   test-postgres:
     name: Test (PostGIS)
     runs-on: ubuntu-latest
@@ -177,16 +200,18 @@ jobs:
     name: Coverage
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [fmt, clippy, test, test-postgres, wasm-test, wasm-test-diesel]
+    needs: [fmt, clippy, test, test-postgres, wasm-test, wasm-test-diesel, docs]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@cargo-llvm-cov
-      - run: cargo llvm-cov --workspace --lcov --output-path lcov.info && cargo llvm-cov --no-clean -p geolite-diesel --features sqlite --lcov --output-path lcov-diesel.info
+      - run: cargo llvm-cov --workspace --lcov --output-path lcov.info
+      - run: cargo llvm-cov --no-clean -p geolite-diesel --features sqlite --lcov --output-path lcov-diesel.info
+      - run: cargo llvm-cov --no-clean -p geolite-diesel --features postgres --test postgres_integration --lcov --output-path lcov-postgres.info
       - uses: codecov/codecov-action@v5
         with:
           use_oidc: true
-          files: lcov.info,lcov-diesel.info
+          files: lcov.info,lcov-diesel.info,lcov-postgres.info
           fail_ci_if_error: false
           verbose: true
