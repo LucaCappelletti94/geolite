@@ -319,6 +319,14 @@ pub const SQLITE_DETERMINISTIC_FUNCTIONS: &[SqliteFunctionSpec] = &[
         n_arg: 3,
     },
     SqliteFunctionSpec {
+        name: "ST_DWithinSphere",
+        n_arg: 3,
+    },
+    SqliteFunctionSpec {
+        name: "ST_DWithinSpheroid",
+        n_arg: 3,
+    },
+    SqliteFunctionSpec {
         name: "ST_Covers",
         n_arg: 2,
     },

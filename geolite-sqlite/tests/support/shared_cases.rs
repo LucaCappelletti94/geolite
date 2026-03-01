@@ -565,6 +565,48 @@ fn st_project() {
 }
 
 #[$test_attr]
+fn st_dwithin_sphere() {
+    let db = ActiveTestDb::open();
+    let yes = db.query_i64(
+        "SELECT ST_DWithinSphere(
+            ST_Point(-0.1278, 51.5074, 4326),
+            ST_Point(2.3522, 48.8566, 4326),
+            400000.0
+        )",
+    );
+    let no = db.query_i64(
+        "SELECT ST_DWithinSphere(
+            ST_Point(-0.1278, 51.5074, 4326),
+            ST_Point(2.3522, 48.8566, 4326),
+            300000.0
+        )",
+    );
+    assert_eq!(yes, 1);
+    assert_eq!(no, 0);
+}
+
+#[$test_attr]
+fn st_dwithin_spheroid() {
+    let db = ActiveTestDb::open();
+    let yes = db.query_i64(
+        "SELECT ST_DWithinSpheroid(
+            ST_Point(-0.1278, 51.5074, 4326),
+            ST_Point(2.3522, 48.8566, 4326),
+            400000.0
+        )",
+    );
+    let no = db.query_i64(
+        "SELECT ST_DWithinSpheroid(
+            ST_Point(-0.1278, 51.5074, 4326),
+            ST_Point(2.3522, 48.8566, 4326),
+            300000.0
+        )",
+    );
+    assert_eq!(yes, 1);
+    assert_eq!(no, 0);
+}
+
+#[$test_attr]
 fn st_distance_sphere_requires_explicit_4326_srid() {
     let db = ActiveTestDb::open();
     let err = db
@@ -607,6 +649,70 @@ fn st_project_requires_explicit_4326_srid() {
         .try_query_i64("SELECT ST_Project(ST_Point(0,0), 111000.0, 0.0)")
         .expect_err("SRID-less geodesic projection should error");
     assert!(err.contains("requires SRID 4326"), "unexpected error: {err}");
+}
+
+#[$test_attr]
+fn st_dwithin_geodesic_requires_explicit_4326_srid() {
+    let db = ActiveTestDb::open();
+    let err = db
+        .try_query_i64("SELECT ST_DWithinSphere(ST_Point(0,0), ST_Point(1,1), 1000.0)")
+        .expect_err("SRID-less geodesic dwithin (sphere) should error");
+    assert!(err.contains("requires SRID 4326"), "unexpected error: {err}");
+
+    let err = db
+        .try_query_i64("SELECT ST_DWithinSpheroid(ST_Point(0,0), ST_Point(1,1), 1000.0)")
+        .expect_err("SRID-less geodesic dwithin (spheroid) should error");
+    assert!(err.contains("requires SRID 4326"), "unexpected error: {err}");
+}
+
+#[$test_attr]
+fn st_dwithin_geodesic_rejects_negative_distance() {
+    let db = ActiveTestDb::open();
+    let err = db
+        .try_query_i64(
+            "SELECT ST_DWithinSphere(ST_Point(0,0,4326), ST_Point(1,1,4326), -1.0)",
+        )
+        .expect_err("negative distance should be rejected for ST_DWithinSphere");
+    assert!(
+        err.contains("distance must be non-negative"),
+        "unexpected error: {err}"
+    );
+
+    let err = db
+        .try_query_i64(
+            "SELECT ST_DWithinSpheroid(ST_Point(0,0,4326), ST_Point(1,1,4326), -1.0)",
+        )
+        .expect_err("negative distance should be rejected for ST_DWithinSpheroid");
+    assert!(
+        err.contains("distance must be non-negative"),
+        "unexpected error: {err}"
+    );
+}
+
+#[$test_attr]
+fn st_dwithin_geodesic_rejects_non_point_inputs() {
+    let db = ActiveTestDb::open();
+    let err = db
+        .try_query_i64(
+            "SELECT ST_DWithinSphere(
+                ST_GeomFromText('LINESTRING(0 0,1 1)', 4326),
+                ST_Point(0,0,4326),
+                1000.0
+            )",
+        )
+        .expect_err("non-point input should be rejected for ST_DWithinSphere");
+    assert!(err.contains("not a Point"), "unexpected error: {err}");
+
+    let err = db
+        .try_query_i64(
+            "SELECT ST_DWithinSpheroid(
+                ST_GeomFromText('LINESTRING(0 0,1 1)', 4326),
+                ST_Point(0,0,4326),
+                1000.0
+            )",
+        )
+        .expect_err("non-point input should be rejected for ST_DWithinSpheroid");
+    assert!(err.contains("not a Point"), "unexpected error: {err}");
 }
 
 #[$test_attr]
@@ -1058,6 +1164,18 @@ fn null_input_st_dwithin() {
     let db = ActiveTestDb::open();
     assert!(db.query_is_null("SELECT ST_DWithin(NULL, ST_Point(0,0), 5.0)"));
     assert!(db.query_is_null("SELECT ST_DWithin(ST_Point(0,0), NULL, 5.0)"));
+    assert!(db.query_is_null(
+        "SELECT ST_DWithinSphere(NULL, ST_Point(0,0,4326), 5.0)"
+    ));
+    assert!(db.query_is_null(
+        "SELECT ST_DWithinSphere(ST_Point(0,0,4326), NULL, 5.0)"
+    ));
+    assert!(db.query_is_null(
+        "SELECT ST_DWithinSpheroid(NULL, ST_Point(0,0,4326), 5.0)"
+    ));
+    assert!(db.query_is_null(
+        "SELECT ST_DWithinSpheroid(ST_Point(0,0,4326), NULL, 5.0)"
+    ));
 }
 
 #[$test_attr]

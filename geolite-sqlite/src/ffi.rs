@@ -965,6 +965,18 @@ xfunc_blob2!(st_within_xfunc, "ST_Within", st_within, set_bool);
 xfunc_blob2!(st_disjoint_xfunc, "ST_Disjoint", st_disjoint, set_bool);
 
 xfunc_blob2_f64_bool!(st_dwithin_xfunc, "ST_DWithin", "distance", st_dwithin);
+xfunc_blob2_f64_bool!(
+    st_dwithinsphere_xfunc,
+    "ST_DWithinSphere",
+    "distance",
+    st_dwithin_sphere
+);
+xfunc_blob2_f64_bool!(
+    st_dwithinspheroid_xfunc,
+    "ST_DWithinSpheroid",
+    "distance",
+    st_dwithin_spheroid
+);
 
 xfunc_blob2!(st_covers_xfunc, "ST_Covers", st_covers, set_bool);
 xfunc_blob2!(st_coveredby_xfunc, "ST_CoveredBy", st_covered_by, set_bool);
@@ -1370,6 +1382,8 @@ pub unsafe fn register_functions(db: *mut sqlite3) -> c_int {
         ("ST_Within", 2, st_within_xfunc),
         ("ST_Disjoint", 2, st_disjoint_xfunc),
         ("ST_DWithin", 3, st_dwithin_xfunc),
+        ("ST_DWithinSphere", 3, st_dwithinsphere_xfunc),
+        ("ST_DWithinSpheroid", 3, st_dwithinspheroid_xfunc),
         ("ST_Covers", 2, st_covers_xfunc),
         ("ST_CoveredBy", 2, st_coveredby_xfunc),
         ("ST_Equals", 2, st_equals_xfunc),

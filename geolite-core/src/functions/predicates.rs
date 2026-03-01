@@ -1,6 +1,7 @@
 //! Spatial predicate functions.
 //!
 //! ST_Intersects, ST_Contains, ST_Within, ST_Disjoint, ST_DWithin,
+//! ST_DWithinSphere, ST_DWithinSpheroid,
 //! ST_Covers, ST_CoveredBy, ST_Equals, ST_Touches, ST_Crosses,
 //! ST_Overlaps, ST_Relate, ST_RelateMatch
 
@@ -93,6 +94,54 @@ pub fn st_disjoint(a: &[u8], b: &[u8]) -> Result<bool> {
 pub fn st_dwithin(a: &[u8], b: &[u8], distance: f64) -> Result<bool> {
     use super::measurement::st_distance;
     Ok(st_distance(a, b)? <= distance)
+}
+
+/// ST_DWithinSphere — true if two geographic points are within `distance` metres
+/// using Haversine (spherical) distance (requires SRID 4326).
+///
+/// # Example
+///
+/// ```
+/// use geolite_core::functions::predicates::st_dwithin_sphere;
+/// use geolite_core::functions::constructors::st_point;
+///
+/// let a = st_point(-0.1278, 51.5074, Some(4326)).unwrap(); // London
+/// let b = st_point(2.3522, 48.8566, Some(4326)).unwrap(); // Paris
+/// assert!(st_dwithin_sphere(&a, &b, 400_000.0).unwrap());
+/// assert!(!st_dwithin_sphere(&a, &b, 300_000.0).unwrap());
+/// ```
+pub fn st_dwithin_sphere(a: &[u8], b: &[u8], distance: f64) -> Result<bool> {
+    use super::measurement::st_distance_sphere;
+    if distance < 0.0 {
+        return Err(GeoLiteError::InvalidInput(
+            "ST_DWithinSphere: distance must be non-negative".to_string(),
+        ));
+    }
+    Ok(st_distance_sphere(a, b)? <= distance)
+}
+
+/// ST_DWithinSpheroid — true if two geographic points are within `distance` metres
+/// using geodesic (spheroid) distance (requires SRID 4326).
+///
+/// # Example
+///
+/// ```
+/// use geolite_core::functions::predicates::st_dwithin_spheroid;
+/// use geolite_core::functions::constructors::st_point;
+///
+/// let a = st_point(-0.1278, 51.5074, Some(4326)).unwrap(); // London
+/// let b = st_point(2.3522, 48.8566, Some(4326)).unwrap(); // Paris
+/// assert!(st_dwithin_spheroid(&a, &b, 400_000.0).unwrap());
+/// assert!(!st_dwithin_spheroid(&a, &b, 300_000.0).unwrap());
+/// ```
+pub fn st_dwithin_spheroid(a: &[u8], b: &[u8], distance: f64) -> Result<bool> {
+    use super::measurement::st_distance_spheroid;
+    if distance < 0.0 {
+        return Err(GeoLiteError::InvalidInput(
+            "ST_DWithinSpheroid: distance must be non-negative".to_string(),
+        ));
+    }
+    Ok(st_distance_spheroid(a, b)? <= distance)
 }
 
 /// ST_Covers — A covers B (B has no point outside A).
@@ -486,5 +535,46 @@ mod tests {
         // distance = 5.0 exactly
         assert!(st_dwithin(&a, &b, 5.0).unwrap());
         assert!(!st_dwithin(&a, &b, 4.99).unwrap());
+    }
+
+    #[test]
+    fn st_dwithin_sphere_boundary() {
+        let a = st_point(-0.1278, 51.5074, Some(4326)).unwrap();
+        let b = st_point(2.3522, 48.8566, Some(4326)).unwrap();
+        let d = super::super::measurement::st_distance_sphere(&a, &b).unwrap();
+
+        assert!(st_dwithin_sphere(&a, &b, d).unwrap());
+        assert!(!st_dwithin_sphere(&a, &b, d - 1.0).unwrap());
+    }
+
+    #[test]
+    fn st_dwithin_spheroid_boundary() {
+        let a = st_point(-0.1278, 51.5074, Some(4326)).unwrap();
+        let b = st_point(2.3522, 48.8566, Some(4326)).unwrap();
+        let d = super::super::measurement::st_distance_spheroid(&a, &b).unwrap();
+
+        assert!(st_dwithin_spheroid(&a, &b, d).unwrap());
+        assert!(!st_dwithin_spheroid(&a, &b, d - 1.0).unwrap());
+    }
+
+    #[test]
+    fn st_dwithin_geodesic_negative_distance_rejected() {
+        let a = st_point(0.0, 0.0, Some(4326)).unwrap();
+        let b = st_point(1.0, 1.0, Some(4326)).unwrap();
+        assert!(st_dwithin_sphere(&a, &b, -1.0).is_err());
+        assert!(st_dwithin_spheroid(&a, &b, -1.0).is_err());
+    }
+
+    #[test]
+    fn st_dwithin_geodesic_requires_4326_and_points() {
+        let a = st_point(0.0, 0.0, None).unwrap();
+        let b = st_point(1.0, 1.0, Some(4326)).unwrap();
+        assert!(st_dwithin_sphere(&a, &b, 1_000.0).is_err());
+        assert!(st_dwithin_spheroid(&a, &b, 1_000.0).is_err());
+
+        let line = geom_from_text("LINESTRING(0 0,1 1)", Some(4326)).unwrap();
+        let pt = st_point(0.0, 0.0, Some(4326)).unwrap();
+        assert!(st_dwithin_sphere(&line, &pt, 1_000.0).is_err());
+        assert!(st_dwithin_spheroid(&line, &pt, 1_000.0).is_err());
     }
 }
