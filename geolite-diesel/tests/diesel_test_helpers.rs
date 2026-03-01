@@ -82,6 +82,16 @@ fn st_point_srid_execution() {
 }
 
 #[$test_attr]
+fn st_point_rejects_non_finite_coordinates_execution() {
+    let mut c = conn();
+    let err = diesel::sql_query("SELECT ST_IsValid(ST_Point(1e309, 0)) AS val")
+        .get_result::<I32Result>(&mut c)
+        .expect_err("non-finite ST_Point coordinates must be rejected");
+    let msg = format!("{err}");
+    assert!(msg.contains("coordinates must be finite"), "got: {msg}");
+}
+
+#[$test_attr]
 fn st_makeenvelope_srid_execution() {
     let mut c = conn();
     let result: I32Result =
@@ -114,6 +124,18 @@ fn st_distance_execution() {
     .unwrap();
     let dist = result.val.expect("should not be NULL");
     assert!((dist - 5.0).abs() < 1e-10, "expected 5.0, got {dist}");
+}
+
+#[$test_attr]
+fn st_makeline_rejects_empty_points_execution() {
+    let mut c = conn();
+    let err = diesel::sql_query(
+        "SELECT ST_NumPoints(ST_MakeLine(ST_GeomFromText('POINT EMPTY'), ST_Point(1,1))) AS val",
+    )
+    .get_result::<I32Result>(&mut c)
+    .expect_err("empty point input must be rejected");
+    let msg = format!("{err}");
+    assert!(msg.contains("point must not be empty"), "got: {msg}");
 }
 
 // ── ST_GeomFromText ──────────────────────────────────────────────────────────

@@ -173,6 +173,18 @@ fn st_point_rejects_non_numeric_args() {
 }
 
 #[$test_attr]
+fn st_point_rejects_non_finite_coordinates() {
+    let db = ActiveTestDb::open();
+    let err = db
+        .try_query_i64("SELECT ST_IsValid(ST_Point(1e309, 0))")
+        .expect_err("non-finite ST_Point coordinates must be rejected");
+    assert!(
+        err.contains("coordinates must be finite"),
+        "unexpected error message: {err}"
+    );
+}
+
+#[$test_attr]
 fn st_make_envelope_null_short_circuits_invalid_numeric_args() {
     let db = ActiveTestDb::open();
     let result = db.try_query_i64("SELECT ST_MakeEnvelope('abc', 0, 1, 1, NULL) IS NULL");
@@ -188,6 +200,18 @@ fn st_make_line() {
     let db = ActiveTestDb::open();
     let n = db.query_i64("SELECT ST_NumPoints(ST_MakeLine(ST_Point(0,0), ST_Point(1,1)))");
     assert_eq!(n, 2);
+}
+
+#[$test_attr]
+fn st_make_line_rejects_empty_points() {
+    let db = ActiveTestDb::open();
+    let err = db
+        .try_query_i64("SELECT ST_NumPoints(ST_MakeLine(ST_GeomFromText('POINT EMPTY'), ST_Point(1,1)))")
+        .expect_err("empty point input must be rejected");
+    assert!(
+        err.contains("point must not be empty"),
+        "unexpected error message: {err}"
+    );
 }
 
 #[$test_attr]

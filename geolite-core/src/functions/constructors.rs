@@ -22,6 +22,11 @@ use crate::ewkb::{geometry_type_name, parse_ewkb, parse_ewkb_pair, write_ewkb};
 /// assert_eq!(st_srid(&blob).unwrap(), 4326);
 /// ```
 pub fn st_point(x: f64, y: f64, srid: Option<i32>) -> Result<Vec<u8>> {
+    if !x.is_finite() || !y.is_finite() {
+        return Err(GeoLiteError::InvalidInput(
+            "coordinates must be finite".to_string(),
+        ));
+    }
     write_ewkb(&Geometry::Point(Point::new(x, y)), srid)
 }
 
@@ -58,6 +63,20 @@ pub fn st_make_line(a: &[u8], b: &[u8]) -> Result<Vec<u8>> {
             })
         }
     };
+
+    for p in [&pa, &pb] {
+        if p.x().is_nan() || p.y().is_nan() {
+            return Err(GeoLiteError::InvalidInput(
+                "point must not be empty".to_string(),
+            ));
+        }
+        if !p.x().is_finite() || !p.y().is_finite() {
+            return Err(GeoLiteError::InvalidInput(
+                "point coordinates must be finite".to_string(),
+            ));
+        }
+    }
+
     let ls = LineString::from(vec![Coord::from(pa), Coord::from(pb)]);
     write_ewkb(&Geometry::LineString(ls), srid)
 }
@@ -270,6 +289,12 @@ mod tests {
     }
 
     #[test]
+    fn st_point_rejects_non_finite_coordinates() {
+        assert!(st_point(f64::INFINITY, 0.0, None).is_err());
+        assert!(st_point(0.0, f64::NAN, None).is_err());
+    }
+
+    #[test]
     fn st_make_envelope_type_check() {
         let blob = st_make_envelope(0.0, 0.0, 1.0, 1.0, Some(4326)).unwrap();
         // st_make_envelope produces a Rect which is serialized as a geometry
@@ -305,6 +330,14 @@ mod tests {
         let line = st_make_line(&a, &b).unwrap();
         assert_eq!(extract_srid(&line), Some(4326));
         assert_eq!(st_geometry_type(&line).unwrap(), "ST_LineString");
+    }
+
+    #[test]
+    fn st_make_line_rejects_empty_points() {
+        let empty = geom_from_text("POINT EMPTY", Some(4326)).unwrap();
+        let point = st_point(1.0, 1.0, Some(4326)).unwrap();
+        assert!(st_make_line(&empty, &point).is_err());
+        assert!(st_make_line(&point, &empty).is_err());
     }
 
     #[test]
