@@ -143,7 +143,8 @@ Geometries are stored as EWKB (Extended Well-Known Binary) BLOBs, matching the P
 ## Geographic SRID requirements
 
 Geodesic and spherical functions (`ST_DistanceSphere`, `ST_DistanceSpheroid`,
-`ST_LengthSphere`, `ST_Azimuth`, `ST_Project`) require geometries with explicit
+`ST_LengthSphere`, `ST_Azimuth`, `ST_Project`, `ST_DWithinSphere`,
+`ST_DWithinSpheroid`) require geometries with explicit
 `SRID=4326`.
 
 Inputs with missing SRID or non-4326 SRID are rejected with an error.
