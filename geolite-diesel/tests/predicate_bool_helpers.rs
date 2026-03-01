@@ -62,6 +62,23 @@ macro_rules! run_predicates_and_relate_bool_semantics {
         .unwrap();
         assert_eq!(within, Some(true));
 
+        let inside_area_interior: Option<bool> = diesel::dsl::select(inside_area(
+            st_geomfromtext("POINT(1 1)"),
+            st_geomfromtext("POLYGON((0 0,0 3,3 3,3 0,0 0))"),
+        ))
+        .get_result(conn)
+        .unwrap();
+        assert_eq!(inside_area_interior, Some(true));
+
+        // Boundary touch: strict inside should be false.
+        let inside_area_boundary: Option<bool> = diesel::dsl::select(inside_area(
+            st_geomfromtext("POINT(0 1)"),
+            st_geomfromtext("POLYGON((0 0,0 3,3 3,3 0,0 0))"),
+        ))
+        .get_result(conn)
+        .unwrap();
+        assert_eq!(inside_area_boundary, Some(false));
+
         let covers: Option<bool> = diesel::dsl::select(st_covers(
             st_geomfromtext("POLYGON((0 0,0 3,3 3,3 0,0 0))"),
             st_geomfromtext("POINT(0 1)"),
@@ -85,6 +102,31 @@ macro_rules! run_predicates_and_relate_bool_semantics {
         .get_result(conn)
         .unwrap();
         assert_eq!(disjoint, Some(true));
+
+        let outside_area_disjoint: Option<bool> = diesel::dsl::select(outside_area(
+            st_geomfromtext("POINT(10 10)"),
+            st_geomfromtext("POLYGON((0 0,0 3,3 3,3 0,0 0))"),
+        ))
+        .get_result(conn)
+        .unwrap();
+        assert_eq!(outside_area_disjoint, Some(true));
+
+        // Boundary touch: strict outside should be false.
+        let outside_area_boundary: Option<bool> = diesel::dsl::select(outside_area(
+            st_geomfromtext("POINT(0 1)"),
+            st_geomfromtext("POLYGON((0 0,0 3,3 3,3 0,0 0))"),
+        ))
+        .get_result(conn)
+        .unwrap();
+        assert_eq!(outside_area_boundary, Some(false));
+
+        let outside_area_interior: Option<bool> = diesel::dsl::select(outside_area(
+            st_geomfromtext("POINT(1 1)"),
+            st_geomfromtext("POLYGON((0 0,0 3,3 3,3 0,0 0))"),
+        ))
+        .get_result(conn)
+        .unwrap();
+        assert_eq!(outside_area_interior, Some(false));
 
         let equals: Option<bool> = diesel::dsl::select(st_equals(
             st_geomfromtext("POINT(1 1)"),

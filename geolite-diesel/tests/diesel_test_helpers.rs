@@ -524,6 +524,60 @@ fn method_st_contains_in_filter() {
 }
 
 #[$test_attr]
+fn method_inside_area_in_filter() {
+    use geolite_diesel::prelude::*;
+
+    let mut c = conn();
+    setup_features_table(&mut c);
+
+    diesel::sql_query(
+        "INSERT INTO features (id, name, geom) VALUES
+            (1, 'interior', ST_Point(5, 5)),
+            (2, 'boundary', ST_Point(0, 5)),
+            (3, 'outside',  ST_Point(50, 50))",
+    )
+    .execute(&mut c)
+    .unwrap();
+
+    let names: Vec<String> = features::table
+        .filter(features::geom.inside_area(
+            st_geomfromtext("POLYGON((0 0,10 0,10 10,0 10,0 0))"),
+        ).eq(true))
+        .select(features::name)
+        .order(features::id.asc())
+        .load(&mut c)
+        .unwrap();
+    assert_eq!(names, vec!["interior"]);
+}
+
+#[$test_attr]
+fn method_outside_area_in_filter() {
+    use geolite_diesel::prelude::*;
+
+    let mut c = conn();
+    setup_features_table(&mut c);
+
+    diesel::sql_query(
+        "INSERT INTO features (id, name, geom) VALUES
+            (1, 'interior', ST_Point(5, 5)),
+            (2, 'boundary', ST_Point(0, 5)),
+            (3, 'outside',  ST_Point(50, 50))",
+    )
+    .execute(&mut c)
+    .unwrap();
+
+    let names: Vec<String> = features::table
+        .filter(features::geom.outside_area(
+            st_geomfromtext("POLYGON((0 0,10 0,10 10,0 10,0 0))"),
+        ).eq(true))
+        .select(features::name)
+        .order(features::id.asc())
+        .load(&mut c)
+        .unwrap();
+    assert_eq!(names, vec!["outside"]);
+}
+
+#[$test_attr]
 fn method_st_relate_match_geoms_in_select() {
     use geolite_diesel::prelude::*;
 
