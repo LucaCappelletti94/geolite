@@ -4,6 +4,7 @@
 pub mod expression_methods;
 pub mod functions;
 pub mod prelude;
+pub mod query_patterns;
 pub mod types;
 
 pub use expression_methods::GeometryExpressionMethods;
