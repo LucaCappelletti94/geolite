@@ -486,6 +486,22 @@ fn method_st_dwithin() {
 }
 
 #[test]
+fn method_st_dwithinsphere() {
+    assert_method_eq_func!(
+        g!().st_dwithinsphere(g!(), d!()),
+        st_dwithinsphere(g!(), g!(), d!())
+    );
+}
+
+#[test]
+fn method_st_dwithinspheroid() {
+    assert_method_eq_func!(
+        g!().st_dwithinspheroid(g!(), d!()),
+        st_dwithinspheroid(g!(), g!(), d!())
+    );
+}
+
+#[test]
 fn method_st_relate() {
     assert_method_eq_func!(g!().st_relate(g!()), st_relate(g!(), g!()));
 }

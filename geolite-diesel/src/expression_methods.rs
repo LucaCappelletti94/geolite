@@ -437,6 +437,34 @@ pub trait GeometryExpressionMethods: Expression<SqlType = Nullable<Geometry>> + 
         functions::st_dwithin(self, other, distance)
     }
 
+    /// Return whether this geographic point and another are within the given
+    /// distance in metres using Haversine distance.
+    fn st_dwithinsphere<T, D>(
+        self,
+        other: T,
+        distance: D,
+    ) -> functions::st_dwithinsphere<Self, T, D>
+    where
+        T: AsExpression<Nullable<Geometry>>,
+        D: AsExpression<Double>,
+    {
+        functions::st_dwithinsphere(self, other, distance)
+    }
+
+    /// Return whether this geographic point and another are within the given
+    /// distance in metres using geodesic (spheroid) distance.
+    fn st_dwithinspheroid<T, D>(
+        self,
+        other: T,
+        distance: D,
+    ) -> functions::st_dwithinspheroid<Self, T, D>
+    where
+        T: AsExpression<Nullable<Geometry>>,
+        D: AsExpression<Double>,
+    {
+        functions::st_dwithinspheroid(self, other, distance)
+    }
+
     /// Return whether this geometry shares boundary points but no interior points with another.
     fn st_touches<T>(self, other: T) -> functions::st_touches<Self, T>
     where

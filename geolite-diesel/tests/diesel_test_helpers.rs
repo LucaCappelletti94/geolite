@@ -276,6 +276,54 @@ fn diesel_select_st_dwithin() {
 }
 
 #[$test_attr]
+fn diesel_select_st_dwithinsphere() {
+    use geolite_diesel::functions::*;
+
+    let mut c = conn();
+    let result: Option<bool> = diesel::dsl::select(st_dwithinsphere(
+        st_point_srid(-0.1278, 51.5074, 4326).nullable(),
+        st_point_srid(2.3522, 48.8566, 4326).nullable(),
+        400_000.0,
+    ))
+    .get_result(&mut c)
+    .unwrap();
+    assert_eq!(result, Some(true));
+
+    let result: Option<bool> = diesel::dsl::select(st_dwithinsphere(
+        st_point_srid(-0.1278, 51.5074, 4326).nullable(),
+        st_point_srid(2.3522, 48.8566, 4326).nullable(),
+        300_000.0,
+    ))
+    .get_result(&mut c)
+    .unwrap();
+    assert_eq!(result, Some(false));
+}
+
+#[$test_attr]
+fn diesel_select_st_dwithinspheroid() {
+    use geolite_diesel::functions::*;
+
+    let mut c = conn();
+    let result: Option<bool> = diesel::dsl::select(st_dwithinspheroid(
+        st_point_srid(-0.1278, 51.5074, 4326).nullable(),
+        st_point_srid(2.3522, 48.8566, 4326).nullable(),
+        400_000.0,
+    ))
+    .get_result(&mut c)
+    .unwrap();
+    assert_eq!(result, Some(true));
+
+    let result: Option<bool> = diesel::dsl::select(st_dwithinspheroid(
+        st_point_srid(-0.1278, 51.5074, 4326).nullable(),
+        st_point_srid(2.3522, 48.8566, 4326).nullable(),
+        300_000.0,
+    ))
+    .get_result(&mut c)
+    .unwrap();
+    assert_eq!(result, Some(false));
+}
+
+#[$test_attr]
 fn diesel_select_st_makeenvelope() {
     use geolite_diesel::functions::*;
 

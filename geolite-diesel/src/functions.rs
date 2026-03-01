@@ -410,9 +410,21 @@ diesel::define_sql_function! {
 diesel::define_sql_function! {
     /// Return whether A and B are within the given **Euclidean** (planar) distance.
     ///
-    /// Note: This uses planar distance only. For spherical distance, use
-    /// `ST_DistanceSphere` with a manual threshold comparison instead.
+    /// Note: This uses planar distance only. For geodesic radius predicates,
+    /// use `ST_DWithinSphere` / `ST_DWithinSpheroid`.
     fn st_dwithin(a: Nullable<Geometry>, b: Nullable<Geometry>, distance: Double) -> Nullable<diesel::sql_types::Bool>;
+}
+
+diesel::define_sql_function! {
+    /// Return whether two geographic points are within distance (metres) using
+    /// Haversine (spherical) distance (requires SRID 4326 on both points).
+    fn st_dwithinsphere(a: Nullable<Geometry>, b: Nullable<Geometry>, distance: Double) -> Nullable<diesel::sql_types::Bool>;
+}
+
+diesel::define_sql_function! {
+    /// Return whether two geographic points are within distance (metres) using
+    /// geodesic (spheroid) distance (requires SRID 4326 on both points).
+    fn st_dwithinspheroid(a: Nullable<Geometry>, b: Nullable<Geometry>, distance: Double) -> Nullable<diesel::sql_types::Bool>;
 }
 
 diesel::define_sql_function! {

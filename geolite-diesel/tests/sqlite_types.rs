@@ -793,6 +793,24 @@ fn debug_query_st_dwithin() {
 }
 
 #[test]
+fn debug_query_st_dwithinsphere() {
+    use geolite_diesel::functions::*;
+    assert_sql_contains!(
+        diesel::dsl::select(st_dwithinsphere(g!(), g!(), d!())),
+        "st_dwithinsphere"
+    );
+}
+
+#[test]
+fn debug_query_st_dwithinspheroid() {
+    use geolite_diesel::functions::*;
+    assert_sql_contains!(
+        diesel::dsl::select(st_dwithinspheroid(g!(), g!(), d!())),
+        "st_dwithinspheroid"
+    );
+}
+
+#[test]
 fn debug_query_st_relate() {
     use geolite_diesel::functions::*;
     assert_sql_contains!(diesel::dsl::select(st_relate(g!(), g!())), "st_relate");
