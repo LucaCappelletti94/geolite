@@ -757,6 +757,12 @@ fn debug_query_st_within() {
 }
 
 #[test]
+fn debug_query_inside_area() {
+    use geolite_diesel::functions::*;
+    assert_sql_contains!(diesel::dsl::select(inside_area(g!(), g!())), "st_within");
+}
+
+#[test]
 fn debug_query_st_covers() {
     use geolite_diesel::functions::*;
     assert_sql_contains!(diesel::dsl::select(st_covers(g!(), g!())), "st_covers");
@@ -775,6 +781,12 @@ fn debug_query_st_coveredby() {
 fn debug_query_st_disjoint() {
     use geolite_diesel::functions::*;
     assert_sql_contains!(diesel::dsl::select(st_disjoint(g!(), g!())), "st_disjoint");
+}
+
+#[test]
+fn debug_query_outside_area() {
+    use geolite_diesel::functions::*;
+    assert_sql_contains!(diesel::dsl::select(outside_area(g!(), g!())), "st_disjoint");
 }
 
 #[test]

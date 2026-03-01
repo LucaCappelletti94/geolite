@@ -396,6 +396,16 @@ pub trait GeometryExpressionMethods: Expression<SqlType = Nullable<Geometry>> + 
         functions::st_within(self, other)
     }
 
+    /// Convenience strict "inside area" helper.
+    ///
+    /// Delegates to `ST_Within`: boundary-touching geometries are not inside.
+    fn inside_area<T>(self, area: T) -> functions::inside_area<Self, T>
+    where
+        T: AsExpression<Nullable<Geometry>>,
+    {
+        functions::inside_area(self, area)
+    }
+
     /// Return whether this geometry covers another.
     fn st_covers<T>(self, other: T) -> functions::st_covers<Self, T>
     where
@@ -418,6 +428,16 @@ pub trait GeometryExpressionMethods: Expression<SqlType = Nullable<Geometry>> + 
         T: AsExpression<Nullable<Geometry>>,
     {
         functions::st_disjoint(self, other)
+    }
+
+    /// Convenience strict "outside area" helper.
+    ///
+    /// Delegates to `ST_Disjoint`: boundary-touching geometries are not outside.
+    fn outside_area<T>(self, area: T) -> functions::outside_area<Self, T>
+    where
+        T: AsExpression<Nullable<Geometry>>,
+    {
+        functions::outside_area(self, area)
     }
 
     /// Return whether this geometry is spatially equal to another.

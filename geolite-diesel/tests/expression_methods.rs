@@ -461,6 +461,11 @@ fn method_st_within() {
 }
 
 #[test]
+fn method_inside_area() {
+    assert_method_eq_func!(g!().inside_area(g!()), inside_area(g!(), g!()));
+}
+
+#[test]
 fn method_st_covers() {
     assert_method_eq_func!(g!().st_covers(g!()), st_covers(g!(), g!()));
 }
@@ -473,6 +478,11 @@ fn method_st_coveredby() {
 #[test]
 fn method_st_disjoint() {
     assert_method_eq_func!(g!().st_disjoint(g!()), st_disjoint(g!(), g!()));
+}
+
+#[test]
+fn method_outside_area() {
+    assert_method_eq_func!(g!().outside_area(g!()), outside_area(g!(), g!()));
 }
 
 #[test]

@@ -388,6 +388,14 @@ diesel::define_sql_function! {
 }
 
 diesel::define_sql_function! {
+    /// Convenience alias for strict "inside area" selection.
+    ///
+    /// Semantics match `ST_Within`: boundary-touching geometries are not inside.
+    #[sql_name = "ST_Within"]
+    fn inside_area(geom: Nullable<Geometry>, area: Nullable<Geometry>) -> Nullable<diesel::sql_types::Bool>;
+}
+
+diesel::define_sql_function! {
     /// Return whether A covers B (every point of B lies within A).
     fn st_covers(a: Nullable<Geometry>, b: Nullable<Geometry>) -> Nullable<diesel::sql_types::Bool>;
 }
@@ -400,6 +408,14 @@ diesel::define_sql_function! {
 diesel::define_sql_function! {
     /// Return whether geometries share no points.
     fn st_disjoint(a: Nullable<Geometry>, b: Nullable<Geometry>) -> Nullable<diesel::sql_types::Bool>;
+}
+
+diesel::define_sql_function! {
+    /// Convenience alias for strict "outside area" selection.
+    ///
+    /// Semantics match `ST_Disjoint`: boundary-touching geometries are not outside.
+    #[sql_name = "ST_Disjoint"]
+    fn outside_area(geom: Nullable<Geometry>, area: Nullable<Geometry>) -> Nullable<diesel::sql_types::Bool>;
 }
 
 diesel::define_sql_function! {
