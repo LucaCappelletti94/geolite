@@ -1287,124 +1287,135 @@ unsafe fn reg(
 pub unsafe fn register_functions(db: *mut sqlite3) -> c_int {
     type XFunc = unsafe extern "C" fn(*mut sqlite3_context, c_int, *mut *mut sqlite3_value);
 
-    let deterministic_callbacks: &[XFunc] = &[
+    let deterministic_callbacks: &[(&str, c_int, XFunc)] = &[
         // I/O
-        st_geomfromtext_1_xfunc,
-        st_geomfromtext_2_xfunc,
-        st_geomfromwkb_1_xfunc,
-        st_geomfromwkb_2_xfunc,
-        st_geomfromewkb_xfunc,
-        st_geomfromgeojson_xfunc,
-        st_astext_xfunc,
-        st_asewkt_xfunc,
-        st_asbinary_xfunc,
-        st_asewkb_xfunc,
-        st_asgeojson_xfunc,
+        ("ST_GeomFromText", 1, st_geomfromtext_1_xfunc),
+        ("ST_GeomFromText", 2, st_geomfromtext_2_xfunc),
+        ("ST_GeomFromWKB", 1, st_geomfromwkb_1_xfunc),
+        ("ST_GeomFromWKB", 2, st_geomfromwkb_2_xfunc),
+        ("ST_GeomFromEWKB", 1, st_geomfromewkb_xfunc),
+        ("ST_GeomFromGeoJSON", 1, st_geomfromgeojson_xfunc),
+        ("ST_AsText", 1, st_astext_xfunc),
+        ("ST_AsEWKT", 1, st_asewkt_xfunc),
+        ("ST_AsBinary", 1, st_asbinary_xfunc),
+        ("ST_AsEWKB", 1, st_asewkb_xfunc),
+        ("ST_AsGeoJSON", 1, st_asgeojson_xfunc),
         // Constructors
-        st_point_2_xfunc,
-        st_point_3_xfunc,
-        st_point_2_xfunc, // ST_MakePoint alias
-        st_makeline_xfunc,
-        st_makepolygon_xfunc,
-        st_makeenvelope_4_xfunc,
-        st_makeenvelope_5_xfunc,
-        st_collect_xfunc,
-        st_tileenvelope_xfunc,
+        ("ST_Point", 2, st_point_2_xfunc),
+        ("ST_Point", 3, st_point_3_xfunc),
+        ("ST_MakePoint", 2, st_point_2_xfunc),
+        ("ST_MakeLine", 2, st_makeline_xfunc),
+        ("ST_MakePolygon", 1, st_makepolygon_xfunc),
+        ("ST_MakeEnvelope", 4, st_makeenvelope_4_xfunc),
+        ("ST_MakeEnvelope", 5, st_makeenvelope_5_xfunc),
+        ("ST_Collect", 2, st_collect_xfunc),
+        ("ST_TileEnvelope", 3, st_tileenvelope_xfunc),
         // Accessors
-        st_srid_xfunc,
-        st_setsrid_xfunc,
-        st_geometrytype_xfunc,
-        st_geometrytype_xfunc, // GeometryType alias
-        st_ndims_xfunc,
-        st_coorddim_xfunc,
-        st_zmflag_xfunc,
-        st_isempty_xfunc,
-        st_memsize_xfunc,
-        st_x_xfunc,
-        st_y_xfunc,
-        st_numpoints_xfunc,
-        st_npoints_xfunc,
-        st_numgeometries_xfunc,
-        st_numinteriorrings_xfunc,
-        st_numinteriorrings_xfunc, // ST_NumInteriorRing alias
-        st_numrings_xfunc,
-        st_pointn_xfunc,
-        st_startpoint_xfunc,
-        st_endpoint_xfunc,
-        st_exteriorring_xfunc,
-        st_interiorringn_xfunc,
-        st_geometryn_xfunc,
-        st_dimension_xfunc,
-        st_envelope_xfunc,
-        st_isvalid_xfunc,
-        st_isvalidreason_xfunc,
+        ("ST_SRID", 1, st_srid_xfunc),
+        ("ST_SetSRID", 2, st_setsrid_xfunc),
+        ("ST_GeometryType", 1, st_geometrytype_xfunc),
+        ("GeometryType", 1, st_geometrytype_xfunc),
+        ("ST_NDims", 1, st_ndims_xfunc),
+        ("ST_CoordDim", 1, st_coorddim_xfunc),
+        ("ST_Zmflag", 1, st_zmflag_xfunc),
+        ("ST_IsEmpty", 1, st_isempty_xfunc),
+        ("ST_MemSize", 1, st_memsize_xfunc),
+        ("ST_X", 1, st_x_xfunc),
+        ("ST_Y", 1, st_y_xfunc),
+        ("ST_NumPoints", 1, st_numpoints_xfunc),
+        ("ST_NPoints", 1, st_npoints_xfunc),
+        ("ST_NumGeometries", 1, st_numgeometries_xfunc),
+        ("ST_NumInteriorRings", 1, st_numinteriorrings_xfunc),
+        ("ST_NumInteriorRing", 1, st_numinteriorrings_xfunc),
+        ("ST_NumRings", 1, st_numrings_xfunc),
+        ("ST_PointN", 2, st_pointn_xfunc),
+        ("ST_StartPoint", 1, st_startpoint_xfunc),
+        ("ST_EndPoint", 1, st_endpoint_xfunc),
+        ("ST_ExteriorRing", 1, st_exteriorring_xfunc),
+        ("ST_InteriorRingN", 2, st_interiorringn_xfunc),
+        ("ST_GeometryN", 2, st_geometryn_xfunc),
+        ("ST_Dimension", 1, st_dimension_xfunc),
+        ("ST_Envelope", 1, st_envelope_xfunc),
+        ("ST_IsValid", 1, st_isvalid_xfunc),
+        ("ST_IsValidReason", 1, st_isvalidreason_xfunc),
         // Measurement
-        st_area_xfunc,
-        st_length_xfunc,
-        st_length_xfunc, // ST_Length2D alias
-        st_perimeter_xfunc,
-        st_perimeter_xfunc, // ST_Perimeter2D alias
-        st_distance_xfunc,
-        st_centroid_xfunc,
-        st_pointonsurface_xfunc,
-        st_hausdorffdistance_xfunc,
-        st_xmin_xfunc,
-        st_xmax_xfunc,
-        st_ymin_xfunc,
-        st_ymax_xfunc,
-        st_distancesphere_xfunc,
-        st_distancespheroid_xfunc,
-        st_lengthsphere_xfunc,
-        st_azimuth_xfunc,
-        st_project_xfunc,
-        st_closestpoint_xfunc,
+        ("ST_Area", 1, st_area_xfunc),
+        ("ST_Length", 1, st_length_xfunc),
+        ("ST_Length2D", 1, st_length_xfunc),
+        ("ST_Perimeter", 1, st_perimeter_xfunc),
+        ("ST_Perimeter2D", 1, st_perimeter_xfunc),
+        ("ST_Distance", 2, st_distance_xfunc),
+        ("ST_Centroid", 1, st_centroid_xfunc),
+        ("ST_PointOnSurface", 1, st_pointonsurface_xfunc),
+        ("ST_HausdorffDistance", 2, st_hausdorffdistance_xfunc),
+        ("ST_XMin", 1, st_xmin_xfunc),
+        ("ST_XMax", 1, st_xmax_xfunc),
+        ("ST_YMin", 1, st_ymin_xfunc),
+        ("ST_YMax", 1, st_ymax_xfunc),
+        ("ST_DistanceSphere", 2, st_distancesphere_xfunc),
+        ("ST_DistanceSpheroid", 2, st_distancespheroid_xfunc),
+        ("ST_LengthSphere", 1, st_lengthsphere_xfunc),
+        ("ST_Azimuth", 2, st_azimuth_xfunc),
+        ("ST_Project", 3, st_project_xfunc),
+        ("ST_ClosestPoint", 2, st_closestpoint_xfunc),
         // Operations
-        st_union_xfunc,
-        st_intersection_xfunc,
-        st_difference_xfunc,
-        st_symdifference_xfunc,
-        st_buffer_xfunc,
+        ("ST_Union", 2, st_union_xfunc),
+        ("ST_Intersection", 2, st_intersection_xfunc),
+        ("ST_Difference", 2, st_difference_xfunc),
+        ("ST_SymDifference", 2, st_symdifference_xfunc),
+        ("ST_Buffer", 2, st_buffer_xfunc),
         // Predicates
-        st_intersects_xfunc,
-        st_contains_xfunc,
-        st_within_xfunc,
-        st_disjoint_xfunc,
-        st_dwithin_xfunc,
-        st_covers_xfunc,
-        st_coveredby_xfunc,
-        st_equals_xfunc,
-        st_touches_xfunc,
-        st_crosses_xfunc,
-        st_overlaps_xfunc,
-        st_relate_2_xfunc,
-        st_relate_3_xfunc,
-        st_relatematch_xfunc,
+        ("ST_Intersects", 2, st_intersects_xfunc),
+        ("ST_Contains", 2, st_contains_xfunc),
+        ("ST_Within", 2, st_within_xfunc),
+        ("ST_Disjoint", 2, st_disjoint_xfunc),
+        ("ST_DWithin", 3, st_dwithin_xfunc),
+        ("ST_Covers", 2, st_covers_xfunc),
+        ("ST_CoveredBy", 2, st_coveredby_xfunc),
+        ("ST_Equals", 2, st_equals_xfunc),
+        ("ST_Touches", 2, st_touches_xfunc),
+        ("ST_Crosses", 2, st_crosses_xfunc),
+        ("ST_Overlaps", 2, st_overlaps_xfunc),
+        ("ST_Relate", 2, st_relate_2_xfunc),
+        ("ST_Relate", 3, st_relate_3_xfunc),
+        ("ST_RelateMatch", 2, st_relatematch_xfunc),
     ];
 
     if deterministic_callbacks.len() != SQLITE_DETERMINISTIC_FUNCTIONS.len() {
         return SQLITE_ERROR;
     }
 
-    for (spec, xfunc) in SQLITE_DETERMINISTIC_FUNCTIONS
-        .iter()
-        .zip(deterministic_callbacks.iter())
-    {
+    for spec in SQLITE_DETERMINISTIC_FUNCTIONS {
+        let Some((_, _, xfunc)) = deterministic_callbacks
+            .iter()
+            .find(|(name, n_arg, _)| *name == spec.name && *n_arg == spec.n_arg as c_int)
+        else {
+            return SQLITE_ERROR;
+        };
+
         let rc = reg(db, spec.name, spec.n_arg as c_int, DET, *xfunc);
         if rc != SQLITE_OK {
             return rc;
         }
     }
 
-    let direct_only_callbacks: &[XFunc] = &[create_spatial_index_xfunc, drop_spatial_index_xfunc];
+    let direct_only_callbacks: &[(&str, c_int, XFunc)] = &[
+        ("CreateSpatialIndex", 2, create_spatial_index_xfunc),
+        ("DropSpatialIndex", 2, drop_spatial_index_xfunc),
+    ];
 
     if direct_only_callbacks.len() != SQLITE_DIRECT_ONLY_FUNCTIONS.len() {
         return SQLITE_ERROR;
     }
 
-    for (spec, xfunc) in SQLITE_DIRECT_ONLY_FUNCTIONS
-        .iter()
-        .zip(direct_only_callbacks.iter())
-    {
+    for spec in SQLITE_DIRECT_ONLY_FUNCTIONS {
+        let Some((_, _, xfunc)) = direct_only_callbacks
+            .iter()
+            .find(|(name, n_arg, _)| *name == spec.name && *n_arg == spec.n_arg as c_int)
+        else {
+            return SQLITE_ERROR;
+        };
+
         let rc = reg(db, spec.name, spec.n_arg as c_int, DIRECT, *xfunc);
         if rc != SQLITE_OK {
             return rc;
