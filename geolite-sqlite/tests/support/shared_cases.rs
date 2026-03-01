@@ -1990,5 +1990,577 @@ fn st_make_envelope_inverted_coords_errors() {
     db.try_query_i64("SELECT ST_MakeEnvelope(10, 0, 5, 5, 4326)")
         .expect_err("inverted xmin/xmax should return an error");
 }
+
+// ── Index-aware query pattern tests ──────────────────────────────────────────
+
+#[$test_attr]
+fn spatial_index_intersects_window() {
+    let db = ActiveTestDb::open();
+    db.exec("CREATE TABLE iw_grid (id INTEGER PRIMARY KEY, geom BLOB)");
+
+    for x in 0..10 {
+        for y in 0..10 {
+            let id = x * 10 + y;
+            db.exec(&format!(
+                "INSERT INTO iw_grid (id, geom) VALUES ({id}, ST_Point({x}, {y}))"
+            ));
+        }
+    }
+    db.exec("SELECT CreateSpatialIndex('iw_grid', 'geom')");
+
+    // Indexed: R-tree prefilter + ST_Intersects refinement
+    let indexed = db.query_all_i64(
+        "SELECT g.id FROM iw_grid g \
+         JOIN iw_grid_geom_rtree r ON g.rowid = r.id \
+         WHERE r.xmax >= 2 AND r.xmin <= 5 \
+           AND r.ymax >= 2 AND r.ymin <= 5 \
+           AND ST_Intersects(g.geom, ST_MakeEnvelope(2, 2, 5, 5)) = 1 \
+         ORDER BY g.id",
+    );
+
+    // Non-indexed reference
+    let non_indexed = db.query_all_i64(
+        "SELECT id FROM iw_grid \
+         WHERE ST_Intersects(geom, ST_MakeEnvelope(2, 2, 5, 5)) = 1 \
+         ORDER BY id",
+    );
+
+    assert_eq!(indexed, non_indexed, "indexed and non-indexed must match");
+    assert_eq!(indexed.len(), 16); // (2..=5, 2..=5) = 4×4 = 16
+}
+
+#[$test_attr]
+fn spatial_index_inside_polygon() {
+    let db = ActiveTestDb::open();
+    db.exec("CREATE TABLE ip_pts (id INTEGER PRIMARY KEY, geom BLOB)");
+
+    db.exec(
+        "INSERT INTO ip_pts (id, geom) VALUES \
+            (1, ST_Point(5, 5)), \
+            (2, ST_Point(0, 5)), \
+            (3, ST_Point(50, 50))",
+    );
+    db.exec("SELECT CreateSpatialIndex('ip_pts', 'geom')");
+
+    // Indexed: R-tree prefilter + ST_Within refinement
+    let indexed = db.query_all_i64(
+        "SELECT p.id FROM ip_pts p \
+         JOIN ip_pts_geom_rtree r ON p.rowid = r.id \
+         WHERE r.xmax >= 0 AND r.xmin <= 10 \
+           AND r.ymax >= 0 AND r.ymin <= 10 \
+           AND ST_Within(p.geom, ST_GeomFromText('POLYGON((0 0,10 0,10 10,0 10,0 0))')) = 1 \
+         ORDER BY p.id",
+    );
+
+    // Non-indexed reference
+    let non_indexed = db.query_all_i64(
+        "SELECT id FROM ip_pts \
+         WHERE ST_Within(geom, ST_GeomFromText('POLYGON((0 0,10 0,10 10,0 10,0 0))')) = 1 \
+         ORDER BY id",
+    );
+
+    assert_eq!(indexed, non_indexed);
+    // Only interior point (5,5) is strictly within; boundary (0,5) is not
+    assert_eq!(indexed, vec![1]);
+}
+
+#[$test_attr]
+fn spatial_index_contains_point() {
+    let db = ActiveTestDb::open();
+    db.exec("CREATE TABLE ic_polys (id INTEGER PRIMARY KEY, geom BLOB)");
+
+    db.exec(
+        "INSERT INTO ic_polys (id, geom) VALUES \
+            (1, ST_GeomFromText('POLYGON((0 0,5 0,5 5,0 5,0 0))')), \
+            (2, ST_GeomFromText('POLYGON((0 0,20 0,20 20,0 20,0 0))')), \
+            (3, ST_GeomFromText('POLYGON((50 50,60 50,60 60,50 60,50 50))'))",
+    );
+    db.exec("SELECT CreateSpatialIndex('ic_polys', 'geom')");
+
+    // Indexed: R-tree point containment + ST_Contains refinement
+    let indexed = db.query_all_i64(
+        "SELECT p.id FROM ic_polys p \
+         JOIN ic_polys_geom_rtree r ON p.rowid = r.id \
+         WHERE r.xmin <= 3 AND r.xmax >= 3 \
+           AND r.ymin <= 3 AND r.ymax >= 3 \
+           AND ST_Contains(p.geom, ST_Point(3, 3)) = 1 \
+         ORDER BY p.id",
+    );
+
+    // Non-indexed reference
+    let non_indexed = db.query_all_i64(
+        "SELECT id FROM ic_polys \
+         WHERE ST_Contains(geom, ST_Point(3, 3)) = 1 \
+         ORDER BY id",
+    );
+
+    assert_eq!(indexed, non_indexed);
+    // Point (3,3) inside both 'small' and 'big', not 'far'
+    assert_eq!(indexed, vec![1, 2]);
+}
+
+#[$test_attr]
+fn spatial_index_geodesic_radius() {
+    let db = ActiveTestDb::open();
+    db.exec("CREATE TABLE igr_cities (id INTEGER PRIMARY KEY, name TEXT, geom BLOB)");
+
+    db.exec(
+        "INSERT INTO igr_cities (id, name, geom) VALUES \
+            (1, 'London', ST_Point(-0.1278, 51.5074, 4326)), \
+            (2, 'Paris',  ST_Point(2.3522, 48.8566, 4326)), \
+            (3, 'Berlin', ST_Point(13.4050, 52.5200, 4326)), \
+            (4, 'Tokyo',  ST_Point(139.6917, 35.6895, 4326))",
+    );
+    db.exec("SELECT CreateSpatialIndex('igr_cities', 'geom')");
+
+    let lon: f64 = -0.1278;
+    let lat: f64 = 51.5074;
+    let radius_m: f64 = 400_000.0;
+    let dlat = radius_m / 111_320.0;
+    let dlon = radius_m / (111_320.0 * lat.to_radians().cos());
+
+    // Indexed query
+    let indexed = db.query_all_i64(&format!(
+        "SELECT c.id FROM igr_cities c \
+         JOIN igr_cities_geom_rtree r ON c.rowid = r.id \
+         WHERE r.xmax >= {xmin} AND r.xmin <= {xmax} \
+           AND r.ymax >= {ymin} AND r.ymin <= {ymax} \
+           AND ST_DWithinSphere(c.geom, ST_Point({lon}, {lat}, 4326), {radius_m}) = 1 \
+         ORDER BY c.id",
+        xmin = lon - dlon,
+        xmax = lon + dlon,
+        ymin = lat - dlat,
+        ymax = lat + dlat,
+    ));
+
+    // Non-indexed reference
+    let non_indexed = db.query_all_i64(&format!(
+        "SELECT id FROM igr_cities \
+         WHERE ST_DWithinSphere(geom, ST_Point({lon}, {lat}, 4326), {radius_m}) = 1 \
+         ORDER BY id",
+    ));
+
+    assert_eq!(indexed, non_indexed);
+    // London→Paris ≈ 344 km (within), London→Berlin ≈ 930 km (outside)
+    assert_eq!(indexed, vec![1, 2]);
+}
+
+#[$test_attr]
+fn spatial_index_knn_nearest_n() {
+    let db = ActiveTestDb::open();
+    db.exec("CREATE TABLE knn_grid (id INTEGER PRIMARY KEY, geom BLOB)");
+
+    for x in 0..10 {
+        for y in 0..10 {
+            let id = x * 10 + y;
+            db.exec(&format!(
+                "INSERT INTO knn_grid (id, geom) VALUES ({id}, ST_Point({x}, {y}))"
+            ));
+        }
+    }
+    db.exec("SELECT CreateSpatialIndex('knn_grid', 'geom')");
+
+    // KNN: 5 nearest to (4.5, 4.5), search box half_w = 3
+    // Use id as tiebreaker for deterministic ordering when distances are equal
+    let indexed = db.query_all_i64(
+        "SELECT g.id FROM knn_grid g \
+         JOIN knn_grid_geom_rtree r ON g.rowid = r.id \
+         WHERE r.xmax >= 1.5 AND r.xmin <= 7.5 \
+           AND r.ymax >= 1.5 AND r.ymin <= 7.5 \
+         ORDER BY ST_Distance(g.geom, ST_Point(4.5, 4.5)), g.id \
+         LIMIT 5",
+    );
+
+    // Non-indexed reference
+    let non_indexed = db.query_all_i64(
+        "SELECT id FROM knn_grid \
+         ORDER BY ST_Distance(geom, ST_Point(4.5, 4.5)), id \
+         LIMIT 5",
+    );
+
+    assert_eq!(indexed.len(), 5);
+    assert_eq!(indexed, non_indexed, "indexed KNN must match non-indexed");
+
+    // The 4 nearest points to (4.5, 4.5) are (4,4),(4,5),(5,4),(5,5) = ids 44,45,54,55
+    let mut top4: Vec<i64> = indexed[..4].to_vec();
+    top4.sort();
+    assert_eq!(top4, vec![44, 45, 54, 55]);
+}
+
+#[$test_attr]
+fn spatial_index_knn_nearest_n_geodesic() {
+    let db = ActiveTestDb::open();
+    db.exec("CREATE TABLE knn_cities (id INTEGER PRIMARY KEY, name TEXT, geom BLOB)");
+
+    db.exec(
+        "INSERT INTO knn_cities (id, name, geom) VALUES \
+            (1, 'London', ST_Point(-0.1278, 51.5074, 4326)), \
+            (2, 'Paris',  ST_Point(2.3522, 48.8566, 4326)), \
+            (3, 'Berlin', ST_Point(13.4050, 52.5200, 4326)), \
+            (4, 'Madrid', ST_Point(-3.7038, 40.4168, 4326)), \
+            (5, 'Tokyo',  ST_Point(139.6917, 35.6895, 4326))",
+    );
+    db.exec("SELECT CreateSpatialIndex('knn_cities', 'geom')");
+
+    // KNN: 3 nearest cities to Paris
+    let lon: f64 = 2.3522;
+    let lat: f64 = 48.8566;
+    let search_radius_m: f64 = 2_000_000.0;
+    let dlat = search_radius_m / 111_320.0;
+    let dlon = search_radius_m / (111_320.0 * lat.to_radians().cos());
+
+    let indexed = db.query_all_i64(&format!(
+        "SELECT c.id FROM knn_cities c \
+         JOIN knn_cities_geom_rtree r ON c.rowid = r.id \
+         WHERE r.xmax >= {xmin} AND r.xmin <= {xmax} \
+           AND r.ymax >= {ymin} AND r.ymin <= {ymax} \
+         ORDER BY ST_DistanceSphere(c.geom, ST_Point({lon}, {lat}, 4326)) \
+         LIMIT 3",
+        xmin = lon - dlon,
+        xmax = lon + dlon,
+        ymin = lat - dlat,
+        ymax = lat + dlat,
+    ));
+
+    // Non-indexed reference
+    let non_indexed = db.query_all_i64(&format!(
+        "SELECT id FROM knn_cities \
+         ORDER BY ST_DistanceSphere(geom, ST_Point({lon}, {lat}, 4326)) \
+         LIMIT 3",
+    ));
+
+    assert_eq!(indexed.len(), 3);
+    assert_eq!(indexed, non_indexed, "indexed geodesic KNN must match non-indexed");
+
+    // Paris→self=0, Paris→London≈344km, Paris→Berlin≈878km
+    assert_eq!(indexed[0], 2, "Paris should be nearest to itself");
+    assert_eq!(indexed[1], 1, "London should be second");
+    assert_eq!(indexed[2], 3, "Berlin should be third");
+}
+
+// ── Index speed tests ────────────────────────────────────────────────────────
+
+fn elapsed_since_utc(start: chrono::DateTime<chrono::Utc>) -> std::time::Duration {
+    (chrono::Utc::now() - start)
+        .to_std()
+        .unwrap_or(std::time::Duration::ZERO)
+}
+
+#[$test_attr]
+fn spatial_index_accelerates_intersects_window() {
+    let db = ActiveTestDb::open();
+    db.exec("CREATE TABLE sw_grid (id INTEGER PRIMARY KEY, geom BLOB)");
+
+    // 10 000 points in a 100×100 grid
+    db.exec("BEGIN");
+    for x in 0..100 {
+        for y in 0..100 {
+            let id = x * 100 + y;
+            db.exec(&format!(
+                "INSERT INTO sw_grid (id, geom) VALUES ({id}, ST_Point({x}, {y}))"
+            ));
+        }
+    }
+    db.exec("COMMIT");
+    db.exec("SELECT CreateSpatialIndex('sw_grid', 'geom')");
+
+    let indexed_sql =
+        "SELECT g.id FROM sw_grid g \
+         JOIN sw_grid_geom_rtree r ON g.rowid = r.id \
+         WHERE r.xmax >= 10 AND r.xmin <= 20 \
+           AND r.ymax >= 10 AND r.ymin <= 20 \
+           AND ST_Intersects(g.geom, ST_MakeEnvelope(10, 10, 20, 20)) = 1";
+    let full_scan_sql =
+        "SELECT id FROM sw_grid \
+         WHERE ST_Intersects(geom, ST_MakeEnvelope(10, 10, 20, 20)) = 1";
+
+    // Warmup
+    let _ = db.query_all_i64(indexed_sql);
+    let _ = db.query_all_i64(full_scan_sql);
+
+    // Take best of 20 runs
+    let n = 20;
+    let mut indexed_best = std::time::Duration::MAX;
+    for _ in 0..n {
+        let t = chrono::Utc::now();
+        let _ = db.query_all_i64(indexed_sql);
+        indexed_best = indexed_best.min(elapsed_since_utc(t));
+    }
+
+    let mut full_best = std::time::Duration::MAX;
+    for _ in 0..n {
+        let t = chrono::Utc::now();
+        let _ = db.query_all_i64(full_scan_sql);
+        full_best = full_best.min(elapsed_since_utc(t));
+    }
+
+    // Sanity: both return the same count
+    let idx_count = db.query_all_i64(indexed_sql).len();
+    let full_count = db.query_all_i64(full_scan_sql).len();
+    assert_eq!(idx_count, full_count);
+    assert_eq!(idx_count, 121); // 11×11 points in [10,20]
+
+    eprintln!("intersects_window 10K: indexed={indexed_best:?}  full_scan={full_best:?}  speedup={:.1}x", full_best.as_nanos() as f64 / indexed_best.as_nanos() as f64);
+    assert!(
+        indexed_best < full_best,
+        "indexed ({indexed_best:?}) should be faster than full scan ({full_best:?}) \
+         over 10K rows"
+    );
+}
+
+#[$test_attr]
+fn spatial_index_accelerates_knn() {
+    let db = ActiveTestDb::open();
+    db.exec("CREATE TABLE sk_grid (id INTEGER PRIMARY KEY, geom BLOB)");
+
+    db.exec("BEGIN");
+    for x in 0..100 {
+        for y in 0..100 {
+            let id = x * 100 + y;
+            db.exec(&format!(
+                "INSERT INTO sk_grid (id, geom) VALUES ({id}, ST_Point({x}, {y}))"
+            ));
+        }
+    }
+    db.exec("COMMIT");
+    db.exec("SELECT CreateSpatialIndex('sk_grid', 'geom')");
+
+    let indexed_sql =
+        "SELECT g.id FROM sk_grid g \
+         JOIN sk_grid_geom_rtree r ON g.rowid = r.id \
+         WHERE r.xmax >= 45 AND r.xmin <= 55 \
+           AND r.ymax >= 45 AND r.ymin <= 55 \
+         ORDER BY ST_Distance(g.geom, ST_Point(50, 50)), g.id \
+         LIMIT 5";
+    let full_scan_sql =
+        "SELECT id FROM sk_grid \
+         ORDER BY ST_Distance(geom, ST_Point(50, 50)), id \
+         LIMIT 5";
+
+    let _ = db.query_all_i64(indexed_sql);
+    let _ = db.query_all_i64(full_scan_sql);
+
+    let n = 20;
+    let mut indexed_best = std::time::Duration::MAX;
+    for _ in 0..n {
+        let t = chrono::Utc::now();
+        let _ = db.query_all_i64(indexed_sql);
+        indexed_best = indexed_best.min(elapsed_since_utc(t));
+    }
+
+    let mut full_best = std::time::Duration::MAX;
+    for _ in 0..n {
+        let t = chrono::Utc::now();
+        let _ = db.query_all_i64(full_scan_sql);
+        full_best = full_best.min(elapsed_since_utc(t));
+    }
+
+    // Both must return the same top-5
+    let idx_ids = db.query_all_i64(indexed_sql);
+    let full_ids = db.query_all_i64(full_scan_sql);
+    assert_eq!(idx_ids, full_ids);
+
+    eprintln!("knn 10K: indexed={indexed_best:?}  full_scan={full_best:?}  speedup={:.1}x", full_best.as_nanos() as f64 / indexed_best.as_nanos() as f64);
+    assert!(
+        indexed_best < full_best,
+        "indexed KNN ({indexed_best:?}) should be faster than full scan ({full_best:?}) \
+         over 10K rows"
+    );
+}
+
+// --- Type-aware index strategy benchmark ---
+
+#[$test_attr]
+fn type_partitioned_vs_mixed_index() {
+    let db = ActiveTestDb::open();
+
+    // --- Mixed-type table: 7000 Points + 2000 LineStrings + 1000 Polygons ---
+    db.exec("CREATE TABLE mixed (id INTEGER PRIMARY KEY, geom BLOB)");
+    db.exec("BEGIN");
+    let mut id = 0i64;
+    // 7000 Points in a 100×70 grid
+    for x in 0..100 {
+        for y in 0..70 {
+            db.exec(&format!(
+                "INSERT INTO mixed (id, geom) VALUES ({id}, ST_Point({x}, {y}))"
+            ));
+            id += 1;
+        }
+    }
+    // 2000 short LineStrings
+    for i in 0..2000 {
+        let x = (i % 100) as f64;
+        let y = (i / 100) as f64 * 5.0;
+        db.exec(&format!(
+            "INSERT INTO mixed (id, geom) VALUES ({id}, \
+             ST_GeomFromText('LINESTRING({x} {y}, {} {})'))",
+            x + 1.0, y + 1.0
+        ));
+        id += 1;
+    }
+    // 1000 unit-square Polygons
+    for i in 0..1000 {
+        let x = (i % 50) as f64 * 2.0;
+        let y = (i / 50) as f64 * 2.0;
+        db.exec(&format!(
+            "INSERT INTO mixed (id, geom) VALUES ({id}, \
+             ST_GeomFromText('POLYGON(({x} {y}, {} {y}, {} {}, {x} {}, {x} {y}))'))",
+            x + 1.0, x + 1.0, y + 1.0, y + 1.0
+        ));
+        id += 1;
+    }
+    db.exec("COMMIT");
+    db.exec("SELECT CreateSpatialIndex('mixed', 'geom')");
+
+    // --- Points-only table: same 7000 points ---
+    db.exec("CREATE TABLE pts_only (id INTEGER PRIMARY KEY, geom BLOB)");
+    db.exec("BEGIN");
+    for x in 0..100 {
+        for y in 0..70 {
+            let pid = x * 70 + y;
+            db.exec(&format!(
+                "INSERT INTO pts_only (id, geom) VALUES ({pid}, ST_Point({x}, {y}))"
+            ));
+        }
+    }
+    db.exec("COMMIT");
+    db.exec("SELECT CreateSpatialIndex('pts_only', 'geom')");
+
+    // --- Polygons-only table: same 1000 polygons ---
+    db.exec("CREATE TABLE poly_only (id INTEGER PRIMARY KEY, geom BLOB)");
+    db.exec("BEGIN");
+    for i in 0..1000 {
+        let x = (i % 50) as f64 * 2.0;
+        let y = (i / 50) as f64 * 2.0;
+        db.exec(&format!(
+            "INSERT INTO poly_only (id, geom) VALUES ({i}, \
+             ST_GeomFromText('POLYGON(({x} {y}, {} {y}, {} {}, {x} {}, {x} {y}))'))",
+            x + 1.0, x + 1.0, y + 1.0, y + 1.0
+        ));
+    }
+    db.exec("COMMIT");
+    db.exec("SELECT CreateSpatialIndex('poly_only', 'geom')");
+
+    // ===== Benchmark 1: "Find Points in window [40,40]-[60,60]" =====
+    let mixed_pts_sql =
+        "SELECT g.id FROM mixed g \
+         JOIN mixed_geom_rtree r ON g.rowid = r.id \
+         WHERE r.xmax >= 40 AND r.xmin <= 60 \
+           AND r.ymax >= 40 AND r.ymin <= 60 \
+           AND ST_GeometryType(g.geom) = 'ST_Point' \
+           AND ST_Intersects(g.geom, ST_MakeEnvelope(40, 40, 60, 60)) = 1";
+    let pts_only_sql =
+        "SELECT g.id FROM pts_only g \
+         JOIN pts_only_geom_rtree r ON g.rowid = r.id \
+         WHERE r.xmax >= 40 AND r.xmin <= 60 \
+           AND r.ymax >= 40 AND r.ymin <= 60 \
+           AND ST_Intersects(g.geom, ST_MakeEnvelope(40, 40, 60, 60)) = 1";
+
+    // Verify correctness: same point counts
+    let mixed_pts_count = db.query_all_i64(mixed_pts_sql).len();
+    let pts_only_count = db.query_all_i64(pts_only_sql).len();
+    assert_eq!(mixed_pts_count, pts_only_count,
+        "mixed type-filtered ({mixed_pts_count}) vs pts-only ({pts_only_count})");
+    assert_eq!(pts_only_count, 21 * 21); // points [40..60] × [40..60]
+
+    // Warmup
+    let _ = db.query_all_i64(mixed_pts_sql);
+    let _ = db.query_all_i64(pts_only_sql);
+
+    let n = 20;
+    let mut mixed_best = std::time::Duration::MAX;
+    for _ in 0..n {
+        let t = chrono::Utc::now();
+        let _ = db.query_all_i64(mixed_pts_sql);
+        mixed_best = mixed_best.min(elapsed_since_utc(t));
+    }
+    let mut pts_only_best = std::time::Duration::MAX;
+    for _ in 0..n {
+        let t = chrono::Utc::now();
+        let _ = db.query_all_i64(pts_only_sql);
+        pts_only_best = pts_only_best.min(elapsed_since_utc(t));
+    }
+
+    // Also benchmark mixed table WITHOUT type filter (all types)
+    let mixed_all_sql =
+        "SELECT g.id FROM mixed g \
+         JOIN mixed_geom_rtree r ON g.rowid = r.id \
+         WHERE r.xmax >= 40 AND r.xmin <= 60 \
+           AND r.ymax >= 40 AND r.ymin <= 60 \
+           AND ST_Intersects(g.geom, ST_MakeEnvelope(40, 40, 60, 60)) = 1";
+    let _ = db.query_all_i64(mixed_all_sql);
+    let mut mixed_all_best = std::time::Duration::MAX;
+    for _ in 0..n {
+        let t = chrono::Utc::now();
+        let _ = db.query_all_i64(mixed_all_sql);
+        mixed_all_best = mixed_all_best.min(elapsed_since_utc(t));
+    }
+
+    eprintln!("=== Type-Partitioned vs Mixed Index (Points in window) ===");
+    eprintln!("  pts-only table (7K rows):     {:?}", pts_only_best);
+    eprintln!("  mixed table + type filter (10K rows): {:?}", mixed_best);
+    eprintln!("  mixed table, no filter (10K rows):    {:?}", mixed_all_best);
+    eprintln!("  overhead of mixed+filter vs pts-only: {:.1}x",
+        mixed_best.as_nanos() as f64 / pts_only_best.as_nanos() as f64);
+
+    // ===== Benchmark 2: "Reverse geocode — find Polygon containing (25, 9)" =====
+    let mixed_poly_sql =
+        "SELECT g.id FROM mixed g \
+         JOIN mixed_geom_rtree r ON g.rowid = r.id \
+         WHERE r.xmin <= 25 AND r.xmax >= 25 \
+           AND r.ymin <= 9 AND r.ymax >= 9 \
+           AND ST_GeometryType(g.geom) = 'ST_Polygon' \
+           AND ST_Contains(g.geom, ST_Point(25, 9)) = 1";
+    let poly_only_sql =
+        "SELECT g.id FROM poly_only g \
+         JOIN poly_only_geom_rtree r ON g.rowid = r.id \
+         WHERE r.xmin <= 25 AND r.xmax >= 25 \
+           AND r.ymin <= 9 AND r.ymax >= 9 \
+           AND ST_Contains(g.geom, ST_Point(25, 9)) = 1";
+
+    let mixed_poly_count = db.query_all_i64(mixed_poly_sql).len();
+    let poly_only_count = db.query_all_i64(poly_only_sql).len();
+    assert_eq!(mixed_poly_count, poly_only_count,
+        "mixed poly ({mixed_poly_count}) vs poly-only ({poly_only_count})");
+
+    let _ = db.query_all_i64(mixed_poly_sql);
+    let _ = db.query_all_i64(poly_only_sql);
+
+    let mut mixed_poly_best = std::time::Duration::MAX;
+    for _ in 0..n {
+        let t = chrono::Utc::now();
+        let _ = db.query_all_i64(mixed_poly_sql);
+        mixed_poly_best = mixed_poly_best.min(elapsed_since_utc(t));
+    }
+    let mut poly_only_best = std::time::Duration::MAX;
+    for _ in 0..n {
+        let t = chrono::Utc::now();
+        let _ = db.query_all_i64(poly_only_sql);
+        poly_only_best = poly_only_best.min(elapsed_since_utc(t));
+    }
+
+    // Mixed without type filter (all R-tree hits get ST_Contains)
+    let mixed_poly_nofilter_sql =
+        "SELECT g.id FROM mixed g \
+         JOIN mixed_geom_rtree r ON g.rowid = r.id \
+         WHERE r.xmin <= 25 AND r.xmax >= 25 \
+           AND r.ymin <= 9 AND r.ymax >= 9 \
+           AND ST_Contains(g.geom, ST_Point(25, 9)) = 1";
+    let _ = db.query_all_i64(mixed_poly_nofilter_sql);
+    let mut mixed_poly_nofilter_best = std::time::Duration::MAX;
+    for _ in 0..n {
+        let t = chrono::Utc::now();
+        let _ = db.query_all_i64(mixed_poly_nofilter_sql);
+        mixed_poly_nofilter_best = mixed_poly_nofilter_best.min(elapsed_since_utc(t));
+    }
+
+    eprintln!("=== Type-Partitioned vs Mixed Index (Reverse Geocode) ===");
+    eprintln!("  poly-only table (1K rows):    {:?}", poly_only_best);
+    eprintln!("  mixed table + type filter (10K rows): {:?}", mixed_poly_best);
+    eprintln!("  mixed table, no filter (10K rows):    {:?}", mixed_poly_nofilter_best);
+    eprintln!("  overhead of mixed+filter vs poly-only: {:.1}x",
+        mixed_poly_best.as_nanos() as f64 / poly_only_best.as_nanos() as f64);
+}
+
     };
 }

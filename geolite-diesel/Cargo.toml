@@ -27,6 +27,7 @@ geo           = { version = "0.32", default-features = false }
 diesel = { version = "2", default-features = false }
 
 [dev-dependencies]
+chrono = "0.4"
 geolite-core = { version = "0.1.0", path = "../geolite-core" }
 geolite-sqlite = { version = "0.1.0", path = "../geolite-sqlite" }
 

@@ -27,6 +27,9 @@ libsqlite3-sys = { version = ">=0.17.2, <0.36.0", features = ["bundled_bindings"
 sqlite-wasm-rs = "0.5"
 getrandom = { version = "0.2", features = ["js"] }
 
+[dev-dependencies]
+chrono = "0.4"
+
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 libsqlite3-sys = { version = ">=0.17.2, <0.36.0", features = ["bundled_bindings"] }
 
