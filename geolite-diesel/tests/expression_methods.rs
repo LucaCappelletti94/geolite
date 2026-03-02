@@ -199,349 +199,193 @@ fn catalog_functions_are_covered_by_diesel_declarations() {
     );
 }
 
+macro_rules! assert_unary_cases {
+    ($( $test_name:ident => $method:ident ),+ $(,)?) => {
+        $(
+            #[test]
+            fn $test_name() {
+                assert_method_eq_func!(g!().$method(), $method(g!()));
+            }
+        )+
+    };
+}
+
+macro_rules! assert_geom_geom_cases {
+    ($( $test_name:ident => $method:ident ),+ $(,)?) => {
+        $(
+            #[test]
+            fn $test_name() {
+                assert_method_eq_func!(g!().$method(g!()), $method(g!(), g!()));
+            }
+        )+
+    };
+}
+
+macro_rules! assert_geom_int_cases {
+    ($( $test_name:ident => $method:ident ),+ $(,)?) => {
+        $(
+            #[test]
+            fn $test_name() {
+                assert_method_eq_func!(g!().$method(i!()), $method(g!(), i!()));
+            }
+        )+
+    };
+}
+
+macro_rules! assert_geom_double_cases {
+    ($( $test_name:ident => $method:ident ),+ $(,)?) => {
+        $(
+            #[test]
+            fn $test_name() {
+                assert_method_eq_func!(g!().$method(d!()), $method(g!(), d!()));
+            }
+        )+
+    };
+}
+
+macro_rules! assert_geom_geom_double_cases {
+    ($( $test_name:ident => $method:ident ),+ $(,)?) => {
+        $(
+            #[test]
+            fn $test_name() {
+                assert_method_eq_func!(g!().$method(g!(), d!()), $method(g!(), g!(), d!()));
+            }
+        )+
+    };
+}
+
+macro_rules! assert_geom_geom_text_cases {
+    ($( $test_name:ident => $method:ident ),+ $(,)?) => {
+        $(
+            #[test]
+            fn $test_name() {
+                assert_method_eq_func!(g!().$method(g!(), t!()), $method(g!(), g!(), t!()));
+            }
+        )+
+    };
+}
+
+macro_rules! assert_geom_double_double_cases {
+    ($( $test_name:ident => $method:ident ),+ $(,)?) => {
+        $(
+            #[test]
+            fn $test_name() {
+                assert_method_eq_func!(g!().$method(d!(), d!()), $method(g!(), d!(), d!()));
+            }
+        )+
+    };
+}
+
 // ── I/O ─────────────────────────────────────────────────────────────────────
 
-#[test]
-fn method_st_astext() {
-    assert_method_eq_func!(g!().st_astext(), st_astext(g!()));
-}
-
-#[test]
-fn method_st_asewkt() {
-    assert_method_eq_func!(g!().st_asewkt(), st_asewkt(g!()));
-}
-
-#[test]
-fn method_st_asbinary() {
-    assert_method_eq_func!(g!().st_asbinary(), st_asbinary(g!()));
-}
-
-#[test]
-fn method_st_asewkb() {
-    assert_method_eq_func!(g!().st_asewkb(), st_asewkb(g!()));
-}
-
-#[test]
-fn method_st_asgeojson() {
-    assert_method_eq_func!(g!().st_asgeojson(), st_asgeojson(g!()));
-}
-
-// ── Constructors / transforms ─────────────────────────────────────────────
-
-#[test]
-fn method_st_makeline() {
-    assert_method_eq_func!(g!().st_makeline(g!()), st_makeline(g!(), g!()));
-}
-
-#[test]
-fn method_st_makepolygon() {
-    assert_method_eq_func!(g!().st_makepolygon(), st_makepolygon(g!()));
-}
-
-#[test]
-fn method_st_collect() {
-    assert_method_eq_func!(g!().st_collect(g!()), st_collect(g!(), g!()));
-}
-
-// ── Accessors ───────────────────────────────────────────────────────────────
-
-#[test]
-fn method_st_srid() {
-    assert_method_eq_func!(g!().st_srid(), st_srid(g!()));
-}
-
-#[test]
-fn method_st_setsrid() {
-    assert_method_eq_func!(g!().st_setsrid(i!()), st_setsrid(g!(), i!()));
-}
-
-#[test]
-fn method_st_geometrytype() {
-    assert_method_eq_func!(g!().st_geometrytype(), st_geometrytype(g!()));
-}
-
-#[test]
-fn method_st_x() {
-    assert_method_eq_func!(g!().st_x(), st_x(g!()));
-}
-
-#[test]
-fn method_st_y() {
-    assert_method_eq_func!(g!().st_y(), st_y(g!()));
-}
-
-#[test]
-fn method_st_isempty() {
-    assert_method_eq_func!(g!().st_isempty(), st_isempty(g!()));
-}
-
-#[test]
-fn method_st_ndims() {
-    assert_method_eq_func!(g!().st_ndims(), st_ndims(g!()));
-}
-
-#[test]
-fn method_st_coorddim() {
-    assert_method_eq_func!(g!().st_coorddim(), st_coorddim(g!()));
-}
-
-#[test]
-fn method_st_zmflag() {
-    assert_method_eq_func!(g!().st_zmflag(), st_zmflag(g!()));
-}
-
-#[test]
-fn method_st_memsize() {
-    assert_method_eq_func!(g!().st_memsize(), st_memsize(g!()));
-}
-
-#[test]
-fn method_st_isvalid() {
-    assert_method_eq_func!(g!().st_isvalid(), st_isvalid(g!()));
-}
-
-#[test]
-fn method_st_isvalidreason() {
-    assert_method_eq_func!(g!().st_isvalidreason(), st_isvalidreason(g!()));
-}
-
-#[test]
-fn method_st_numpoints() {
-    assert_method_eq_func!(g!().st_numpoints(), st_numpoints(g!()));
-}
-
-#[test]
-fn method_st_npoints() {
-    assert_method_eq_func!(g!().st_npoints(), st_npoints(g!()));
-}
-
-#[test]
-fn method_st_numgeometries() {
-    assert_method_eq_func!(g!().st_numgeometries(), st_numgeometries(g!()));
-}
-
-#[test]
-fn method_st_numinteriorrings() {
-    assert_method_eq_func!(g!().st_numinteriorrings(), st_numinteriorrings(g!()));
-}
-
-#[test]
-fn method_st_numrings() {
-    assert_method_eq_func!(g!().st_numrings(), st_numrings(g!()));
-}
-
-#[test]
-fn method_st_dimension() {
-    assert_method_eq_func!(g!().st_dimension(), st_dimension(g!()));
-}
-
-#[test]
-fn method_st_envelope() {
-    assert_method_eq_func!(g!().st_envelope(), st_envelope(g!()));
-}
-
-#[test]
-fn method_st_pointn() {
-    assert_method_eq_func!(g!().st_pointn(i!()), st_pointn(g!(), i!()));
-}
-
-#[test]
-fn method_st_startpoint() {
-    assert_method_eq_func!(g!().st_startpoint(), st_startpoint(g!()));
-}
-
-#[test]
-fn method_st_endpoint() {
-    assert_method_eq_func!(g!().st_endpoint(), st_endpoint(g!()));
-}
-
-#[test]
-fn method_st_exteriorring() {
-    assert_method_eq_func!(g!().st_exteriorring(), st_exteriorring(g!()));
-}
-
-#[test]
-fn method_st_interiorringn() {
-    assert_method_eq_func!(g!().st_interiorringn(i!()), st_interiorringn(g!(), i!()));
-}
-
-#[test]
-fn method_st_geometryn() {
-    assert_method_eq_func!(g!().st_geometryn(i!()), st_geometryn(g!(), i!()));
-}
-
-#[test]
-fn method_st_xmin() {
-    assert_method_eq_func!(g!().st_xmin(), st_xmin(g!()));
-}
-
-#[test]
-fn method_st_xmax() {
-    assert_method_eq_func!(g!().st_xmax(), st_xmax(g!()));
-}
-
-#[test]
-fn method_st_ymin() {
-    assert_method_eq_func!(g!().st_ymin(), st_ymin(g!()));
-}
-
-#[test]
-fn method_st_ymax() {
-    assert_method_eq_func!(g!().st_ymax(), st_ymax(g!()));
-}
-
-// ── Measurement ─────────────────────────────────────────────────────────────
-
-#[test]
-fn method_st_area() {
-    assert_method_eq_func!(g!().st_area(), st_area(g!()));
-}
-
-#[test]
-fn method_st_length() {
-    assert_method_eq_func!(g!().st_length(), st_length(g!()));
-}
-
-#[test]
-fn method_st_perimeter() {
-    assert_method_eq_func!(g!().st_perimeter(), st_perimeter(g!()));
-}
-
-#[test]
-fn method_st_distance() {
-    assert_method_eq_func!(g!().st_distance(g!()), st_distance(g!(), g!()));
-}
-
-#[test]
-fn method_st_distancesphere() {
-    assert_method_eq_func!(g!().st_distancesphere(g!()), st_distancesphere(g!(), g!()));
-}
-
-#[test]
-fn method_st_distancespheroid() {
-    assert_method_eq_func!(
-        g!().st_distancespheroid(g!()),
-        st_distancespheroid(g!(), g!())
-    );
-}
-
-#[test]
-fn method_st_hausdorffdistance() {
-    assert_method_eq_func!(
-        g!().st_hausdorffdistance(g!()),
-        st_hausdorffdistance(g!(), g!())
-    );
-}
-
-#[test]
-fn method_st_centroid() {
-    assert_method_eq_func!(g!().st_centroid(), st_centroid(g!()));
-}
-
-#[test]
-fn method_st_pointonsurface() {
-    assert_method_eq_func!(g!().st_pointonsurface(), st_pointonsurface(g!()));
-}
-
-// ── Predicates ──────────────────────────────────────────────────────────────
-
-#[test]
-fn method_st_intersects() {
-    assert_method_eq_func!(g!().st_intersects(g!()), st_intersects(g!(), g!()));
-}
-
-#[test]
-fn method_st_contains() {
-    assert_method_eq_func!(g!().st_contains(g!()), st_contains(g!(), g!()));
-}
-
-#[test]
-fn method_st_within() {
-    assert_method_eq_func!(g!().st_within(g!()), st_within(g!(), g!()));
-}
-
-#[test]
-fn method_inside_area() {
-    assert_method_eq_func!(g!().inside_area(g!()), inside_area(g!(), g!()));
-}
-
-#[test]
-fn method_st_covers() {
-    assert_method_eq_func!(g!().st_covers(g!()), st_covers(g!(), g!()));
-}
-
-#[test]
-fn method_st_coveredby() {
-    assert_method_eq_func!(g!().st_coveredby(g!()), st_coveredby(g!(), g!()));
-}
-
-#[test]
-fn method_st_disjoint() {
-    assert_method_eq_func!(g!().st_disjoint(g!()), st_disjoint(g!(), g!()));
-}
-
-#[test]
-fn method_outside_area() {
-    assert_method_eq_func!(g!().outside_area(g!()), outside_area(g!(), g!()));
-}
-
-#[test]
-fn method_st_equals() {
-    assert_method_eq_func!(g!().st_equals(g!()), st_equals(g!(), g!()));
-}
-
-#[test]
-fn method_st_dwithin() {
-    assert_method_eq_func!(g!().st_dwithin(g!(), d!()), st_dwithin(g!(), g!(), d!()));
-}
-
-#[test]
-fn method_st_dwithinsphere() {
-    assert_method_eq_func!(
-        g!().st_dwithinsphere(g!(), d!()),
-        st_dwithinsphere(g!(), g!(), d!())
-    );
-}
-
-#[test]
-fn method_st_dwithinspheroid() {
-    assert_method_eq_func!(
-        g!().st_dwithinspheroid(g!(), d!()),
-        st_dwithinspheroid(g!(), g!(), d!())
-    );
-}
-
-#[test]
-fn method_st_relate() {
-    assert_method_eq_func!(g!().st_relate(g!()), st_relate(g!(), g!()));
-}
-
-#[test]
-fn method_st_relate_match_geoms() {
-    assert_method_eq_func!(
-        g!().st_relate_match_geoms(g!(), t!()),
-        st_relate_match_geoms(g!(), g!(), t!())
-    );
-}
-
-// ── Geography variants ──────────────────────────────────────────────────────
-
-#[test]
-fn method_st_lengthsphere() {
-    assert_method_eq_func!(g!().st_lengthsphere(), st_lengthsphere(g!()));
-}
-
-#[test]
-fn method_st_azimuth() {
-    assert_method_eq_func!(g!().st_azimuth(g!()), st_azimuth(g!(), g!()));
-}
-
-#[test]
-fn method_st_project() {
-    assert_method_eq_func!(g!().st_project(d!(), d!()), st_project(g!(), d!(), d!()));
-}
-
-#[test]
-fn method_st_closestpoint() {
-    assert_method_eq_func!(g!().st_closestpoint(g!()), st_closestpoint(g!(), g!()));
-}
+assert_unary_cases!(
+    method_st_astext => st_astext,
+    method_st_asewkt => st_asewkt,
+    method_st_asbinary => st_asbinary,
+    method_st_asewkb => st_asewkb,
+    method_st_asgeojson => st_asgeojson,
+);
+
+// ── Constructors / transforms ───────────────────────────────────────────────
+
+assert_unary_cases!(method_st_makepolygon => st_makepolygon,);
+assert_geom_geom_cases!(
+    method_st_makeline => st_makeline,
+    method_st_collect => st_collect,
+);
+assert_geom_double_cases!(method_st_buffer => st_buffer,);
+
+// ── Accessors ────────────────────────────────────────────────────────────────
+
+assert_unary_cases!(
+    method_st_srid => st_srid,
+    method_st_geometrytype => st_geometrytype,
+    method_st_x => st_x,
+    method_st_y => st_y,
+    method_st_isempty => st_isempty,
+    method_st_ndims => st_ndims,
+    method_st_coorddim => st_coorddim,
+    method_st_zmflag => st_zmflag,
+    method_st_memsize => st_memsize,
+    method_st_isvalid => st_isvalid,
+    method_st_isvalidreason => st_isvalidreason,
+    method_st_numpoints => st_numpoints,
+    method_st_npoints => st_npoints,
+    method_st_numgeometries => st_numgeometries,
+    method_st_numinteriorrings => st_numinteriorrings,
+    method_st_numinteriorring => st_numinteriorring,
+    method_st_numrings => st_numrings,
+    method_st_dimension => st_dimension,
+    method_st_envelope => st_envelope,
+    method_st_startpoint => st_startpoint,
+    method_st_endpoint => st_endpoint,
+    method_st_exteriorring => st_exteriorring,
+    method_st_xmin => st_xmin,
+    method_st_xmax => st_xmax,
+    method_st_ymin => st_ymin,
+    method_st_ymax => st_ymax,
+);
+assert_geom_int_cases!(
+    method_st_setsrid => st_setsrid,
+    method_st_pointn => st_pointn,
+    method_st_interiorringn => st_interiorringn,
+    method_st_geometryn => st_geometryn,
+);
+
+// ── Measurement ──────────────────────────────────────────────────────────────
+
+assert_unary_cases!(
+    method_st_area => st_area,
+    method_st_length => st_length,
+    method_st_length2d => st_length2d,
+    method_st_perimeter => st_perimeter,
+    method_st_perimeter2d => st_perimeter2d,
+    method_st_centroid => st_centroid,
+    method_st_pointonsurface => st_pointonsurface,
+);
+assert_geom_geom_cases!(
+    method_st_distance => st_distance,
+    method_st_distancesphere => st_distancesphere,
+    method_st_distancespheroid => st_distancespheroid,
+    method_st_hausdorffdistance => st_hausdorffdistance,
+);
+
+// ── Operations ───────────────────────────────────────────────────────────────
+
+assert_geom_geom_cases!(
+    method_st_union => st_union,
+    method_st_intersection => st_intersection,
+    method_st_difference => st_difference,
+    method_st_symdifference => st_symdifference,
+);
+
+// ── Predicates ───────────────────────────────────────────────────────────────
+
+assert_geom_geom_cases!(
+    method_st_intersects => st_intersects,
+    method_st_contains => st_contains,
+    method_st_within => st_within,
+    method_inside_area => inside_area,
+    method_st_covers => st_covers,
+    method_st_coveredby => st_coveredby,
+    method_st_disjoint => st_disjoint,
+    method_outside_area => outside_area,
+    method_st_equals => st_equals,
+    method_st_relate => st_relate,
+    method_st_touches => st_touches,
+    method_st_crosses => st_crosses,
+    method_st_overlaps => st_overlaps,
+    method_st_azimuth => st_azimuth,
+    method_st_closestpoint => st_closestpoint,
+);
+assert_geom_geom_double_cases!(
+    method_st_dwithin => st_dwithin,
+    method_st_dwithinsphere => st_dwithinsphere,
+    method_st_dwithinspheroid => st_dwithinspheroid,
+);
+assert_geom_geom_text_cases!(method_st_relate_match_geoms => st_relate_match_geoms,);
+
+// ── Geography variants ───────────────────────────────────────────────────────
+
+assert_unary_cases!(method_st_lengthsphere => st_lengthsphere,);
+assert_geom_double_double_cases!(method_st_project => st_project,);
