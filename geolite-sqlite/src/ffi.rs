@@ -1068,6 +1068,83 @@ unsafe fn rollback_savepoint(db: *mut sqlite3, ctx: *mut sqlite3_context, savepo
     let _ = exec_sql_silent(db, &format!("RELEASE {savepoint}"));
 }
 
+unsafe fn sqlite_master_lookup_text(
+    db: *mut sqlite3,
+    sql: &str,
+) -> std::result::Result<Option<String>, String> {
+    let c_sql = sql_to_cstring(sql)
+        .map_err(|_| "internal error: generated SQL contains NUL byte".to_string())?;
+    let mut stmt: *mut sqlite3_stmt = std::ptr::null_mut();
+    let rc = sqlite3_prepare_v2(db, c_sql.as_ptr(), -1, &mut stmt, std::ptr::null_mut());
+    if rc != SQLITE_OK {
+        return Err(CStr::from_ptr(sqlite3_errmsg(db))
+            .to_string_lossy()
+            .into_owned());
+    }
+
+    let mut result = None;
+    let step = sqlite3_step(stmt);
+    if step == SQLITE_ROW {
+        if sqlite3_column_type(stmt, 0) != SQLITE_NULL {
+            let ptr = sqlite3_column_text(stmt, 0);
+            if !ptr.is_null() {
+                result = Some(CStr::from_ptr(ptr.cast()).to_string_lossy().into_owned());
+            }
+        }
+    } else if step != SQLITE_DONE {
+        let err = CStr::from_ptr(sqlite3_errmsg(db))
+            .to_string_lossy()
+            .into_owned();
+        let _ = sqlite3_finalize(stmt);
+        return Err(err);
+    }
+
+    let _ = sqlite3_finalize(stmt);
+    Ok(result)
+}
+
+unsafe fn ensure_spatial_index_name_not_colliding(
+    db: *mut sqlite3,
+    ctx: *mut sqlite3_context,
+    table: &str,
+    column: &str,
+) -> bool {
+    // Object names are built as `{table}_{column}_...`. Different input pairs
+    // can collide (e.g. `a_b`+`c` vs `a`+`b_c`). Detect and fail fast instead
+    // of silently reusing another table's triggers/index objects.
+    let prefix = format!("{table}_{column}");
+    for suffix in &["_insert", "_update", "_delete"] {
+        let trigger_name = format!("{prefix}{suffix}");
+        let sql = format!(
+            "SELECT tbl_name FROM sqlite_master \
+             WHERE type = 'trigger' AND name = '{trigger_name}' LIMIT 1"
+        );
+        let owner = match sqlite_master_lookup_text(db, &sql) {
+            Ok(v) => v,
+            Err(e) => {
+                set_error(
+                    ctx,
+                    &format!("CreateSpatialIndex: failed to inspect sqlite_master: {e}"),
+                );
+                return false;
+            }
+        };
+        if let Some(owner) = owner {
+            if owner != table {
+                set_error(
+                    ctx,
+                    &format!(
+                        "CreateSpatialIndex: naming collision for trigger [{trigger_name}] \
+                         between tables [{owner}] and [{table}]"
+                    ),
+                );
+                return false;
+            }
+        }
+    }
+    true
+}
+
 // ── Spatial index callbacks ──────────────────────────────────────────────────
 
 /// Extract and validate `(table, column)` identifiers from the first two args.
@@ -1136,6 +1213,10 @@ unsafe extern "C" fn create_spatial_index_xfunc(
         let rtree = format!("{table}_{column}_rtree");
         let savepoint = "geolite_create_spatial_index";
 
+        if !ensure_spatial_index_name_not_colliding(db, ctx, table, column) {
+            return;
+        }
+
         if exec_sql(db, ctx, &format!("SAVEPOINT {savepoint}")) != SQLITE_OK {
             return;
         }
@@ -1188,7 +1269,7 @@ unsafe extern "C" fn create_spatial_index_xfunc(
         // 4. AFTER UPDATE trigger
         let trigger_update = format!("{table}_{column}_update");
         let sql = format!(
-            "CREATE TRIGGER IF NOT EXISTS [{trigger_update}] AFTER UPDATE OF [{column}] ON [{table}] \
+            "CREATE TRIGGER IF NOT EXISTS [{trigger_update}] AFTER UPDATE ON [{table}] \
              BEGIN \
                DELETE FROM [{rtree}] WHERE id = OLD.rowid; \
                INSERT INTO [{rtree}] \

@@ -565,6 +565,30 @@ fn st_project() {
 }
 
 #[$test_attr]
+fn st_project_rejects_non_finite_distance() {
+    let db = ActiveTestDb::open();
+    let err = db
+        .try_query_i64("SELECT ST_IsEmpty(ST_Project(ST_Point(0,0,4326), 1e309, 0.0))")
+        .expect_err("non-finite distance should be rejected");
+    assert!(
+        err.contains("distance must be finite"),
+        "unexpected error: {err}"
+    );
+}
+
+#[$test_attr]
+fn st_project_rejects_non_finite_azimuth() {
+    let db = ActiveTestDb::open();
+    let err = db
+        .try_query_i64("SELECT ST_IsEmpty(ST_Project(ST_Point(0,0,4326), 1000.0, 1e309))")
+        .expect_err("non-finite azimuth should be rejected");
+    assert!(
+        err.contains("azimuth must be finite"),
+        "unexpected error: {err}"
+    );
+}
+
+#[$test_attr]
 fn st_dwithin_sphere() {
     let db = ActiveTestDb::open();
     let yes = db.query_i64(
@@ -1669,6 +1693,25 @@ fn spatial_index_trigger_sync() {
 }
 
 #[$test_attr]
+fn spatial_index_trigger_sync_tracks_rowid_updates() {
+    let db = ActiveTestDb::open();
+    db.exec("CREATE TABLE t (id INTEGER PRIMARY KEY, geom BLOB)");
+    db.exec("SELECT CreateSpatialIndex('t', 'geom')");
+    db.exec("INSERT INTO t (geom) VALUES (ST_Point(1, 2))");
+
+    let count_old = db.query_i64("SELECT COUNT(*) FROM t_geom_rtree WHERE id = 1");
+    assert_eq!(count_old, 1);
+
+    db.exec("UPDATE t SET rowid = 42 WHERE rowid = 1");
+
+    let count_stale = db.query_i64("SELECT COUNT(*) FROM t_geom_rtree WHERE id = 1");
+    assert_eq!(count_stale, 0, "stale rowid must be removed from index");
+
+    let count_new = db.query_i64("SELECT COUNT(*) FROM t_geom_rtree WHERE id = 42");
+    assert_eq!(count_new, 1, "new rowid must be inserted into index");
+}
+
+#[$test_attr]
 fn spatial_index_narrows_candidates() {
     let db = ActiveTestDb::open();
     db.exec("CREATE TABLE grid (id INTEGER PRIMARY KEY, geom BLOB)");
@@ -1740,6 +1783,34 @@ fn spatial_index_rejects_invalid_names() {
     // DropSpatialIndex also validates
     let res = db.try_query_i64("SELECT DropSpatialIndex('ok', 'col name')");
     assert!(res.is_err(), "should reject spaces in col: {res:?}");
+}
+
+#[$test_attr]
+fn spatial_index_rejects_colliding_object_names() {
+    let db = ActiveTestDb::open();
+    db.exec("CREATE TABLE a_b (id INTEGER PRIMARY KEY, c BLOB)");
+    db.exec("CREATE TABLE a (id INTEGER PRIMARY KEY, b_c BLOB)");
+    db.exec("INSERT INTO a_b (c) VALUES (ST_Point(0, 0))");
+    db.exec("INSERT INTO a (b_c) VALUES (ST_Point(1, 1)), (ST_Point(2, 2))");
+
+    let rc = db.query_i64("SELECT CreateSpatialIndex('a_b', 'c')");
+    assert_eq!(rc, 1);
+
+    let err = db
+        .try_query_i64("SELECT CreateSpatialIndex('a', 'b_c')")
+        .expect_err("colliding index object names must be rejected");
+    assert!(
+        err.contains("naming collision"),
+        "unexpected error message: {err}"
+    );
+
+    // Existing index must remain intact and must still belong to a_b/c.
+    let row_count = db.query_i64("SELECT COUNT(*) FROM a_b_c_rtree");
+    assert_eq!(row_count, 1);
+    let trigger_count_on_a = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'a'",
+    );
+    assert_eq!(trigger_count_on_a, 0);
 }
 
 #[$test_attr]

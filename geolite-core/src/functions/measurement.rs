@@ -419,6 +419,16 @@ pub fn st_azimuth(origin: &[u8], target: &[u8]) -> Result<f64> {
 /// assert!((st_y(&dest).unwrap().unwrap() - 1.0).abs() < 0.1);
 /// ```
 pub fn st_project(origin: &[u8], distance: f64, azimuth: f64) -> Result<Vec<u8>> {
+    if !distance.is_finite() {
+        return Err(GeoLiteError::InvalidInput(
+            "ST_Project: distance must be finite".to_string(),
+        ));
+    }
+    if !azimuth.is_finite() {
+        return Err(GeoLiteError::InvalidInput(
+            "ST_Project: azimuth must be finite".to_string(),
+        ));
+    }
     let (go, srid) = parse_ewkb(origin)?;
     ensure_geographic_srid(srid, "ST_Project")?;
     let po = require_non_empty_point(require_point(go)?, "ST_Project")?;
@@ -592,6 +602,19 @@ mod tests {
     fn st_project_missing_srid_errors() {
         let origin = st_point(0.0, 0.0, None).unwrap();
         assert!(st_project(&origin, 111_000.0, 0.0).is_err());
+    }
+
+    #[test]
+    fn st_project_non_finite_args_error() {
+        let origin = st_point(0.0, 0.0, Some(4326)).unwrap();
+
+        let err = st_project(&origin, f64::INFINITY, 0.0)
+            .expect_err("non-finite distance should be rejected");
+        assert!(format!("{err}").contains("distance must be finite"));
+
+        let err =
+            st_project(&origin, 1_000.0, f64::NEG_INFINITY).expect_err("non-finite azimuth");
+        assert!(format!("{err}").contains("azimuth must be finite"));
     }
 
     #[test]
