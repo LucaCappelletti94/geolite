@@ -575,7 +575,11 @@ pub fn st_dimension(blob: &[u8]) -> Result<i32> {
     Ok(geometry_dimension(&geom))
 }
 
-/// ST_Envelope — bounding rectangle as a 5-point Polygon.
+/// ST_Envelope — axis-aligned envelope geometry.
+///
+/// Current behavior:
+/// - non-empty: returns the rectangular envelope as a Polygon
+/// - empty: returns the same empty geometry unchanged
 ///
 /// # Example
 ///
@@ -589,6 +593,9 @@ pub fn st_dimension(blob: &[u8]) -> Result<i32> {
 /// ```
 pub fn st_envelope(blob: &[u8]) -> Result<Vec<u8>> {
     let (geom, srid) = parse_ewkb(blob)?;
+    if is_empty_geometry(&geom) {
+        return write_ewkb(&geom, srid);
+    }
     let rect = geom
         .bounding_rect()
         .ok_or_else(|| GeoLiteError::WrongType {
@@ -1080,8 +1087,16 @@ mod tests {
         assert_eq!(st_geometry_type(&env).unwrap(), "ST_Polygon");
         assert_eq!(st_srid(&env).unwrap(), 3857);
 
-        let empty = geom_from_text("GEOMETRYCOLLECTION EMPTY", None).unwrap();
-        assert!(st_envelope(&empty).is_err());
+        let empty_point = geom_from_text("POINT EMPTY", Some(3857)).unwrap();
+        let env_point = st_envelope(&empty_point).unwrap();
+        assert_eq!(st_geometry_type(&env_point).unwrap(), "ST_Point");
+        assert!(st_is_empty(&env_point).unwrap());
+        assert_eq!(st_srid(&env_point).unwrap(), 3857);
+
+        let empty_gc = geom_from_text("GEOMETRYCOLLECTION EMPTY", None).unwrap();
+        let env_gc = st_envelope(&empty_gc).unwrap();
+        assert_eq!(st_geometry_type(&env_gc).unwrap(), "ST_GeometryCollection");
+        assert!(st_is_empty(&env_gc).unwrap());
     }
 
     #[test]

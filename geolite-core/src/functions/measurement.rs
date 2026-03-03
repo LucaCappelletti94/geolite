@@ -206,6 +206,8 @@ pub fn st_hausdorff_distance(a: &[u8], b: &[u8]) -> Result<f64> {
 
 /// ST_XMin — minimum X of the bounding rectangle.
 ///
+/// Returns `None` for empty geometries (PostGIS-compatible).
+///
 /// # Example
 ///
 /// ```
@@ -213,14 +215,16 @@ pub fn st_hausdorff_distance(a: &[u8], b: &[u8]) -> Result<f64> {
 /// use geolite_core::functions::io::geom_from_text;
 ///
 /// let blob = geom_from_text("LINESTRING(1 2,3 4)", None).unwrap();
-/// assert!((st_xmin(&blob).unwrap() - 1.0).abs() < 1e-10);
+/// assert!((st_xmin(&blob).unwrap().unwrap() - 1.0).abs() < 1e-10);
 /// ```
-pub fn st_xmin(blob: &[u8]) -> Result<f64> {
+pub fn st_xmin(blob: &[u8]) -> Result<Option<f64>> {
     let r = bbox(blob)?;
-    Ok(r.min().x)
+    Ok(r.map(|r| r.min().x))
 }
 
 /// ST_XMax — maximum X of the bounding rectangle.
+///
+/// Returns `None` for empty geometries (PostGIS-compatible).
 ///
 /// # Example
 ///
@@ -229,14 +233,16 @@ pub fn st_xmin(blob: &[u8]) -> Result<f64> {
 /// use geolite_core::functions::io::geom_from_text;
 ///
 /// let blob = geom_from_text("LINESTRING(1 2,3 4)", None).unwrap();
-/// assert!((st_xmax(&blob).unwrap() - 3.0).abs() < 1e-10);
+/// assert!((st_xmax(&blob).unwrap().unwrap() - 3.0).abs() < 1e-10);
 /// ```
-pub fn st_xmax(blob: &[u8]) -> Result<f64> {
+pub fn st_xmax(blob: &[u8]) -> Result<Option<f64>> {
     let r = bbox(blob)?;
-    Ok(r.max().x)
+    Ok(r.map(|r| r.max().x))
 }
 
 /// ST_YMin — minimum Y of the bounding rectangle.
+///
+/// Returns `None` for empty geometries (PostGIS-compatible).
 ///
 /// # Example
 ///
@@ -245,14 +251,16 @@ pub fn st_xmax(blob: &[u8]) -> Result<f64> {
 /// use geolite_core::functions::io::geom_from_text;
 ///
 /// let blob = geom_from_text("LINESTRING(1 2,3 4)", None).unwrap();
-/// assert!((st_ymin(&blob).unwrap() - 2.0).abs() < 1e-10);
+/// assert!((st_ymin(&blob).unwrap().unwrap() - 2.0).abs() < 1e-10);
 /// ```
-pub fn st_ymin(blob: &[u8]) -> Result<f64> {
+pub fn st_ymin(blob: &[u8]) -> Result<Option<f64>> {
     let r = bbox(blob)?;
-    Ok(r.min().y)
+    Ok(r.map(|r| r.min().y))
 }
 
 /// ST_YMax — maximum Y of the bounding rectangle.
+///
+/// Returns `None` for empty geometries (PostGIS-compatible).
 ///
 /// # Example
 ///
@@ -261,19 +269,24 @@ pub fn st_ymin(blob: &[u8]) -> Result<f64> {
 /// use geolite_core::functions::io::geom_from_text;
 ///
 /// let blob = geom_from_text("LINESTRING(1 2,3 4)", None).unwrap();
-/// assert!((st_ymax(&blob).unwrap() - 4.0).abs() < 1e-10);
+/// assert!((st_ymax(&blob).unwrap().unwrap() - 4.0).abs() < 1e-10);
 /// ```
-pub fn st_ymax(blob: &[u8]) -> Result<f64> {
+pub fn st_ymax(blob: &[u8]) -> Result<Option<f64>> {
     let r = bbox(blob)?;
-    Ok(r.max().y)
+    Ok(r.map(|r| r.max().y))
 }
 
-fn bbox(blob: &[u8]) -> Result<Rect<f64>> {
+fn bbox(blob: &[u8]) -> Result<Option<Rect<f64>>> {
     let (geom, _) = parse_ewkb(blob)?;
-    geom.bounding_rect().ok_or_else(|| GeoLiteError::WrongType {
-        expected: "non-empty geometry",
-        actual: geometry_type_name(&geom),
-    })
+    if is_empty_geometry(&geom) {
+        return Ok(None);
+    }
+    geom.bounding_rect()
+        .ok_or_else(|| GeoLiteError::WrongType {
+            expected: "non-empty geometry",
+            actual: geometry_type_name(&geom),
+        })
+        .map(Some)
 }
 
 // ── Spherical / geodetic variants ─────────────────────────────────────────────
@@ -667,16 +680,31 @@ mod tests {
     #[test]
     fn bbox_invariants() {
         let poly = geom_from_text("POLYGON((1 2,5 2,5 8,1 8,1 2))", None).unwrap();
-        let xmin = st_xmin(&poly).unwrap();
-        let xmax = st_xmax(&poly).unwrap();
-        let ymin = st_ymin(&poly).unwrap();
-        let ymax = st_ymax(&poly).unwrap();
+        let xmin = st_xmin(&poly).unwrap().unwrap();
+        let xmax = st_xmax(&poly).unwrap().unwrap();
+        let ymin = st_ymin(&poly).unwrap().unwrap();
+        let ymax = st_ymax(&poly).unwrap().unwrap();
         assert!(xmin <= xmax);
         assert!(ymin <= ymax);
         assert!((xmin - 1.0).abs() < 1e-10);
         assert!((xmax - 5.0).abs() < 1e-10);
         assert!((ymin - 2.0).abs() < 1e-10);
         assert!((ymax - 8.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn bbox_accessors_return_none_for_empty_geometries() {
+        let empty_point = geom_from_text("POINT EMPTY", None).unwrap();
+        assert_eq!(st_xmin(&empty_point).unwrap(), None);
+        assert_eq!(st_xmax(&empty_point).unwrap(), None);
+        assert_eq!(st_ymin(&empty_point).unwrap(), None);
+        assert_eq!(st_ymax(&empty_point).unwrap(), None);
+
+        let empty_gc = geom_from_text("GEOMETRYCOLLECTION EMPTY", None).unwrap();
+        assert_eq!(st_xmin(&empty_gc).unwrap(), None);
+        assert_eq!(st_xmax(&empty_gc).unwrap(), None);
+        assert_eq!(st_ymin(&empty_gc).unwrap(), None);
+        assert_eq!(st_ymax(&empty_gc).unwrap(), None);
     }
 
     #[test]
