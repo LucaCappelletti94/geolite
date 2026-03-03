@@ -1011,6 +1011,57 @@ fn st_dwithin_spheroid_nan_distance_binds_as_null_in_sqlite() {
 }
 
 #[$test_attr]
+fn st_dwithin_inf_distance_binds_are_rejected() {
+    let db = ActiveTestDb::open();
+    for distance in [f64::INFINITY, f64::NEG_INFINITY] {
+        let err = db
+            .try_query_i64_with_f64_param(
+                "SELECT ST_DWithin(ST_Point(0,0), ST_Point(3,4), ?1)",
+                distance,
+            )
+            .expect_err("infinite distance should be rejected for ST_DWithin");
+        assert!(
+            err.contains("distance must be finite"),
+            "unexpected error for distance={distance}: {err}"
+        );
+    }
+}
+
+#[$test_attr]
+fn st_dwithin_sphere_inf_distance_binds_are_rejected() {
+    let db = ActiveTestDb::open();
+    for distance in [f64::INFINITY, f64::NEG_INFINITY] {
+        let err = db
+            .try_query_i64_with_f64_param(
+                "SELECT ST_DWithinSphere(ST_Point(0,0,4326), ST_Point(1,1,4326), ?1)",
+                distance,
+            )
+            .expect_err("infinite distance should be rejected for ST_DWithinSphere");
+        assert!(
+            err.contains("distance must be finite"),
+            "unexpected error for distance={distance}: {err}"
+        );
+    }
+}
+
+#[$test_attr]
+fn st_dwithin_spheroid_inf_distance_binds_are_rejected() {
+    let db = ActiveTestDb::open();
+    for distance in [f64::INFINITY, f64::NEG_INFINITY] {
+        let err = db
+            .try_query_i64_with_f64_param(
+                "SELECT ST_DWithinSpheroid(ST_Point(0,0,4326), ST_Point(1,1,4326), ?1)",
+                distance,
+            )
+            .expect_err("infinite distance should be rejected for ST_DWithinSpheroid");
+        assert!(
+            err.contains("distance must be finite"),
+            "unexpected error for distance={distance}: {err}"
+        );
+    }
+}
+
+#[$test_attr]
 fn st_dwithin_geodesic_rejects_non_finite_distance() {
     let db = ActiveTestDb::open();
     for sql in [
