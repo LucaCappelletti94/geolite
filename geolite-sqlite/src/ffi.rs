@@ -74,6 +74,13 @@ enum SqlArg<T> {
     InvalidType,
 }
 
+enum SqlI32Arg {
+    Null,
+    Value(i32),
+    InvalidType,
+    OutOfRange(i64),
+}
+
 unsafe fn get_f64_arg(argv: *mut *mut sqlite3_value, i: usize) -> SqlArg<f64> {
     let v = *argv.add(i);
     match sqlite3_value_type(v) {
@@ -83,12 +90,18 @@ unsafe fn get_f64_arg(argv: *mut *mut sqlite3_value, i: usize) -> SqlArg<f64> {
     }
 }
 
-unsafe fn get_i32_arg(argv: *mut *mut sqlite3_value, i: usize) -> SqlArg<i32> {
+unsafe fn get_i32_arg(argv: *mut *mut sqlite3_value, i: usize) -> SqlI32Arg {
     let v = *argv.add(i);
     match sqlite3_value_type(v) {
-        SQLITE_NULL => SqlArg::Null,
-        SQLITE_INTEGER => SqlArg::Value(sqlite3_value_int(v)),
-        _ => SqlArg::InvalidType,
+        SQLITE_NULL => SqlI32Arg::Null,
+        SQLITE_INTEGER => {
+            let raw = sqlite3_value_int64(v);
+            match i32::try_from(raw) {
+                Ok(value) => SqlI32Arg::Value(value),
+                Err(_) => SqlI32Arg::OutOfRange(raw),
+            }
+        }
+        _ => SqlI32Arg::InvalidType,
     }
 }
 
@@ -179,13 +192,20 @@ unsafe fn require_i32_arg(
     arg_name: &str,
 ) -> Option<i32> {
     match get_i32_arg(argv, i) {
-        SqlArg::Value(v) => Some(v),
-        SqlArg::Null => {
+        SqlI32Arg::Value(v) => Some(v),
+        SqlI32Arg::Null => {
             set_null(ctx);
             None
         }
-        SqlArg::InvalidType => {
+        SqlI32Arg::InvalidType => {
             set_error(ctx, &format!("{fn_name}: {arg_name} must be integer"));
+            None
+        }
+        SqlI32Arg::OutOfRange(v) => {
+            set_error(
+                ctx,
+                &format!("{fn_name}: {arg_name} out of range for i32: {v}"),
+            );
             None
         }
     }
@@ -1492,10 +1512,7 @@ pub unsafe fn register_functions(db: *mut sqlite3) -> c_int {
     }
 
     // Callback order must match `SQLITE_DIRECT_ONLY_FUNCTIONS`.
-    let direct_only_callbacks: &[XFunc] = &[
-        create_spatial_index_xfunc,
-        drop_spatial_index_xfunc,
-    ];
+    let direct_only_callbacks: &[XFunc] = &[create_spatial_index_xfunc, drop_spatial_index_xfunc];
 
     if direct_only_callbacks.len() != SQLITE_DIRECT_ONLY_FUNCTIONS.len() {
         return SQLITE_ERROR;
@@ -1606,8 +1623,7 @@ mod tests {
     }
 
     fn null_call_sql(name: &str, n_arg: i32) -> String {
-        let args = std::iter::repeat("NULL")
-            .take(n_arg as usize)
+        let args = std::iter::repeat_n("NULL", n_arg as usize)
             .collect::<Vec<_>>()
             .join(", ");
         format!("SELECT {name}({args})")
