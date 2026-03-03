@@ -2,6 +2,44 @@ macro_rules! define_shared_cases {
     ($test_attr:meta) => {
 // ── I/O round-trips ───────────────────────────────────────────────────────────
 
+fn assert_i32_out_of_range_error(
+    db: &ActiveTestDb,
+    sql: &str,
+    fn_label: &str,
+    arg_name: &str,
+) {
+    let err = db
+        .try_query_i64(sql)
+        .expect_err("query should fail for out-of-range i32 argument");
+    assert!(
+        err.contains("out of range for i32"),
+        "unexpected error message for `{sql}`: {err}"
+    );
+    assert!(
+        err.contains(fn_label),
+        "error should mention function `{fn_label}` for `{sql}`: {err}"
+    );
+    let arg_token = format!(": {arg_name} out of range for i32:");
+    assert!(
+        err.contains(&arg_token),
+        "error should mention argument token `{arg_token}` for `{sql}`: {err}"
+    );
+}
+
+fn assert_non_overflow_error(db: &ActiveTestDb, sql: &str, expected_substring: &str) {
+    let err = db
+        .try_query_i64(sql)
+        .expect_err("query should fail after passing i32 conversion");
+    assert!(
+        err.contains(expected_substring),
+        "unexpected error message for `{sql}`: {err}"
+    );
+    assert!(
+        !err.contains("out of range for i32"),
+        "boundary i32 value should not trigger overflow for `{sql}`: {err}"
+    );
+}
+
 #[$test_attr]
 fn wkt_round_trip() {
     let db = ActiveTestDb::open();
@@ -147,6 +185,47 @@ fn st_tile_envelope_negative_args_rejected_with_clear_error() {
 }
 
 #[$test_attr]
+fn st_tile_envelope_rejects_out_of_range_i32_args() {
+    let db = ActiveTestDb::open();
+    let cases = [
+        ("SELECT ST_Area(ST_TileEnvelope(2147483648, 0, 0))", "zoom"),
+        ("SELECT ST_Area(ST_TileEnvelope(-2147483649, 0, 0))", "zoom"),
+        ("SELECT ST_Area(ST_TileEnvelope(0, 2147483648, 0))", "tile x"),
+        ("SELECT ST_Area(ST_TileEnvelope(0, -2147483649, 0))", "tile x"),
+        ("SELECT ST_Area(ST_TileEnvelope(0, 0, 2147483648))", "tile y"),
+        ("SELECT ST_Area(ST_TileEnvelope(0, 0, -2147483649))", "tile y"),
+    ];
+    for (sql, arg_label) in cases {
+        assert_i32_out_of_range_error(&db, sql, "ST_TileEnvelope", arg_label);
+    }
+}
+
+#[$test_attr]
+fn st_tile_envelope_i32_boundaries_are_not_treated_as_overflow() {
+    let db = ActiveTestDb::open();
+    assert_non_overflow_error(
+        &db,
+        "SELECT ST_Area(ST_TileEnvelope(2147483647, 0, 0))",
+        "exceeds maximum of 31",
+    );
+    assert_non_overflow_error(
+        &db,
+        "SELECT ST_Area(ST_TileEnvelope(-2147483648, 0, 0))",
+        "zoom must be non-negative",
+    );
+    assert_non_overflow_error(
+        &db,
+        "SELECT ST_Area(ST_TileEnvelope(1, 2147483647, 0))",
+        "out of range for zoom",
+    );
+    assert_non_overflow_error(
+        &db,
+        "SELECT ST_Area(ST_TileEnvelope(1, 0, -2147483648))",
+        "tile y must be non-negative",
+    );
+}
+
+#[$test_attr]
 fn st_point_with_srid() {
     let db = ActiveTestDb::open();
     let srid = db.query_i64("SELECT ST_SRID(ST_Point(1, 2, 4326))");
@@ -267,6 +346,92 @@ fn st_set_srid() {
     let db = ActiveTestDb::open();
     let srid = db.query_i64("SELECT ST_SRID(ST_SetSRID(ST_GeomFromText('POINT(0 0)'), 4326))");
     assert_eq!(srid, 4326);
+}
+
+#[$test_attr]
+fn srid_args_reject_out_of_range_i32() {
+    let db = ActiveTestDb::open();
+    let cases = [
+        ("SELECT ST_SRID(ST_Point(1, 2, 2147483648))", "ST_Point"),
+        ("SELECT ST_SRID(ST_Point(1, 2, -2147483649))", "ST_Point"),
+        (
+            "SELECT ST_SRID(ST_MakeEnvelope(0, 0, 1, 1, 2147483648))",
+            "ST_MakeEnvelope",
+        ),
+        (
+            "SELECT ST_SRID(ST_MakeEnvelope(0, 0, 1, 1, -2147483649))",
+            "ST_MakeEnvelope",
+        ),
+        (
+            "SELECT ST_SRID(ST_GeomFromText('POINT(0 0)', 2147483648))",
+            "ST_GeomFromText",
+        ),
+        (
+            "SELECT ST_SRID(ST_GeomFromText('POINT(0 0)', -2147483649))",
+            "ST_GeomFromText",
+        ),
+        (
+            "SELECT ST_SRID(ST_GeomFromWKB(ST_AsBinary(ST_GeomFromText('POINT(0 0)')), 2147483648))",
+            "ST_GeomFromWKB",
+        ),
+        (
+            "SELECT ST_SRID(ST_GeomFromWKB(ST_AsBinary(ST_GeomFromText('POINT(0 0)')), -2147483649))",
+            "ST_GeomFromWKB",
+        ),
+        (
+            "SELECT ST_SRID(ST_SetSRID(ST_Point(0, 0), 2147483648))",
+            "ST_SetSRID",
+        ),
+        (
+            "SELECT ST_SRID(ST_SetSRID(ST_Point(0, 0), -2147483649))",
+            "ST_SetSRID",
+        ),
+    ];
+    for (sql, fn_label) in cases {
+        assert_i32_out_of_range_error(&db, sql, fn_label, "srid");
+    }
+}
+
+#[$test_attr]
+fn srid_args_accept_i32_boundaries() {
+    let db = ActiveTestDb::open();
+    assert_eq!(db.query_i64("SELECT ST_SRID(ST_Point(1, 2, 2147483647))"), 2147483647);
+    assert_eq!(
+        db.query_i64("SELECT ST_SRID(ST_Point(1, 2, -2147483648))"),
+        -2147483648
+    );
+    assert_eq!(
+        db.query_i64("SELECT ST_SRID(ST_MakeEnvelope(0, 0, 1, 1, 2147483647))"),
+        2147483647
+    );
+    assert_eq!(
+        db.query_i64("SELECT ST_SRID(ST_MakeEnvelope(0, 0, 1, 1, -2147483648))"),
+        -2147483648
+    );
+    assert_eq!(
+        db.query_i64("SELECT ST_SRID(ST_GeomFromText('POINT(0 0)', 2147483647))"),
+        2147483647
+    );
+    assert_eq!(
+        db.query_i64("SELECT ST_SRID(ST_GeomFromText('POINT(0 0)', -2147483648))"),
+        -2147483648
+    );
+    assert_eq!(
+        db.query_i64("SELECT ST_SRID(ST_GeomFromWKB(ST_AsBinary(ST_GeomFromText('POINT(0 0)')), 2147483647))"),
+        2147483647
+    );
+    assert_eq!(
+        db.query_i64("SELECT ST_SRID(ST_GeomFromWKB(ST_AsBinary(ST_GeomFromText('POINT(0 0)')), -2147483648))"),
+        -2147483648
+    );
+    assert_eq!(
+        db.query_i64("SELECT ST_SRID(ST_SetSRID(ST_Point(0, 0), 2147483647))"),
+        2147483647
+    );
+    assert_eq!(
+        db.query_i64("SELECT ST_SRID(ST_SetSRID(ST_Point(0, 0), -2147483648))"),
+        -2147483648
+    );
 }
 
 #[$test_attr]
@@ -420,6 +585,74 @@ fn st_geometry_n() {
     let db = ActiveTestDb::open();
     let x = db.query_f64("SELECT ST_X(ST_GeometryN(ST_Collect(ST_Point(5,6), ST_Point(7,8)), 1))");
     assert!((x - 5.0).abs() < 1e-10, "x = {x}");
+}
+
+#[$test_attr]
+fn index_args_reject_out_of_range_i32() {
+    let db = ActiveTestDb::open();
+    let cases = [
+        (
+            "SELECT ST_IsEmpty(ST_PointN(ST_GeomFromText('LINESTRING(0 0,1 1)'), 2147483648))",
+            "ST_PointN",
+        ),
+        (
+            "SELECT ST_IsEmpty(ST_PointN(ST_GeomFromText('LINESTRING(0 0,1 1)'), -2147483649))",
+            "ST_PointN",
+        ),
+        (
+            "SELECT ST_IsEmpty(ST_InteriorRingN(ST_GeomFromText('POLYGON((0 0,10 0,10 10,0 10,0 0),(1 1,2 1,2 2,1 2,1 1))'), 2147483648))",
+            "ST_InteriorRingN",
+        ),
+        (
+            "SELECT ST_IsEmpty(ST_InteriorRingN(ST_GeomFromText('POLYGON((0 0,10 0,10 10,0 10,0 0),(1 1,2 1,2 2,1 2,1 1))'), -2147483649))",
+            "ST_InteriorRingN",
+        ),
+        (
+            "SELECT ST_IsEmpty(ST_GeometryN(ST_Collect(ST_Point(0,0), ST_Point(1,1)), 2147483648))",
+            "ST_GeometryN",
+        ),
+        (
+            "SELECT ST_IsEmpty(ST_GeometryN(ST_Collect(ST_Point(0,0), ST_Point(1,1)), -2147483649))",
+            "ST_GeometryN",
+        ),
+    ];
+    for (sql, fn_label) in cases {
+        assert_i32_out_of_range_error(&db, sql, fn_label, "n");
+    }
+}
+
+#[$test_attr]
+fn index_args_i32_boundaries_are_not_treated_as_overflow() {
+    let db = ActiveTestDb::open();
+    let cases = [
+        (
+            "SELECT ST_IsEmpty(ST_PointN(ST_GeomFromText('LINESTRING(0 0,1 1)'), 2147483647))",
+            "index out of bounds",
+        ),
+        (
+            "SELECT ST_IsEmpty(ST_PointN(ST_GeomFromText('LINESTRING(0 0,1 1)'), -2147483648))",
+            "index out of bounds",
+        ),
+        (
+            "SELECT ST_IsEmpty(ST_InteriorRingN(ST_GeomFromText('POLYGON((0 0,10 0,10 10,0 10,0 0),(1 1,2 1,2 2,1 2,1 1))'), 2147483647))",
+            "index out of bounds",
+        ),
+        (
+            "SELECT ST_IsEmpty(ST_InteriorRingN(ST_GeomFromText('POLYGON((0 0,10 0,10 10,0 10,0 0),(1 1,2 1,2 2,1 2,1 1))'), -2147483648))",
+            "index out of bounds",
+        ),
+        (
+            "SELECT ST_IsEmpty(ST_GeometryN(ST_Collect(ST_Point(0,0), ST_Point(1,1)), 2147483647))",
+            "index out of bounds",
+        ),
+        (
+            "SELECT ST_IsEmpty(ST_GeometryN(ST_Collect(ST_Point(0,0), ST_Point(1,1)), -2147483648))",
+            "index out of bounds",
+        ),
+    ];
+    for (sql, expected_substring) in cases {
+        assert_non_overflow_error(&db, sql, expected_substring);
+    }
 }
 
 #[$test_attr]
