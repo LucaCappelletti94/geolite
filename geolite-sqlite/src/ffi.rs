@@ -909,10 +909,10 @@ xfunc_blob2!(
     st_hausdorff_distance,
     set_f64
 );
-xfunc_blob!(st_xmin_xfunc, "ST_XMin", st_xmin, set_f64);
-xfunc_blob!(st_xmax_xfunc, "ST_XMax", st_xmax, set_f64);
-xfunc_blob!(st_ymin_xfunc, "ST_YMin", st_ymin, set_f64);
-xfunc_blob!(st_ymax_xfunc, "ST_YMax", st_ymax, set_f64);
+xfunc_blob_opt_f64!(st_xmin_xfunc, "ST_XMin", st_xmin);
+xfunc_blob_opt_f64!(st_xmax_xfunc, "ST_XMax", st_xmax);
+xfunc_blob_opt_f64!(st_ymin_xfunc, "ST_YMin", st_ymin);
+xfunc_blob_opt_f64!(st_ymax_xfunc, "ST_YMax", st_ymax);
 xfunc_blob2!(
     st_distancesphere_xfunc,
     "ST_DistanceSphere",

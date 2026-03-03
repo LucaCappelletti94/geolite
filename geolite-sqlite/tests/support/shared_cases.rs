@@ -670,6 +670,19 @@ fn st_envelope() {
 }
 
 #[$test_attr]
+fn st_envelope_empty_geometry_passthrough() {
+    let db = ActiveTestDb::open();
+    let point_empty_wkt =
+        db.query_text("SELECT ST_AsText(ST_Envelope(ST_GeomFromText('POINT EMPTY')))");
+    assert_eq!(point_empty_wkt, "POINT EMPTY");
+
+    let gc_empty_wkt = db.query_text(
+        "SELECT ST_AsText(ST_Envelope(ST_GeomFromText('GEOMETRYCOLLECTION EMPTY')))",
+    );
+    assert_eq!(gc_empty_wkt, "GEOMETRYCOLLECTION EMPTY");
+}
+
+#[$test_attr]
 fn st_is_valid() {
     let db = ActiveTestDb::open();
     let v = db.query_i64("SELECT ST_IsValid(ST_GeomFromText('POLYGON((0 0,1 0,1 1,0 1,0 0))'))");
@@ -722,6 +735,28 @@ fn st_bbox() {
     assert!((xmax - 3.0).abs() < 1e-10);
     assert!((ymin - 2.0).abs() < 1e-10);
     assert!((ymax - 4.0).abs() < 1e-10);
+}
+
+#[$test_attr]
+fn st_bbox_empty_returns_null() {
+    let db = ActiveTestDb::open();
+    assert!(db.query_is_null("SELECT ST_XMin(ST_GeomFromText('POINT EMPTY'))"));
+    assert!(db.query_is_null("SELECT ST_XMax(ST_GeomFromText('POINT EMPTY'))"));
+    assert!(db.query_is_null("SELECT ST_YMin(ST_GeomFromText('POINT EMPTY'))"));
+    assert!(db.query_is_null("SELECT ST_YMax(ST_GeomFromText('POINT EMPTY'))"));
+
+    assert!(db.query_is_null(
+        "SELECT ST_XMin(ST_GeomFromText('GEOMETRYCOLLECTION EMPTY'))"
+    ));
+    assert!(db.query_is_null(
+        "SELECT ST_XMax(ST_GeomFromText('GEOMETRYCOLLECTION EMPTY'))"
+    ));
+    assert!(db.query_is_null(
+        "SELECT ST_YMin(ST_GeomFromText('GEOMETRYCOLLECTION EMPTY'))"
+    ));
+    assert!(db.query_is_null(
+        "SELECT ST_YMax(ST_GeomFromText('GEOMETRYCOLLECTION EMPTY'))"
+    ));
 }
 
 #[$test_attr]
