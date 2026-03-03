@@ -93,6 +93,11 @@ pub fn st_disjoint(a: &[u8], b: &[u8]) -> Result<bool> {
 /// ```
 pub fn st_dwithin(a: &[u8], b: &[u8], distance: f64) -> Result<bool> {
     use super::measurement::st_distance;
+    if !distance.is_finite() {
+        return Err(GeoLiteError::InvalidInput(
+            "ST_DWithin: distance must be finite".to_string(),
+        ));
+    }
     Ok(st_distance(a, b)? <= distance)
 }
 
@@ -112,6 +117,11 @@ pub fn st_dwithin(a: &[u8], b: &[u8], distance: f64) -> Result<bool> {
 /// ```
 pub fn st_dwithin_sphere(a: &[u8], b: &[u8], distance: f64) -> Result<bool> {
     use super::measurement::st_distance_sphere;
+    if !distance.is_finite() {
+        return Err(GeoLiteError::InvalidInput(
+            "ST_DWithinSphere: distance must be finite".to_string(),
+        ));
+    }
     if distance < 0.0 {
         return Err(GeoLiteError::InvalidInput(
             "ST_DWithinSphere: distance must be non-negative".to_string(),
@@ -136,6 +146,11 @@ pub fn st_dwithin_sphere(a: &[u8], b: &[u8], distance: f64) -> Result<bool> {
 /// ```
 pub fn st_dwithin_spheroid(a: &[u8], b: &[u8], distance: f64) -> Result<bool> {
     use super::measurement::st_distance_spheroid;
+    if !distance.is_finite() {
+        return Err(GeoLiteError::InvalidInput(
+            "ST_DWithinSpheroid: distance must be finite".to_string(),
+        ));
+    }
     if distance < 0.0 {
         return Err(GeoLiteError::InvalidInput(
             "ST_DWithinSpheroid: distance must be non-negative".to_string(),
@@ -538,6 +553,20 @@ mod tests {
     }
 
     #[test]
+    fn st_dwithin_non_finite_distance_rejected() {
+        let a = st_point(0.0, 0.0, None).unwrap();
+        let b = st_point(3.0, 4.0, None).unwrap();
+        for distance in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let err = st_dwithin(&a, &b, distance)
+                .expect_err("ST_DWithin should reject non-finite distance");
+            assert!(
+                format!("{err}").contains("distance must be finite"),
+                "unexpected error: {err}"
+            );
+        }
+    }
+
+    #[test]
     fn st_dwithin_sphere_boundary() {
         let a = st_point(-0.1278, 51.5074, Some(4326)).unwrap();
         let b = st_point(2.3522, 48.8566, Some(4326)).unwrap();
@@ -558,11 +587,42 @@ mod tests {
     }
 
     #[test]
+    fn st_dwithin_geodesic_non_finite_distance_rejected() {
+        let a = st_point(0.0, 0.0, Some(4326)).unwrap();
+        let b = st_point(1.0, 1.0, Some(4326)).unwrap();
+        for distance in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let err = st_dwithin_sphere(&a, &b, distance)
+                .expect_err("ST_DWithinSphere should reject non-finite distance");
+            assert!(
+                format!("{err}").contains("distance must be finite"),
+                "unexpected error: {err}"
+            );
+
+            let err = st_dwithin_spheroid(&a, &b, distance)
+                .expect_err("ST_DWithinSpheroid should reject non-finite distance");
+            assert!(
+                format!("{err}").contains("distance must be finite"),
+                "unexpected error: {err}"
+            );
+        }
+    }
+
+    #[test]
     fn st_dwithin_geodesic_negative_distance_rejected() {
         let a = st_point(0.0, 0.0, Some(4326)).unwrap();
         let b = st_point(1.0, 1.0, Some(4326)).unwrap();
-        assert!(st_dwithin_sphere(&a, &b, -1.0).is_err());
-        assert!(st_dwithin_spheroid(&a, &b, -1.0).is_err());
+        let err = st_dwithin_sphere(&a, &b, -1.0)
+            .expect_err("ST_DWithinSphere should reject negative distance");
+        assert!(
+            format!("{err}").contains("distance must be non-negative"),
+            "unexpected error: {err}"
+        );
+        let err = st_dwithin_spheroid(&a, &b, -1.0)
+            .expect_err("ST_DWithinSpheroid should reject negative distance");
+        assert!(
+            format!("{err}").contains("distance must be non-negative"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
