@@ -612,8 +612,7 @@ mod tests {
             .expect_err("non-finite distance should be rejected");
         assert!(format!("{err}").contains("distance must be finite"));
 
-        let err =
-            st_project(&origin, 1_000.0, f64::NEG_INFINITY).expect_err("non-finite azimuth");
+        let err = st_project(&origin, 1_000.0, f64::NEG_INFINITY).expect_err("non-finite azimuth");
         assert!(format!("{err}").contains("azimuth must be finite"));
     }
 
