@@ -118,6 +118,41 @@ macro_rules! define_test_db {
                     Ok(val)
                 }
             }
+
+            fn try_query_i64_with_f64_param(&self, sql: &str, value: f64) -> Result<i64, String> {
+                let sql_c = CString::new(sql).unwrap();
+                unsafe {
+                    let mut stmt = std::ptr::null_mut();
+                    let rc = sqlite3_prepare_v2(
+                        self.0,
+                        sql_c.as_ptr(),
+                        -1,
+                        &mut stmt,
+                        std::ptr::null_mut(),
+                    );
+                    if rc != SQLITE_OK {
+                        let err = sqlite3_errmsg(self.0);
+                        return Err(CStr::from_ptr(err).to_string_lossy().into_owned());
+                    }
+
+                    let bind_rc = sqlite3_bind_double(stmt, 1, value);
+                    if bind_rc != SQLITE_OK {
+                        sqlite3_finalize(stmt);
+                        let err = sqlite3_errmsg(self.0);
+                        return Err(CStr::from_ptr(err).to_string_lossy().into_owned());
+                    }
+
+                    let step = sqlite3_step(stmt);
+                    if step != SQLITE_ROW {
+                        sqlite3_finalize(stmt);
+                        let err = sqlite3_errmsg(self.0);
+                        return Err(CStr::from_ptr(err).to_string_lossy().into_owned());
+                    }
+                    let val = sqlite3_column_int64(stmt, 0);
+                    sqlite3_finalize(stmt);
+                    Ok(val)
+                }
+            }
         }
 
         impl Drop for $name {

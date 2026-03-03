@@ -958,6 +958,78 @@ fn st_dwithin_geodesic_requires_explicit_4326_srid() {
 }
 
 #[$test_attr]
+fn st_dwithin_rejects_non_finite_distance() {
+    let db = ActiveTestDb::open();
+    for sql in [
+        "SELECT ST_DWithin(ST_Point(0,0), ST_Point(3,4), 1e309)",
+        "SELECT ST_DWithin(ST_Point(0,0), ST_Point(3,4), -1e309)",
+    ] {
+        let err = db
+            .try_query_i64(sql)
+            .expect_err("non-finite distance should be rejected for ST_DWithin");
+        assert!(
+            err.contains("distance must be finite"),
+            "unexpected error for `{sql}`: {err}"
+        );
+    }
+}
+
+#[$test_attr]
+fn st_dwithin_nan_distance_binds_as_null_in_sqlite() {
+    let db = ActiveTestDb::open();
+    let is_null = db
+        .try_query_i64_with_f64_param(
+            "SELECT ST_DWithin(ST_Point(0,0), ST_Point(3,4), ?1) IS NULL",
+            f64::NAN,
+        )
+        .expect("NaN bind should produce a row");
+    assert_eq!(is_null, 1);
+}
+
+#[$test_attr]
+fn st_dwithin_sphere_nan_distance_binds_as_null_in_sqlite() {
+    let db = ActiveTestDb::open();
+    let is_null = db
+        .try_query_i64_with_f64_param(
+            "SELECT ST_DWithinSphere(ST_Point(0,0,4326), ST_Point(1,1,4326), ?1) IS NULL",
+            f64::NAN,
+        )
+        .expect("NaN bind should produce a row");
+    assert_eq!(is_null, 1);
+}
+
+#[$test_attr]
+fn st_dwithin_spheroid_nan_distance_binds_as_null_in_sqlite() {
+    let db = ActiveTestDb::open();
+    let is_null = db
+        .try_query_i64_with_f64_param(
+            "SELECT ST_DWithinSpheroid(ST_Point(0,0,4326), ST_Point(1,1,4326), ?1) IS NULL",
+            f64::NAN,
+        )
+        .expect("NaN bind should produce a row");
+    assert_eq!(is_null, 1);
+}
+
+#[$test_attr]
+fn st_dwithin_geodesic_rejects_non_finite_distance() {
+    let db = ActiveTestDb::open();
+    for sql in [
+        "SELECT ST_DWithinSphere(ST_Point(0,0,4326), ST_Point(1,1,4326), 1e309)",
+        "SELECT ST_DWithinSphere(ST_Point(0,0,4326), ST_Point(1,1,4326), -1e309)",
+        "SELECT ST_DWithinSpheroid(ST_Point(0,0,4326), ST_Point(1,1,4326), 1e309)",
+        "SELECT ST_DWithinSpheroid(ST_Point(0,0,4326), ST_Point(1,1,4326), -1e309)",
+    ] {
+        let err = db
+            .try_query_i64(sql)
+            .expect_err("non-finite distance should be rejected for geodesic ST_DWithin");
+        assert!(
+            err.contains("distance must be finite"),
+            "unexpected error for `{sql}`: {err}"
+        );
+    }
+}
+
+#[$test_attr]
 fn st_dwithin_geodesic_rejects_negative_distance() {
     let db = ActiveTestDb::open();
     let err = db
