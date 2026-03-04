@@ -164,6 +164,12 @@ pub const SQLITE_DETERMINISTIC_FUNCTIONS: &[SqliteFunctionSpec] = &[
     spec!("ST_X", 1, Numeric, "SELECT ST_X(ST_Point(1, 2))"),
     spec!("ST_Y", 1, Numeric, "SELECT ST_Y(ST_Point(1, 2))"),
     spec!(
+        "ST_Z",
+        1,
+        Numeric,
+        "SELECT ST_Z(X'0101000080000000000000F03F00000000000000400000000000000840')"
+    ),
+    spec!(
         "ST_NumPoints",
         1,
         Numeric,

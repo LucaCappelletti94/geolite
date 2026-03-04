@@ -13,8 +13,8 @@ use geo::{BoundingRect, Geometry};
 
 use crate::error::{GeoLiteError, Result};
 use crate::ewkb::{
-    geom_type_name, geometry_type_name, parse_ewkb, set_srid, validate_ewkb_payload, write_ewkb,
-    EwkbHeader,
+    geom_type_name, geometry_type_name, is_empty_point_blob, parse_ewkb, set_srid,
+    validate_ewkb_payload, write_ewkb, EwkbHeader, WKB_POINT,
 };
 use crate::functions::emptiness::{is_empty_geometry, is_empty_point};
 
@@ -204,6 +204,53 @@ pub fn st_y(blob: &[u8]) -> Result<Option<f64>> {
             actual: geometry_type_name(&other),
         }),
     }
+}
+
+/// ST_Z — Z coordinate of a Point when present.
+///
+/// Contract:
+/// - Point Z / Point ZM: returns Z coordinate
+/// - Point (XY), Point M, Point EMPTY: returns NULL
+/// - non-Point input: wrong-type error
+///
+/// # Example
+///
+/// ```
+/// use geolite_core::functions::accessors::st_z;
+/// use geolite_core::functions::io::geom_from_text;
+///
+/// let blob = geom_from_text("POINT(3.5 7.2)", None).unwrap();
+/// assert_eq!(st_z(&blob).unwrap(), None);
+/// ```
+pub fn st_z(blob: &[u8]) -> Result<Option<f64>> {
+    let header = validated_header(blob)?;
+    if header.geom_type != WKB_POINT {
+        return Err(GeoLiteError::WrongType {
+            expected: "Point",
+            actual: geom_type_name(header.geom_type)
+                .strip_prefix("ST_")
+                .unwrap_or("Unknown"),
+        });
+    }
+    if is_empty_point_blob(blob)? || !header.has_z {
+        return Ok(None);
+    }
+
+    let z_offset = header.data_offset + 16;
+    if blob.len() < z_offset + 8 {
+        return Err(GeoLiteError::InvalidEwkb(format!(
+            "point payload truncated: got {} bytes",
+            blob.len()
+        )));
+    }
+    let mut z_bytes = [0u8; 8];
+    z_bytes.copy_from_slice(&blob[z_offset..z_offset + 8]);
+    let z = if header.little_endian {
+        f64::from_le_bytes(z_bytes)
+    } else {
+        f64::from_be_bytes(z_bytes)
+    };
+    Ok(Some(z))
 }
 
 /// ST_NumPoints — number of points in a LineString.
@@ -656,6 +703,20 @@ mod tests {
     use crate::ewkb::{EWKB_M_FLAG, EWKB_Z_FLAG, WKB_POINT};
     use crate::functions::io::geom_from_text;
 
+    fn point_blob(flags: u32) -> Vec<u8> {
+        let mut blob = vec![0x01];
+        blob.extend_from_slice(&(WKB_POINT | flags).to_le_bytes());
+        blob.extend_from_slice(&1.0f64.to_le_bytes());
+        blob.extend_from_slice(&2.0f64.to_le_bytes());
+        if flags & EWKB_Z_FLAG != 0 {
+            blob.extend_from_slice(&3.0f64.to_le_bytes());
+        }
+        if flags & EWKB_M_FLAG != 0 {
+            blob.extend_from_slice(&4.0f64.to_le_bytes());
+        }
+        blob
+    }
+
     // ── Wrong-type errors ──────────────────────────────────────────
 
     #[test]
@@ -675,6 +736,14 @@ mod tests {
         let empty = geom_from_text("POINT EMPTY", None).unwrap();
         assert_eq!(st_x(&empty).unwrap(), None);
         assert_eq!(st_y(&empty).unwrap(), None);
+        assert_eq!(st_z(&empty).unwrap(), None);
+    }
+
+    #[test]
+    fn st_z_on_non_point() {
+        let line = geom_from_text("LINESTRING(0 0,1 1)", None).unwrap();
+        let err = st_z(&line).expect_err("non-point input must error");
+        assert!(format!("{err}").contains("not a Point"));
     }
 
     #[test]
@@ -836,20 +905,6 @@ mod tests {
 
     #[test]
     fn st_ndims_coord_dim_and_zmflag_cover_all_header_flags() {
-        fn point_blob(flags: u32) -> Vec<u8> {
-            let mut blob = vec![0x01];
-            blob.extend_from_slice(&(WKB_POINT | flags).to_le_bytes());
-            blob.extend_from_slice(&1.0f64.to_le_bytes());
-            blob.extend_from_slice(&2.0f64.to_le_bytes());
-            if flags & EWKB_Z_FLAG != 0 {
-                blob.extend_from_slice(&3.0f64.to_le_bytes());
-            }
-            if flags & EWKB_M_FLAG != 0 {
-                blob.extend_from_slice(&4.0f64.to_le_bytes());
-            }
-            blob
-        }
-
         let xy = geom_from_text("POINT(1 2)", None).unwrap();
         assert_eq!(st_ndims(&xy).unwrap(), 2);
         assert_eq!(st_coord_dim(&xy).unwrap(), 2);
@@ -867,6 +922,43 @@ mod tests {
         let zm = point_blob(EWKB_Z_FLAG | EWKB_M_FLAG);
         assert_eq!(st_ndims(&zm).unwrap(), 4);
         assert_eq!(st_zmflag(&zm).unwrap(), 3);
+    }
+
+    #[test]
+    fn st_z_point_dimension_contract() {
+        let xy = geom_from_text("POINT(1 2)", None).unwrap();
+        assert_eq!(st_z(&xy).unwrap(), None);
+
+        let z = point_blob(EWKB_Z_FLAG);
+        assert_eq!(st_z(&z).unwrap(), Some(3.0));
+
+        let m = point_blob(EWKB_M_FLAG);
+        assert_eq!(st_z(&m).unwrap(), None);
+
+        let zm = point_blob(EWKB_Z_FLAG | EWKB_M_FLAG);
+        assert_eq!(st_z(&zm).unwrap(), Some(3.0));
+    }
+
+    #[test]
+    fn st_z_supports_big_endian_ewkb_point_z() {
+        let mut blob = vec![0x00];
+        blob.extend_from_slice(&(WKB_POINT | EWKB_Z_FLAG).to_be_bytes());
+        blob.extend_from_slice(&1.0f64.to_be_bytes());
+        blob.extend_from_slice(&2.0f64.to_be_bytes());
+        blob.extend_from_slice(&3.0f64.to_be_bytes());
+
+        assert_eq!(st_z(&blob).unwrap(), Some(3.0));
+    }
+
+    #[test]
+    fn st_z_rejects_truncated_point_z_payload() {
+        let mut blob = vec![0x01];
+        blob.extend_from_slice(&(WKB_POINT | EWKB_Z_FLAG).to_le_bytes());
+        blob.extend_from_slice(&1.0f64.to_le_bytes());
+        blob.extend_from_slice(&2.0f64.to_le_bytes());
+
+        let err = st_z(&blob).expect_err("truncated Z payload must error");
+        assert!(format!("{err}").contains("point payload truncated"));
     }
 
     #[test]
