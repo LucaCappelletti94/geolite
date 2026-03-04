@@ -98,6 +98,11 @@ pub fn st_dwithin(a: &[u8], b: &[u8], distance: f64) -> Result<bool> {
             "ST_DWithin: distance must be finite".to_string(),
         ));
     }
+    if distance < 0.0 {
+        return Err(GeoLiteError::InvalidInput(
+            "ST_DWithin: distance must be non-negative".to_string(),
+        ));
+    }
     Ok(st_distance(a, b)? <= distance)
 }
 
@@ -564,6 +569,17 @@ mod tests {
                 "unexpected error: {err}"
             );
         }
+    }
+
+    #[test]
+    fn st_dwithin_negative_distance_rejected() {
+        let a = st_point(0.0, 0.0, None).unwrap();
+        let b = st_point(3.0, 4.0, None).unwrap();
+        let err = st_dwithin(&a, &b, -1.0).expect_err("ST_DWithin should reject negative distance");
+        assert!(
+            format!("{err}").contains("distance must be non-negative"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

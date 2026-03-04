@@ -1038,6 +1038,18 @@ fn st_dwithin_rejects_non_finite_distance() {
 }
 
 #[$test_attr]
+fn st_dwithin_rejects_negative_distance() {
+    let db = ActiveTestDb::open();
+    let err = db
+        .try_query_i64("SELECT ST_DWithin(ST_Point(0,0), ST_Point(3,4), -1.0)")
+        .expect_err("negative distance should be rejected for ST_DWithin");
+    assert!(
+        err.contains("distance must be non-negative"),
+        "unexpected error: {err}"
+    );
+}
+
+#[$test_attr]
 fn st_dwithin_nan_distance_binds_as_null_in_sqlite() {
     let db = ActiveTestDb::open();
     let is_null = db
@@ -1047,6 +1059,21 @@ fn st_dwithin_nan_distance_binds_as_null_in_sqlite() {
         )
         .expect("NaN bind should produce a row");
     assert_eq!(is_null, 1);
+}
+
+#[$test_attr]
+fn st_dwithin_negative_distance_bind_is_rejected() {
+    let db = ActiveTestDb::open();
+    let err = db
+        .try_query_i64_with_f64_param(
+            "SELECT ST_DWithin(ST_Point(0,0), ST_Point(3,4), ?1)",
+            -1.0,
+        )
+        .expect_err("negative distance bind should be rejected for ST_DWithin");
+    assert!(
+        err.contains("distance must be non-negative"),
+        "unexpected error: {err}"
+    );
 }
 
 #[$test_attr]
@@ -3340,12 +3367,15 @@ fn spatial_index_knn_nearest_n_geodesic() {
 
 // ── Index speed tests ────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 fn elapsed_since_utc(start: chrono::DateTime<chrono::Utc>) -> std::time::Duration {
     (chrono::Utc::now() - start)
         .to_std()
         .unwrap_or(std::time::Duration::ZERO)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[ignore = "perf-only: run in dedicated perf lane with --ignored"]
 #[$test_attr]
 fn spatial_index_accelerates_intersects_window() {
     let db = ActiveTestDb::open();
@@ -3408,6 +3438,8 @@ fn spatial_index_accelerates_intersects_window() {
     );
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[ignore = "perf-only: run in dedicated perf lane with --ignored"]
 #[$test_attr]
 fn spatial_index_accelerates_knn() {
     let db = ActiveTestDb::open();
@@ -3470,6 +3502,8 @@ fn spatial_index_accelerates_knn() {
 
 // --- Type-aware index strategy benchmark ---
 
+#[cfg(not(target_arch = "wasm32"))]
+#[ignore = "perf-only: run in dedicated perf lane with --ignored"]
 #[$test_attr]
 fn type_partitioned_vs_mixed_index() {
     let db = ActiveTestDb::open();

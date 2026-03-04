@@ -160,6 +160,13 @@ cargo test --workspace
 # Diesel integration (feature-gated)
 cargo test -p geolite-diesel --features sqlite
 cargo check -p geolite-diesel --features postgres
+
+# Perf assertions (ignored in normal test runs)
+cargo test -p geolite-sqlite spatial_index_accelerates_intersects_window -- --ignored --exact --nocapture
+cargo test -p geolite-sqlite spatial_index_accelerates_knn -- --ignored --exact --nocapture
+cargo test -p geolite-sqlite type_partitioned_vs_mixed_index -- --ignored --exact --nocapture
+cargo test -p geolite-diesel --features sqlite indexed_intersects_window_is_faster -- --ignored --exact --nocapture
+cargo test -p geolite-diesel --features sqlite indexed_knn_is_faster -- --ignored --exact --nocapture
 ```
 
 ## Development
@@ -191,6 +198,21 @@ Geodesic and spherical functions (`ST_DistanceSphere`, `ST_DistanceSpheroid`,
 `SRID=4326`.
 
 Inputs with missing SRID or non-4326 SRID are rejected with an error.
+
+## Geodesic input type support
+
+Current support matrix for geodesic pairwise distance and radius predicates:
+
+| Functions | Supported input pairs | Unsupported input pairs |
+|---|---|---|
+| `ST_DistanceSphere`, `ST_DistanceSpheroid`, `ST_DWithinSphere`, `ST_DWithinSpheroid` | Point ↔ Point (non-empty) | Point ↔ LineString, Point ↔ Polygon, LineString ↔ LineString, LineString ↔ Polygon, Polygon ↔ Polygon |
+
+Unsupported pairs fail with an explicit `requires Point` error.
+
+## Distance predicate argument validation
+
+`ST_DWithin`, `ST_DWithinSphere`, and `ST_DWithinSpheroid` require a finite,
+non-negative distance argument.
 
 ## GeoJSON SRID behavior
 

@@ -492,8 +492,9 @@
 //! `ST_DistanceSpheroid` currently accept **Point geometries only**. Both
 //! inputs must be non-empty Points with SRID 4326.
 //!
-//! This matches PostGIS semantics — `ST_DistanceSphere` and
-//! `ST_DistanceSpheroid` are also Point-only in PostGIS. The underlying
+//! This is a current geolite subset, not full PostGIS parity. PostGIS docs
+//! describe broader non-Point support for `ST_DistanceSphere` and
+//! `ST_DistanceSpheroid`; geolite is currently narrower. The underlying
 //! `geo` crate (v0.32) only implements `Distance<Point, Point>` for its
 //! `Haversine` and `Geodesic` metric spaces (unlike Euclidean, which
 //! supports all geometry combinations).

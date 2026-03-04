@@ -300,6 +300,18 @@ fn diesel_select_st_dwithin() {
 }
 
 #[$test_attr]
+fn diesel_select_st_dwithin_rejects_negative_distance() {
+    let mut c = conn();
+    let err = diesel::sql_query(
+        "SELECT ST_DWithin(ST_Point(0,0), ST_Point(3,4), -1.0) AS val",
+    )
+    .get_result::<I32Result>(&mut c)
+    .expect_err("negative distance should be rejected for ST_DWithin");
+    let msg = format!("{err}");
+    assert!(msg.contains("distance must be non-negative"), "got: {msg}");
+}
+
+#[$test_attr]
 fn diesel_select_st_dwithinsphere() {
     use geolite_diesel::functions::*;
 
@@ -1193,12 +1205,15 @@ fn knn_nearest_n_geodesic() {
 
 // ── Index speed tests ────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 fn elapsed_since_utc(start: chrono::DateTime<chrono::Utc>) -> std::time::Duration {
     (chrono::Utc::now() - start)
         .to_std()
         .unwrap_or(std::time::Duration::ZERO)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[ignore = "perf-only: run in dedicated perf lane with --ignored"]
 #[$test_attr]
 fn indexed_intersects_window_is_faster() {
     use geolite_diesel::prelude::*;
@@ -1269,6 +1284,8 @@ fn indexed_intersects_window_is_faster() {
     );
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[ignore = "perf-only: run in dedicated perf lane with --ignored"]
 #[$test_attr]
 fn indexed_knn_is_faster() {
     use geolite_diesel::prelude::*;

@@ -1,0 +1,45 @@
+name: Performance
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 4 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  sqlite-perf:
+    name: SQLite Performance Assertions
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      RUST_TEST_THREADS: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: geolite-sqlite intersects window perf
+        run: cargo test -p geolite-sqlite spatial_index_accelerates_intersects_window -- --ignored --exact --nocapture --test-threads=1
+
+      - name: geolite-sqlite knn perf
+        run: cargo test -p geolite-sqlite spatial_index_accelerates_knn -- --ignored --exact --nocapture --test-threads=1
+
+      - name: geolite-sqlite mixed vs partitioned perf
+        run: cargo test -p geolite-sqlite type_partitioned_vs_mixed_index -- --ignored --exact --nocapture --test-threads=1
+
+      - name: geolite-diesel intersects window perf
+        run: cargo test -p geolite-diesel --features sqlite indexed_intersects_window_is_faster -- --ignored --exact --nocapture --test-threads=1
+
+      - name: geolite-diesel knn perf
+        run: cargo test -p geolite-diesel --features sqlite indexed_knn_is_faster -- --ignored --exact --nocapture --test-threads=1
