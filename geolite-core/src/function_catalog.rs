@@ -1,378 +1,520 @@
 //! Canonical SQLite function catalog shared across adapters.
 
+/// Coarse SQLite output class used by registration smoke tests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SqliteReturnClass {
+    Numeric,
+    Text,
+    Blob,
+    Bool,
+}
+
 /// Canonical SQLite function declaration metadata.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SqliteFunctionSpec {
     pub name: &'static str,
     pub n_arg: i32,
+    pub return_class: SqliteReturnClass,
+    /// Semantic smoke SQL used to validate that callback wiring matches
+    /// signature + return class (not just NULL short-circuit behavior).
+    pub smoke_sql: &'static str,
+}
+
+macro_rules! spec {
+    ($name:literal, $n_arg:literal, $return_class:ident, $smoke_sql:literal) => {
+        SqliteFunctionSpec {
+            name: $name,
+            n_arg: $n_arg,
+            return_class: SqliteReturnClass::$return_class,
+            smoke_sql: $smoke_sql,
+        }
+    };
 }
 
 pub const SQLITE_DETERMINISTIC_FUNCTIONS: &[SqliteFunctionSpec] = &[
     // I/O
-    SqliteFunctionSpec {
-        name: "ST_GeomFromText",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_GeomFromText",
-        n_arg: 2,
-    },
-    SqliteFunctionSpec {
-        name: "ST_GeomFromWKB",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_GeomFromWKB",
-        n_arg: 2,
-    },
-    SqliteFunctionSpec {
-        name: "ST_GeomFromEWKB",
-        n_arg: 1,
-    },
+    spec!(
+        "ST_GeomFromText",
+        1,
+        Blob,
+        "SELECT ST_GeomFromText('POINT(1 2)')"
+    ),
+    spec!(
+        "ST_GeomFromText",
+        2,
+        Blob,
+        "SELECT ST_GeomFromText('POINT(1 2)', 4326)"
+    ),
+    spec!(
+        "ST_GeomFromWKB",
+        1,
+        Blob,
+        "SELECT ST_GeomFromWKB(ST_AsBinary(ST_Point(1, 2)))"
+    ),
+    spec!(
+        "ST_GeomFromWKB",
+        2,
+        Blob,
+        "SELECT ST_GeomFromWKB(ST_AsBinary(ST_Point(1, 2)), 4326)"
+    ),
+    spec!(
+        "ST_GeomFromEWKB",
+        1,
+        Blob,
+        "SELECT ST_GeomFromEWKB(ST_AsEWKB(ST_Point(1, 2, 4326)))"
+    ),
     // PostGIS parity: GeoJSON parser is one-argument only.
     // Use ST_SetSRID(ST_GeomFromGeoJSON(...), srid) to override 4326.
-    SqliteFunctionSpec {
-        name: "ST_GeomFromGeoJSON",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_AsText",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_AsEWKT",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_AsBinary",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_AsEWKB",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_AsGeoJSON",
-        n_arg: 1,
-    },
+    spec!(
+        "ST_GeomFromGeoJSON",
+        1,
+        Blob,
+        "SELECT ST_GeomFromGeoJSON('{\"type\":\"Point\",\"coordinates\":[1,2]}')"
+    ),
+    spec!("ST_AsText", 1, Text, "SELECT ST_AsText(ST_Point(1, 2))"),
+    spec!(
+        "ST_AsEWKT",
+        1,
+        Text,
+        "SELECT ST_AsEWKT(ST_Point(1, 2, 4326))"
+    ),
+    spec!(
+        "ST_AsBinary",
+        1,
+        Blob,
+        "SELECT ST_AsBinary(ST_Point(1, 2))"
+    ),
+    spec!(
+        "ST_AsEWKB",
+        1,
+        Blob,
+        "SELECT ST_AsEWKB(ST_Point(1, 2, 4326))"
+    ),
+    spec!(
+        "ST_AsGeoJSON",
+        1,
+        Text,
+        "SELECT ST_AsGeoJSON(ST_Point(1, 2))"
+    ),
     // Constructors
-    SqliteFunctionSpec {
-        name: "ST_Point",
-        n_arg: 2,
-    },
-    SqliteFunctionSpec {
-        name: "ST_Point",
-        n_arg: 3,
-    },
-    SqliteFunctionSpec {
-        name: "ST_MakePoint",
-        n_arg: 2,
-    },
-    SqliteFunctionSpec {
-        name: "ST_MakeLine",
-        n_arg: 2,
-    },
-    SqliteFunctionSpec {
-        name: "ST_MakePolygon",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_MakeEnvelope",
-        n_arg: 4,
-    },
-    SqliteFunctionSpec {
-        name: "ST_MakeEnvelope",
-        n_arg: 5,
-    },
-    SqliteFunctionSpec {
-        name: "ST_Collect",
-        n_arg: 2,
-    },
-    SqliteFunctionSpec {
-        name: "ST_TileEnvelope",
-        n_arg: 3,
-    },
+    spec!("ST_Point", 2, Blob, "SELECT ST_Point(1, 2)"),
+    spec!("ST_Point", 3, Blob, "SELECT ST_Point(1, 2, 4326)"),
+    spec!("ST_MakePoint", 2, Blob, "SELECT ST_MakePoint(1, 2)"),
+    spec!(
+        "ST_MakeLine",
+        2,
+        Blob,
+        "SELECT ST_MakeLine(ST_Point(0, 0), ST_Point(1, 1))"
+    ),
+    spec!(
+        "ST_MakePolygon",
+        1,
+        Blob,
+        "SELECT ST_MakePolygon(ST_GeomFromText('LINESTRING(0 0,1 0,1 1,0 1,0 0)'))"
+    ),
+    spec!(
+        "ST_MakeEnvelope",
+        4,
+        Blob,
+        "SELECT ST_MakeEnvelope(0, 0, 1, 1)"
+    ),
+    spec!(
+        "ST_MakeEnvelope",
+        5,
+        Blob,
+        "SELECT ST_MakeEnvelope(0, 0, 1, 1, 4326)"
+    ),
+    spec!(
+        "ST_Collect",
+        2,
+        Blob,
+        "SELECT ST_Collect(ST_Point(0, 0), ST_Point(1, 1))"
+    ),
+    spec!(
+        "ST_TileEnvelope",
+        3,
+        Blob,
+        "SELECT ST_TileEnvelope(1, 0, 0)"
+    ),
     // Accessors
-    SqliteFunctionSpec {
-        name: "ST_SRID",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_SetSRID",
-        n_arg: 2,
-    },
-    SqliteFunctionSpec {
-        name: "ST_GeometryType",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "GeometryType",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_NDims",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_CoordDim",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_Zmflag",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_IsEmpty",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_MemSize",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_X",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_Y",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_NumPoints",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_NPoints",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_NumGeometries",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_NumInteriorRings",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_NumInteriorRing",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_NumRings",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_PointN",
-        n_arg: 2,
-    },
-    SqliteFunctionSpec {
-        name: "ST_StartPoint",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_EndPoint",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_ExteriorRing",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_InteriorRingN",
-        n_arg: 2,
-    },
-    SqliteFunctionSpec {
-        name: "ST_GeometryN",
-        n_arg: 2,
-    },
-    SqliteFunctionSpec {
-        name: "ST_Dimension",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_Envelope",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_IsValid",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_IsValidReason",
-        n_arg: 1,
-    },
+    spec!("ST_SRID", 1, Numeric, "SELECT ST_SRID(ST_Point(1, 2, 4326))"),
+    spec!(
+        "ST_SetSRID",
+        2,
+        Blob,
+        "SELECT ST_SetSRID(ST_Point(1, 2), 3857)"
+    ),
+    spec!(
+        "ST_GeometryType",
+        1,
+        Text,
+        "SELECT ST_GeometryType(ST_Point(1, 2))"
+    ),
+    spec!(
+        "GeometryType",
+        1,
+        Text,
+        "SELECT GeometryType(ST_Point(1, 2))"
+    ),
+    spec!("ST_NDims", 1, Numeric, "SELECT ST_NDims(ST_Point(1, 2))"),
+    spec!("ST_CoordDim", 1, Numeric, "SELECT ST_CoordDim(ST_Point(1, 2))"),
+    spec!("ST_Zmflag", 1, Numeric, "SELECT ST_Zmflag(ST_Point(1, 2))"),
+    spec!("ST_IsEmpty", 1, Bool, "SELECT ST_IsEmpty(ST_Point(1, 2))"),
+    spec!("ST_MemSize", 1, Numeric, "SELECT ST_MemSize(ST_Point(1, 2))"),
+    spec!("ST_X", 1, Numeric, "SELECT ST_X(ST_Point(1, 2))"),
+    spec!("ST_Y", 1, Numeric, "SELECT ST_Y(ST_Point(1, 2))"),
+    spec!(
+        "ST_NumPoints",
+        1,
+        Numeric,
+        "SELECT ST_NumPoints(ST_GeomFromText('LINESTRING(0 0,1 1)'))"
+    ),
+    spec!(
+        "ST_NPoints",
+        1,
+        Numeric,
+        "SELECT ST_NPoints(ST_GeomFromText('LINESTRING(0 0,1 1,2 2)'))"
+    ),
+    spec!(
+        "ST_NumGeometries",
+        1,
+        Numeric,
+        "SELECT ST_NumGeometries(ST_GeomFromText('MULTIPOINT((0 0),(1 1))'))"
+    ),
+    spec!(
+        "ST_NumInteriorRings",
+        1,
+        Numeric,
+        "SELECT ST_NumInteriorRings(ST_GeomFromText('POLYGON((0 0,3 0,3 3,0 3,0 0),(1 1,2 1,2 2,1 2,1 1))'))"
+    ),
+    spec!(
+        "ST_NumInteriorRing",
+        1,
+        Numeric,
+        "SELECT ST_NumInteriorRing(ST_GeomFromText('POLYGON((0 0,3 0,3 3,0 3,0 0),(1 1,2 1,2 2,1 2,1 1))'))"
+    ),
+    spec!(
+        "ST_NumRings",
+        1,
+        Numeric,
+        "SELECT ST_NumRings(ST_GeomFromText('POLYGON((0 0,3 0,3 3,0 3,0 0),(1 1,2 1,2 2,1 2,1 1))'))"
+    ),
+    spec!(
+        "ST_PointN",
+        2,
+        Blob,
+        "SELECT ST_PointN(ST_GeomFromText('LINESTRING(0 0,1 1,2 2)'), 2)"
+    ),
+    spec!(
+        "ST_StartPoint",
+        1,
+        Blob,
+        "SELECT ST_StartPoint(ST_GeomFromText('LINESTRING(0 0,1 1,2 2)'))"
+    ),
+    spec!(
+        "ST_EndPoint",
+        1,
+        Blob,
+        "SELECT ST_EndPoint(ST_GeomFromText('LINESTRING(0 0,1 1,2 2)'))"
+    ),
+    spec!(
+        "ST_ExteriorRing",
+        1,
+        Blob,
+        "SELECT ST_ExteriorRing(ST_GeomFromText('POLYGON((0 0,2 0,2 2,0 2,0 0))'))"
+    ),
+    spec!(
+        "ST_InteriorRingN",
+        2,
+        Blob,
+        "SELECT ST_InteriorRingN(ST_GeomFromText('POLYGON((0 0,3 0,3 3,0 3,0 0),(1 1,2 1,2 2,1 2,1 1))'), 1)"
+    ),
+    spec!(
+        "ST_GeometryN",
+        2,
+        Blob,
+        "SELECT ST_GeometryN(ST_GeomFromText('GEOMETRYCOLLECTION(POINT(0 0),LINESTRING(0 0,1 1))'), 2)"
+    ),
+    spec!(
+        "ST_Dimension",
+        1,
+        Numeric,
+        "SELECT ST_Dimension(ST_GeomFromText('LINESTRING(0 0,1 1)'))"
+    ),
+    spec!(
+        "ST_Envelope",
+        1,
+        Blob,
+        "SELECT ST_Envelope(ST_GeomFromText('LINESTRING(0 0,1 1)'))"
+    ),
+    spec!(
+        "ST_IsValid",
+        1,
+        Bool,
+        "SELECT ST_IsValid(ST_GeomFromText('POLYGON((0 0,1 0,1 1,0 1,0 0))'))"
+    ),
+    spec!(
+        "ST_IsValidReason",
+        1,
+        Text,
+        "SELECT ST_IsValidReason(ST_GeomFromText('POLYGON((0 0,1 0,1 1,0 1,0 0))'))"
+    ),
     // Measurement
-    SqliteFunctionSpec {
-        name: "ST_Area",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_Length",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_Length2D",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_Perimeter",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_Perimeter2D",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_Distance",
-        n_arg: 2,
-    },
-    SqliteFunctionSpec {
-        name: "ST_Centroid",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_PointOnSurface",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_HausdorffDistance",
-        n_arg: 2,
-    },
-    SqliteFunctionSpec {
-        name: "ST_XMin",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_XMax",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_YMin",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_YMax",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_DistanceSphere",
-        n_arg: 2,
-    },
-    SqliteFunctionSpec {
-        name: "ST_DistanceSpheroid",
-        n_arg: 2,
-    },
-    SqliteFunctionSpec {
-        name: "ST_LengthSphere",
-        n_arg: 1,
-    },
-    SqliteFunctionSpec {
-        name: "ST_Azimuth",
-        n_arg: 2,
-    },
-    SqliteFunctionSpec {
-        name: "ST_Project",
-        n_arg: 3,
-    },
-    SqliteFunctionSpec {
-        name: "ST_ClosestPoint",
-        n_arg: 2,
-    },
+    spec!(
+        "ST_Area",
+        1,
+        Numeric,
+        "SELECT ST_Area(ST_GeomFromText('POLYGON((0 0,1 0,1 1,0 1,0 0))'))"
+    ),
+    spec!(
+        "ST_Length",
+        1,
+        Numeric,
+        "SELECT ST_Length(ST_GeomFromText('LINESTRING(0 0,1 1)'))"
+    ),
+    spec!(
+        "ST_Length2D",
+        1,
+        Numeric,
+        "SELECT ST_Length2D(ST_GeomFromText('LINESTRING(0 0,1 1)'))"
+    ),
+    spec!(
+        "ST_Perimeter",
+        1,
+        Numeric,
+        "SELECT ST_Perimeter(ST_GeomFromText('POLYGON((0 0,1 0,1 1,0 1,0 0))'))"
+    ),
+    spec!(
+        "ST_Perimeter2D",
+        1,
+        Numeric,
+        "SELECT ST_Perimeter2D(ST_GeomFromText('POLYGON((0 0,1 0,1 1,0 1,0 0))'))"
+    ),
+    spec!(
+        "ST_Distance",
+        2,
+        Numeric,
+        "SELECT ST_Distance(ST_Point(0, 0), ST_Point(3, 4))"
+    ),
+    spec!(
+        "ST_Centroid",
+        1,
+        Blob,
+        "SELECT ST_Centroid(ST_GeomFromText('POLYGON((0 0,2 0,2 2,0 2,0 0))'))"
+    ),
+    spec!(
+        "ST_PointOnSurface",
+        1,
+        Blob,
+        "SELECT ST_PointOnSurface(ST_GeomFromText('POLYGON((0 0,2 0,2 2,0 2,0 0))'))"
+    ),
+    spec!(
+        "ST_HausdorffDistance",
+        2,
+        Numeric,
+        "SELECT ST_HausdorffDistance(ST_GeomFromText('LINESTRING(0 0,1 0)'), ST_GeomFromText('LINESTRING(0 1,1 1)'))"
+    ),
+    spec!(
+        "ST_XMin",
+        1,
+        Numeric,
+        "SELECT ST_XMin(ST_GeomFromText('POLYGON((0 0,2 0,2 2,0 2,0 0))'))"
+    ),
+    spec!(
+        "ST_XMax",
+        1,
+        Numeric,
+        "SELECT ST_XMax(ST_GeomFromText('POLYGON((0 0,2 0,2 2,0 2,0 0))'))"
+    ),
+    spec!(
+        "ST_YMin",
+        1,
+        Numeric,
+        "SELECT ST_YMin(ST_GeomFromText('POLYGON((0 0,2 0,2 2,0 2,0 0))'))"
+    ),
+    spec!(
+        "ST_YMax",
+        1,
+        Numeric,
+        "SELECT ST_YMax(ST_GeomFromText('POLYGON((0 0,2 0,2 2,0 2,0 0))'))"
+    ),
+    spec!(
+        "ST_DistanceSphere",
+        2,
+        Numeric,
+        "SELECT ST_DistanceSphere(ST_Point(0, 0, 4326), ST_Point(0, 1, 4326))"
+    ),
+    spec!(
+        "ST_DistanceSpheroid",
+        2,
+        Numeric,
+        "SELECT ST_DistanceSpheroid(ST_Point(0, 0, 4326), ST_Point(0, 1, 4326))"
+    ),
+    spec!(
+        "ST_LengthSphere",
+        1,
+        Numeric,
+        "SELECT ST_LengthSphere(ST_GeomFromText('LINESTRING(0 0,0 1)', 4326))"
+    ),
+    spec!(
+        "ST_Azimuth",
+        2,
+        Numeric,
+        "SELECT ST_Azimuth(ST_Point(0, 0, 4326), ST_Point(1, 1, 4326))"
+    ),
+    spec!(
+        "ST_Project",
+        3,
+        Blob,
+        "SELECT ST_Project(ST_Point(0, 0, 4326), 1000.0, 0.5)"
+    ),
+    spec!(
+        "ST_ClosestPoint",
+        2,
+        Blob,
+        "SELECT ST_ClosestPoint(ST_GeomFromText('LINESTRING(0 0,2 0)'), ST_Point(1, 1))"
+    ),
     // Operations
-    SqliteFunctionSpec {
-        name: "ST_Union",
-        n_arg: 2,
-    },
-    SqliteFunctionSpec {
-        name: "ST_Intersection",
-        n_arg: 2,
-    },
-    SqliteFunctionSpec {
-        name: "ST_Difference",
-        n_arg: 2,
-    },
-    SqliteFunctionSpec {
-        name: "ST_SymDifference",
-        n_arg: 2,
-    },
-    SqliteFunctionSpec {
-        name: "ST_Buffer",
-        n_arg: 2,
-    },
+    spec!(
+        "ST_Union",
+        2,
+        Blob,
+        "SELECT ST_Union(ST_GeomFromText('POLYGON((0 0,2 0,2 2,0 2,0 0))'), ST_GeomFromText('POLYGON((1 1,3 1,3 3,1 3,1 1))'))"
+    ),
+    spec!(
+        "ST_Intersection",
+        2,
+        Blob,
+        "SELECT ST_Intersection(ST_GeomFromText('POLYGON((0 0,2 0,2 2,0 2,0 0))'), ST_GeomFromText('POLYGON((1 1,3 1,3 3,1 3,1 1))'))"
+    ),
+    spec!(
+        "ST_Difference",
+        2,
+        Blob,
+        "SELECT ST_Difference(ST_GeomFromText('POLYGON((0 0,3 0,3 3,0 3,0 0))'), ST_GeomFromText('POLYGON((1 1,2 1,2 2,1 2,1 1))'))"
+    ),
+    spec!(
+        "ST_SymDifference",
+        2,
+        Blob,
+        "SELECT ST_SymDifference(ST_GeomFromText('POLYGON((0 0,2 0,2 2,0 2,0 0))'), ST_GeomFromText('POLYGON((1 1,3 1,3 3,1 3,1 1))'))"
+    ),
+    spec!(
+        "ST_Buffer",
+        2,
+        Blob,
+        "SELECT ST_Buffer(ST_Point(0, 0), 1.0)"
+    ),
     // Predicates
-    SqliteFunctionSpec {
-        name: "ST_Intersects",
-        n_arg: 2,
-    },
-    SqliteFunctionSpec {
-        name: "ST_Contains",
-        n_arg: 2,
-    },
-    SqliteFunctionSpec {
-        name: "ST_Within",
-        n_arg: 2,
-    },
-    SqliteFunctionSpec {
-        name: "ST_Disjoint",
-        n_arg: 2,
-    },
-    SqliteFunctionSpec {
-        name: "ST_DWithin",
-        n_arg: 3,
-    },
-    SqliteFunctionSpec {
-        name: "ST_DWithinSphere",
-        n_arg: 3,
-    },
-    SqliteFunctionSpec {
-        name: "ST_DWithinSpheroid",
-        n_arg: 3,
-    },
-    SqliteFunctionSpec {
-        name: "ST_Covers",
-        n_arg: 2,
-    },
-    SqliteFunctionSpec {
-        name: "ST_CoveredBy",
-        n_arg: 2,
-    },
-    SqliteFunctionSpec {
-        name: "ST_Equals",
-        n_arg: 2,
-    },
-    SqliteFunctionSpec {
-        name: "ST_Touches",
-        n_arg: 2,
-    },
-    SqliteFunctionSpec {
-        name: "ST_Crosses",
-        n_arg: 2,
-    },
-    SqliteFunctionSpec {
-        name: "ST_Overlaps",
-        n_arg: 2,
-    },
-    SqliteFunctionSpec {
-        name: "ST_Relate",
-        n_arg: 2,
-    },
-    SqliteFunctionSpec {
-        name: "ST_Relate",
-        n_arg: 3,
-    },
-    SqliteFunctionSpec {
-        name: "ST_RelateMatch",
-        n_arg: 2,
-    },
+    spec!(
+        "ST_Intersects",
+        2,
+        Bool,
+        "SELECT ST_Intersects(ST_GeomFromText('LINESTRING(0 0,2 0)'), ST_GeomFromText('LINESTRING(1 -1,1 1)'))"
+    ),
+    spec!(
+        "ST_Contains",
+        2,
+        Bool,
+        "SELECT ST_Contains(ST_GeomFromText('POLYGON((0 0,2 0,2 2,0 2,0 0))'), ST_Point(1, 1))"
+    ),
+    spec!(
+        "ST_Within",
+        2,
+        Bool,
+        "SELECT ST_Within(ST_Point(1, 1), ST_GeomFromText('POLYGON((0 0,2 0,2 2,0 2,0 0))'))"
+    ),
+    spec!(
+        "ST_Disjoint",
+        2,
+        Bool,
+        "SELECT ST_Disjoint(ST_Point(0, 0), ST_Point(5, 5))"
+    ),
+    spec!(
+        "ST_DWithin",
+        3,
+        Bool,
+        "SELECT ST_DWithin(ST_Point(0, 0), ST_Point(3, 4), 5.0)"
+    ),
+    spec!(
+        "ST_DWithinSphere",
+        3,
+        Bool,
+        "SELECT ST_DWithinSphere(ST_Point(0, 0, 4326), ST_Point(0, 1, 4326), 200000.0)"
+    ),
+    spec!(
+        "ST_DWithinSpheroid",
+        3,
+        Bool,
+        "SELECT ST_DWithinSpheroid(ST_Point(0, 0, 4326), ST_Point(0, 1, 4326), 200000.0)"
+    ),
+    spec!(
+        "ST_Covers",
+        2,
+        Bool,
+        "SELECT ST_Covers(ST_GeomFromText('POLYGON((0 0,2 0,2 2,0 2,0 0))'), ST_Point(1, 1))"
+    ),
+    spec!(
+        "ST_CoveredBy",
+        2,
+        Bool,
+        "SELECT ST_CoveredBy(ST_Point(1, 1), ST_GeomFromText('POLYGON((0 0,2 0,2 2,0 2,0 0))'))"
+    ),
+    spec!(
+        "ST_Equals",
+        2,
+        Bool,
+        "SELECT ST_Equals(ST_Point(1, 1), ST_Point(1, 1))"
+    ),
+    spec!(
+        "ST_Touches",
+        2,
+        Bool,
+        "SELECT ST_Touches(ST_GeomFromText('POLYGON((0 0,2 0,2 2,0 2,0 0))'), ST_Point(0, 1))"
+    ),
+    spec!(
+        "ST_Crosses",
+        2,
+        Bool,
+        "SELECT ST_Crosses(ST_GeomFromText('LINESTRING(0 0,2 2)'), ST_GeomFromText('LINESTRING(0 2,2 0)'))"
+    ),
+    spec!(
+        "ST_Overlaps",
+        2,
+        Bool,
+        "SELECT ST_Overlaps(ST_GeomFromText('LINESTRING(0 0,2 0)'), ST_GeomFromText('LINESTRING(1 0,3 0)'))"
+    ),
+    spec!(
+        "ST_Relate",
+        2,
+        Text,
+        "SELECT ST_Relate(ST_Point(0, 0), ST_Point(0, 0))"
+    ),
+    spec!(
+        "ST_Relate",
+        3,
+        Bool,
+        "SELECT ST_Relate(ST_Point(0, 0), ST_Point(0, 0), '0FFFFFFF2')"
+    ),
+    spec!(
+        "ST_RelateMatch",
+        2,
+        Bool,
+        "SELECT ST_RelateMatch('0FFFFFFF2', '0FFFFFFF2')"
+    ),
 ];
 
 pub const SQLITE_DIRECT_ONLY_FUNCTIONS: &[SqliteFunctionSpec] = &[
-    SqliteFunctionSpec {
-        name: "CreateSpatialIndex",
-        n_arg: 2,
-    },
-    SqliteFunctionSpec {
-        name: "DropSpatialIndex",
-        n_arg: 2,
-    },
+    spec!(
+        "CreateSpatialIndex",
+        2,
+        Numeric,
+        "SELECT CreateSpatialIndex('_rt', 'geom')"
+    ),
+    spec!(
+        "DropSpatialIndex",
+        2,
+        Numeric,
+        "SELECT DropSpatialIndex('_rt', 'geom')"
+    ),
 ];
