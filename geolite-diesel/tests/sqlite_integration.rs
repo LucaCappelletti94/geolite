@@ -141,3 +141,60 @@ fn spatial_index_narrows_candidates_deterministically() {
         "expected indexed plan to reference the R-tree/index path, got: {indexed_plan:?}"
     );
 }
+
+#[test]
+fn spatial_index_lifecycle_via_raw_sql() {
+    let mut c = conn();
+
+    sql_query(
+        "CREATE TABLE lifecycle (
+            id   INTEGER PRIMARY KEY,
+            geom BLOB
+        )",
+    )
+    .execute(&mut c)
+    .unwrap();
+
+    // Index lifecycle is intentionally exercised through raw SQL.
+    let created: I32Result = sql_query("SELECT CreateSpatialIndex('lifecycle', 'geom') AS val")
+        .get_result(&mut c)
+        .unwrap();
+    assert_eq!(created.val, Some(1));
+
+    let rtree_table_count: I32Result = sql_query(
+        "SELECT COUNT(*) AS val FROM sqlite_master \
+         WHERE type = 'table' AND name = 'lifecycle_geom_rtree'",
+    )
+    .get_result(&mut c)
+    .unwrap();
+    assert_eq!(rtree_table_count.val, Some(1));
+
+    let trigger_count: I32Result = sql_query(
+        "SELECT COUNT(*) AS val FROM sqlite_master \
+         WHERE type = 'trigger' AND name LIKE 'lifecycle_geom_%'",
+    )
+    .get_result(&mut c)
+    .unwrap();
+    assert!(trigger_count.val.expect("trigger count should not be NULL") > 0);
+
+    let dropped: I32Result = sql_query("SELECT DropSpatialIndex('lifecycle', 'geom') AS val")
+        .get_result(&mut c)
+        .unwrap();
+    assert_eq!(dropped.val, Some(1));
+
+    let rtree_table_count: I32Result = sql_query(
+        "SELECT COUNT(*) AS val FROM sqlite_master \
+         WHERE type = 'table' AND name = 'lifecycle_geom_rtree'",
+    )
+    .get_result(&mut c)
+    .unwrap();
+    assert_eq!(rtree_table_count.val, Some(0));
+
+    let trigger_count: I32Result = sql_query(
+        "SELECT COUNT(*) AS val FROM sqlite_master \
+         WHERE type = 'trigger' AND name LIKE 'lifecycle_geom_%'",
+    )
+    .get_result(&mut c)
+    .unwrap();
+    assert_eq!(trigger_count.val, Some(0));
+}
