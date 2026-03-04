@@ -29,6 +29,8 @@ pub const SQLITE_DETERMINISTIC_FUNCTIONS: &[SqliteFunctionSpec] = &[
         name: "ST_GeomFromEWKB",
         n_arg: 1,
     },
+    // PostGIS parity: GeoJSON parser is one-argument only.
+    // Use ST_SetSRID(ST_GeomFromGeoJSON(...), srid) to override 4326.
     SqliteFunctionSpec {
         name: "ST_GeomFromGeoJSON",
         n_arg: 1,

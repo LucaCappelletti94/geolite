@@ -104,6 +104,9 @@ diesel::define_sql_function! {
 
 diesel::define_sql_function! {
     /// Parse a GeoJSON string into a geometry BLOB.
+    ///
+    /// SQL signature parity follows PostGIS (`ST_GeomFromGeoJSON(json)` only).
+    /// Use `st_setsrid(st_geomfromgeojson(...), srid)` to override SRID.
     fn st_geomfromgeojson(json: Text) -> Nullable<Geometry>;
 }
 

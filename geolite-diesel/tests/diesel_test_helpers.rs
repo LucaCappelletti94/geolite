@@ -122,6 +122,20 @@ fn st_geomfromwkb_srid_execution() {
     assert_eq!(result.val, Some(4326));
 }
 
+#[$test_attr]
+fn st_geomfromgeojson_srid_override_uses_setsrid_execution() {
+    use geolite_diesel::functions::*;
+
+    let mut c = conn();
+    let srid: Option<i32> = diesel::dsl::select(st_srid(st_setsrid(
+        st_geomfromgeojson(r#"{"type":"Point","coordinates":[1,2]}"#),
+        3857,
+    )))
+    .get_result(&mut c)
+    .unwrap();
+    assert_eq!(srid, Some(3857));
+}
+
 // ── ST_Distance ──────────────────────────────────────────────────────────────
 
 #[$test_attr]

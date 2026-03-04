@@ -261,6 +261,23 @@ macro_rules! postgis_tests {
                 .unwrap();
                 assert_eq!(val.unwrap(), "POINT(1 2)");
 
+                // ST_GeomFromGeoJSON defaults to SRID=4326 in PostGIS 3+.
+                let val: Option<i32> = diesel::dsl::select(st_srid(st_geomfromgeojson(
+                    r#"{"type":"Point","coordinates":[1,2]}"#,
+                )))
+                .get_result(&mut c)
+                .unwrap();
+                assert_eq!(val.unwrap(), 4326);
+
+                // SRID overrides should be done with ST_SetSRID(...), not a 2-arg GeoJSON parser.
+                let val: Option<i32> = diesel::dsl::select(st_srid(st_setsrid(
+                    st_geomfromgeojson(r#"{"type":"Point","coordinates":[1,2]}"#),
+                    3857,
+                )))
+                .get_result(&mut c)
+                .unwrap();
+                assert_eq!(val.unwrap(), 3857);
+
                 // ST_Point constructor
                 let val: Option<String> =
                     diesel::dsl::select(st_astext(st_point(3.0, 4.0).nullable()))

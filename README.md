@@ -176,6 +176,18 @@ Geodesic and spherical functions (`ST_DistanceSphere`, `ST_DistanceSpheroid`,
 
 Inputs with missing SRID or non-4326 SRID are rejected with an error.
 
+## GeoJSON SRID behavior
+
+`ST_GeomFromGeoJSON` follows PostGIS signature parity and is exposed as a
+single-argument SQL function. When SRID is not provided in SQL, GeoJSON input
+defaults to `SRID=4326`.
+
+To override SRID, wrap with `ST_SetSRID`:
+
+```sql
+SELECT ST_SetSRID(ST_GeomFromGeoJSON('{"type":"Point","coordinates":[1,2]}'), 3857);
+```
+
 ## License
 
 MIT OR Apache-2.0
