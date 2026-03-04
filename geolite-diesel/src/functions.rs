@@ -36,6 +36,14 @@
 //! let via_matrix: Option<bool> = diesel::dsl::select(st_relate_match(matrix, pattern))
 //!     .get_result(&mut conn)?;
 //! ```
+//!
+//! # Spatial index lifecycle is raw SQL only
+//!
+//! `CreateSpatialIndex` and `DropSpatialIndex` are intentionally **not**
+//! declared as typed Diesel functions in this module.
+//!
+//! Manage index lifecycle with `diesel::sql_query(...)` (or SQL migrations),
+//! which mirrors the PostGIS workflow where index lifecycle is DDL/SQL-driven.
 
 use crate::types::Geometry;
 use diesel::sql_types::{Binary, Double, Integer, Nullable, Text};

@@ -91,6 +91,33 @@ Relate aliases in Diesel:
 - Method-style geometry matching is available via `geolite_diesel::prelude::*`
   as `.st_relate_match_geoms(...)`.
 
+Spatial index lifecycle in Diesel (`sqlite` feature):
+
+- `CreateSpatialIndex` / `DropSpatialIndex` are called through raw SQL
+  (`diesel::sql_query`) intentionally.
+- Typed wrappers are not exposed in `geolite_diesel::functions` for these two
+  lifecycle helpers.
+- For migration-style setup/teardown, prefer SQL migrations.
+
+```rust,no_run
+# #[cfg(feature = "sqlite")]
+# {
+use diesel::prelude::*;
+use diesel::sql_query;
+
+let mut conn = SqliteConnection::establish(":memory:").unwrap();
+sql_query("CREATE TABLE places (id INTEGER PRIMARY KEY, geom BLOB)")
+    .execute(&mut conn)
+    .unwrap();
+sql_query("SELECT CreateSpatialIndex('places', 'geom')")
+    .execute(&mut conn)
+    .unwrap();
+sql_query("SELECT DropSpatialIndex('places', 'geom')")
+    .execute(&mut conn)
+    .unwrap();
+# }
+```
+
 ## Documentation
 
 - `geolite` docs are the source of truth for API surface.
