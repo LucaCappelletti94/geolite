@@ -10,7 +10,7 @@ use std::ffi::{CStr, CString};
 use std::os::raw::c_int;
 
 use geolite_core::function_catalog::{
-    SQLITE_DETERMINISTIC_FUNCTIONS, SQLITE_DIRECT_ONLY_FUNCTIONS,
+    SqliteFunctionSpec, SQLITE_DETERMINISTIC_FUNCTIONS, SQLITE_DIRECT_ONLY_FUNCTIONS,
 };
 use geolite_core::functions::accessors::*;
 use geolite_core::functions::constructors::*;
@@ -1613,13 +1613,164 @@ unsafe extern "C" fn drop_spatial_index_xfunc(
 
 // ── Registration ─────────────────────────────────────────────────────────────
 
-unsafe fn reg(
-    db: *mut sqlite3,
-    name: &str,
-    n_arg: c_int,
-    flags: c_int,
-    xfunc: unsafe extern "C" fn(*mut sqlite3_context, c_int, *mut *mut sqlite3_value),
-) -> c_int {
+type XFunc = unsafe extern "C" fn(*mut sqlite3_context, c_int, *mut *mut sqlite3_value);
+
+#[derive(Clone, Copy)]
+struct SqliteCallbackSpec {
+    name: &'static str,
+    n_arg: i32,
+    xfunc: XFunc,
+}
+
+macro_rules! callback_spec {
+    ($name:literal, $n_arg:literal, $xfunc:ident) => {
+        SqliteCallbackSpec {
+            name: $name,
+            n_arg: $n_arg,
+            xfunc: $xfunc,
+        }
+    };
+}
+
+const SQLITE_DETERMINISTIC_CALLBACKS: &[SqliteCallbackSpec] = &[
+    // I/O
+    callback_spec!("ST_GeomFromText", 1, st_geomfromtext_1_xfunc),
+    callback_spec!("ST_GeomFromText", 2, st_geomfromtext_2_xfunc),
+    callback_spec!("ST_GeomFromWKB", 1, st_geomfromwkb_1_xfunc),
+    callback_spec!("ST_GeomFromWKB", 2, st_geomfromwkb_2_xfunc),
+    callback_spec!("ST_GeomFromEWKB", 1, st_geomfromewkb_xfunc),
+    callback_spec!("ST_GeomFromGeoJSON", 1, st_geomfromgeojson_xfunc),
+    callback_spec!("ST_AsText", 1, st_astext_xfunc),
+    callback_spec!("ST_AsEWKT", 1, st_asewkt_xfunc),
+    callback_spec!("ST_AsBinary", 1, st_asbinary_xfunc),
+    callback_spec!("ST_AsEWKB", 1, st_asewkb_xfunc),
+    callback_spec!("ST_AsGeoJSON", 1, st_asgeojson_xfunc),
+    // Constructors
+    callback_spec!("ST_Point", 2, st_point_2_xfunc),
+    callback_spec!("ST_Point", 3, st_point_3_xfunc),
+    callback_spec!("ST_MakePoint", 2, st_point_2_xfunc),
+    callback_spec!("ST_MakeLine", 2, st_makeline_xfunc),
+    callback_spec!("ST_MakePolygon", 1, st_makepolygon_xfunc),
+    callback_spec!("ST_MakeEnvelope", 4, st_makeenvelope_4_xfunc),
+    callback_spec!("ST_MakeEnvelope", 5, st_makeenvelope_5_xfunc),
+    callback_spec!("ST_Collect", 2, st_collect_xfunc),
+    callback_spec!("ST_TileEnvelope", 3, st_tileenvelope_xfunc),
+    // Accessors
+    callback_spec!("ST_SRID", 1, st_srid_xfunc),
+    callback_spec!("ST_SetSRID", 2, st_setsrid_xfunc),
+    callback_spec!("ST_GeometryType", 1, st_geometrytype_xfunc),
+    callback_spec!("GeometryType", 1, st_geometrytype_xfunc),
+    callback_spec!("ST_NDims", 1, st_ndims_xfunc),
+    callback_spec!("ST_CoordDim", 1, st_coorddim_xfunc),
+    callback_spec!("ST_Zmflag", 1, st_zmflag_xfunc),
+    callback_spec!("ST_IsEmpty", 1, st_isempty_xfunc),
+    callback_spec!("ST_MemSize", 1, st_memsize_xfunc),
+    callback_spec!("ST_X", 1, st_x_xfunc),
+    callback_spec!("ST_Y", 1, st_y_xfunc),
+    callback_spec!("ST_NumPoints", 1, st_numpoints_xfunc),
+    callback_spec!("ST_NPoints", 1, st_npoints_xfunc),
+    callback_spec!("ST_NumGeometries", 1, st_numgeometries_xfunc),
+    callback_spec!("ST_NumInteriorRings", 1, st_numinteriorrings_xfunc),
+    callback_spec!("ST_NumInteriorRing", 1, st_numinteriorrings_xfunc),
+    callback_spec!("ST_NumRings", 1, st_numrings_xfunc),
+    callback_spec!("ST_PointN", 2, st_pointn_xfunc),
+    callback_spec!("ST_StartPoint", 1, st_startpoint_xfunc),
+    callback_spec!("ST_EndPoint", 1, st_endpoint_xfunc),
+    callback_spec!("ST_ExteriorRing", 1, st_exteriorring_xfunc),
+    callback_spec!("ST_InteriorRingN", 2, st_interiorringn_xfunc),
+    callback_spec!("ST_GeometryN", 2, st_geometryn_xfunc),
+    callback_spec!("ST_Dimension", 1, st_dimension_xfunc),
+    callback_spec!("ST_Envelope", 1, st_envelope_xfunc),
+    callback_spec!("ST_IsValid", 1, st_isvalid_xfunc),
+    callback_spec!("ST_IsValidReason", 1, st_isvalidreason_xfunc),
+    // Measurement
+    callback_spec!("ST_Area", 1, st_area_xfunc),
+    callback_spec!("ST_Length", 1, st_length_xfunc),
+    callback_spec!("ST_Length2D", 1, st_length_xfunc),
+    callback_spec!("ST_Perimeter", 1, st_perimeter_xfunc),
+    callback_spec!("ST_Perimeter2D", 1, st_perimeter_xfunc),
+    callback_spec!("ST_Distance", 2, st_distance_xfunc),
+    callback_spec!("ST_Centroid", 1, st_centroid_xfunc),
+    callback_spec!("ST_PointOnSurface", 1, st_pointonsurface_xfunc),
+    callback_spec!("ST_HausdorffDistance", 2, st_hausdorffdistance_xfunc),
+    callback_spec!("ST_XMin", 1, st_xmin_xfunc),
+    callback_spec!("ST_XMax", 1, st_xmax_xfunc),
+    callback_spec!("ST_YMin", 1, st_ymin_xfunc),
+    callback_spec!("ST_YMax", 1, st_ymax_xfunc),
+    callback_spec!("ST_DistanceSphere", 2, st_distancesphere_xfunc),
+    callback_spec!("ST_DistanceSpheroid", 2, st_distancespheroid_xfunc),
+    callback_spec!("ST_LengthSphere", 1, st_lengthsphere_xfunc),
+    callback_spec!("ST_Azimuth", 2, st_azimuth_xfunc),
+    callback_spec!("ST_Project", 3, st_project_xfunc),
+    callback_spec!("ST_ClosestPoint", 2, st_closestpoint_xfunc),
+    // Operations
+    callback_spec!("ST_Union", 2, st_union_xfunc),
+    callback_spec!("ST_Intersection", 2, st_intersection_xfunc),
+    callback_spec!("ST_Difference", 2, st_difference_xfunc),
+    callback_spec!("ST_SymDifference", 2, st_symdifference_xfunc),
+    callback_spec!("ST_Buffer", 2, st_buffer_xfunc),
+    // Predicates
+    callback_spec!("ST_Intersects", 2, st_intersects_xfunc),
+    callback_spec!("ST_Contains", 2, st_contains_xfunc),
+    callback_spec!("ST_Within", 2, st_within_xfunc),
+    callback_spec!("ST_Disjoint", 2, st_disjoint_xfunc),
+    callback_spec!("ST_DWithin", 3, st_dwithin_xfunc),
+    callback_spec!("ST_DWithinSphere", 3, st_dwithinsphere_xfunc),
+    callback_spec!("ST_DWithinSpheroid", 3, st_dwithinspheroid_xfunc),
+    callback_spec!("ST_Covers", 2, st_covers_xfunc),
+    callback_spec!("ST_CoveredBy", 2, st_coveredby_xfunc),
+    callback_spec!("ST_Equals", 2, st_equals_xfunc),
+    callback_spec!("ST_Touches", 2, st_touches_xfunc),
+    callback_spec!("ST_Crosses", 2, st_crosses_xfunc),
+    callback_spec!("ST_Overlaps", 2, st_overlaps_xfunc),
+    callback_spec!("ST_Relate", 2, st_relate_2_xfunc),
+    callback_spec!("ST_Relate", 3, st_relate_3_xfunc),
+    callback_spec!("ST_RelateMatch", 2, st_relatematch_xfunc),
+];
+
+const SQLITE_DIRECT_ONLY_CALLBACKS: &[SqliteCallbackSpec] = &[
+    callback_spec!("CreateSpatialIndex", 2, create_spatial_index_xfunc),
+    callback_spec!("DropSpatialIndex", 2, drop_spatial_index_xfunc),
+];
+
+const fn const_str_eq(a: &str, b: &str) -> bool {
+    let a_bytes = a.as_bytes();
+    let b_bytes = b.as_bytes();
+    if a_bytes.len() != b_bytes.len() {
+        return false;
+    }
+
+    let mut i = 0;
+    while i < a_bytes.len() {
+        if a_bytes[i] != b_bytes[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+const fn assert_catalog_callback_parity(
+    catalog: &[SqliteFunctionSpec],
+    callbacks: &[SqliteCallbackSpec],
+) {
+    assert!(catalog.len() == callbacks.len());
+    let mut i = 0;
+    while i < callbacks.len() {
+        assert!(const_str_eq(callbacks[i].name, catalog[i].name));
+        assert!(callbacks[i].n_arg == catalog[i].n_arg);
+        i += 1;
+    }
+}
+
+const _: () = assert_catalog_callback_parity(
+    SQLITE_DETERMINISTIC_FUNCTIONS,
+    SQLITE_DETERMINISTIC_CALLBACKS,
+);
+const _: () =
+    assert_catalog_callback_parity(SQLITE_DIRECT_ONLY_FUNCTIONS, SQLITE_DIRECT_ONLY_CALLBACKS);
+
+unsafe fn reg(db: *mut sqlite3, name: &str, n_arg: c_int, flags: c_int, xfunc: XFunc) -> c_int {
     let c_name = match CString::new(name) {
         Ok(v) => v,
         Err(_) => return SQLITE_ERROR,
@@ -1644,131 +1795,27 @@ unsafe fn reg(
 /// # Safety
 /// `db` must be a valid, open SQLite database handle for the lifetime of the call.
 pub unsafe fn register_functions(db: *mut sqlite3) -> c_int {
-    type XFunc = unsafe extern "C" fn(*mut sqlite3_context, c_int, *mut *mut sqlite3_value);
-
-    // Callback order must match `SQLITE_DETERMINISTIC_FUNCTIONS`.
-    let deterministic_callbacks: &[XFunc] = &[
-        // I/O
-        st_geomfromtext_1_xfunc,
-        st_geomfromtext_2_xfunc,
-        st_geomfromwkb_1_xfunc,
-        st_geomfromwkb_2_xfunc,
-        st_geomfromewkb_xfunc,
-        st_geomfromgeojson_xfunc,
-        st_astext_xfunc,
-        st_asewkt_xfunc,
-        st_asbinary_xfunc,
-        st_asewkb_xfunc,
-        st_asgeojson_xfunc,
-        // Constructors
-        st_point_2_xfunc,
-        st_point_3_xfunc,
-        st_point_2_xfunc,
-        st_makeline_xfunc,
-        st_makepolygon_xfunc,
-        st_makeenvelope_4_xfunc,
-        st_makeenvelope_5_xfunc,
-        st_collect_xfunc,
-        st_tileenvelope_xfunc,
-        // Accessors
-        st_srid_xfunc,
-        st_setsrid_xfunc,
-        st_geometrytype_xfunc,
-        st_geometrytype_xfunc,
-        st_ndims_xfunc,
-        st_coorddim_xfunc,
-        st_zmflag_xfunc,
-        st_isempty_xfunc,
-        st_memsize_xfunc,
-        st_x_xfunc,
-        st_y_xfunc,
-        st_numpoints_xfunc,
-        st_npoints_xfunc,
-        st_numgeometries_xfunc,
-        st_numinteriorrings_xfunc,
-        st_numinteriorrings_xfunc,
-        st_numrings_xfunc,
-        st_pointn_xfunc,
-        st_startpoint_xfunc,
-        st_endpoint_xfunc,
-        st_exteriorring_xfunc,
-        st_interiorringn_xfunc,
-        st_geometryn_xfunc,
-        st_dimension_xfunc,
-        st_envelope_xfunc,
-        st_isvalid_xfunc,
-        st_isvalidreason_xfunc,
-        // Measurement
-        st_area_xfunc,
-        st_length_xfunc,
-        st_length_xfunc,
-        st_perimeter_xfunc,
-        st_perimeter_xfunc,
-        st_distance_xfunc,
-        st_centroid_xfunc,
-        st_pointonsurface_xfunc,
-        st_hausdorffdistance_xfunc,
-        st_xmin_xfunc,
-        st_xmax_xfunc,
-        st_ymin_xfunc,
-        st_ymax_xfunc,
-        st_distancesphere_xfunc,
-        st_distancespheroid_xfunc,
-        st_lengthsphere_xfunc,
-        st_azimuth_xfunc,
-        st_project_xfunc,
-        st_closestpoint_xfunc,
-        // Operations
-        st_union_xfunc,
-        st_intersection_xfunc,
-        st_difference_xfunc,
-        st_symdifference_xfunc,
-        st_buffer_xfunc,
-        // Predicates
-        st_intersects_xfunc,
-        st_contains_xfunc,
-        st_within_xfunc,
-        st_disjoint_xfunc,
-        st_dwithin_xfunc,
-        st_dwithinsphere_xfunc,
-        st_dwithinspheroid_xfunc,
-        st_covers_xfunc,
-        st_coveredby_xfunc,
-        st_equals_xfunc,
-        st_touches_xfunc,
-        st_crosses_xfunc,
-        st_overlaps_xfunc,
-        st_relate_2_xfunc,
-        st_relate_3_xfunc,
-        st_relatematch_xfunc,
-    ];
-
-    if deterministic_callbacks.len() != SQLITE_DETERMINISTIC_FUNCTIONS.len() {
-        return SQLITE_ERROR;
-    }
-
-    for (spec, xfunc) in SQLITE_DETERMINISTIC_FUNCTIONS
-        .iter()
-        .zip(deterministic_callbacks.iter())
-    {
-        let rc = reg(db, spec.name, spec.n_arg as c_int, DET, *xfunc);
+    for callback in SQLITE_DETERMINISTIC_CALLBACKS {
+        let rc = reg(
+            db,
+            callback.name,
+            callback.n_arg as c_int,
+            DET,
+            callback.xfunc,
+        );
         if rc != SQLITE_OK {
             return rc;
         }
     }
 
-    // Callback order must match `SQLITE_DIRECT_ONLY_FUNCTIONS`.
-    let direct_only_callbacks: &[XFunc] = &[create_spatial_index_xfunc, drop_spatial_index_xfunc];
-
-    if direct_only_callbacks.len() != SQLITE_DIRECT_ONLY_FUNCTIONS.len() {
-        return SQLITE_ERROR;
-    }
-
-    for (spec, xfunc) in SQLITE_DIRECT_ONLY_FUNCTIONS
-        .iter()
-        .zip(direct_only_callbacks.iter())
-    {
-        let rc = reg(db, spec.name, spec.n_arg as c_int, DIRECT, *xfunc);
+    for callback in SQLITE_DIRECT_ONLY_CALLBACKS {
+        let rc = reg(
+            db,
+            callback.name,
+            callback.n_arg as c_int,
+            DIRECT,
+            callback.xfunc,
+        );
         if rc != SQLITE_OK {
             return rc;
         }
@@ -1809,6 +1856,7 @@ pub unsafe extern "C" fn sqlite3_geolitesqlite_init(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use geolite_core::function_catalog::SqliteReturnClass;
     use std::ffi::{CStr, CString};
     use std::ptr;
 
@@ -1868,11 +1916,109 @@ mod tests {
         Ok(value)
     }
 
-    fn null_call_sql(name: &str, n_arg: i32) -> String {
-        let args = std::iter::repeat_n("NULL", n_arg as usize)
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!("SELECT {name}({args})")
+    #[derive(Debug)]
+    enum QueryValue {
+        Null,
+        Integer(i64),
+        Float(f64),
+        Text(String),
+        Blob(Vec<u8>),
+    }
+
+    unsafe fn query_value(db: *mut sqlite3, sql: &str) -> Result<QueryValue, String> {
+        let sql_c = CString::new(sql).expect("valid SQL");
+        let mut stmt = ptr::null_mut();
+        let rc = sqlite3_prepare_v2(db, sql_c.as_ptr(), -1, &mut stmt, ptr::null_mut());
+        if rc != SQLITE_OK {
+            let err = CStr::from_ptr(sqlite3_errmsg(db))
+                .to_string_lossy()
+                .into_owned();
+            return Err(err);
+        }
+
+        let step = sqlite3_step(stmt);
+        if step != SQLITE_ROW {
+            sqlite3_finalize(stmt);
+            let err = CStr::from_ptr(sqlite3_errmsg(db))
+                .to_string_lossy()
+                .into_owned();
+            return Err(err);
+        }
+
+        let value = match sqlite3_column_type(stmt, 0) {
+            SQLITE_NULL => QueryValue::Null,
+            SQLITE_INTEGER => QueryValue::Integer(sqlite3_column_int64(stmt, 0)),
+            SQLITE_FLOAT => QueryValue::Float(sqlite3_column_double(stmt, 0)),
+            SQLITE_TEXT => {
+                let ptr = sqlite3_column_text(stmt, 0);
+                if ptr.is_null() {
+                    sqlite3_finalize(stmt);
+                    return Err("unexpected NULL text pointer for SQLITE_TEXT".to_string());
+                }
+                QueryValue::Text(CStr::from_ptr(ptr.cast()).to_string_lossy().into_owned())
+            }
+            SQLITE_BLOB => {
+                let len = sqlite3_column_bytes(stmt, 0) as usize;
+                let ptr = sqlite3_column_blob(stmt, 0) as *const u8;
+                if len == 0 {
+                    QueryValue::Blob(Vec::new())
+                } else if ptr.is_null() {
+                    sqlite3_finalize(stmt);
+                    return Err("unexpected NULL blob pointer for SQLITE_BLOB".to_string());
+                } else {
+                    QueryValue::Blob(std::slice::from_raw_parts(ptr, len).to_vec())
+                }
+            }
+            other => {
+                sqlite3_finalize(stmt);
+                return Err(format!("unexpected SQLite type code: {other}"));
+            }
+        };
+
+        sqlite3_finalize(stmt);
+        Ok(value)
+    }
+
+    fn assert_return_class(spec: &SqliteFunctionSpec, value: QueryValue) {
+        match (spec.return_class, value) {
+            (SqliteReturnClass::Numeric, QueryValue::Integer(_)) => {}
+            (SqliteReturnClass::Numeric, QueryValue::Float(v)) => {
+                assert!(
+                    v.is_finite(),
+                    "non-finite numeric for {}({})",
+                    spec.name,
+                    spec.n_arg
+                );
+            }
+            (SqliteReturnClass::Text, QueryValue::Text(v)) => {
+                assert!(
+                    !v.is_empty(),
+                    "empty text smoke result for {}({})",
+                    spec.name,
+                    spec.n_arg
+                );
+            }
+            (SqliteReturnClass::Blob, QueryValue::Blob(v)) => {
+                assert!(
+                    !v.is_empty(),
+                    "empty blob smoke result for {}({})",
+                    spec.name,
+                    spec.n_arg
+                );
+            }
+            (SqliteReturnClass::Bool, QueryValue::Integer(v)) => {
+                assert!(
+                    v == 0 || v == 1,
+                    "bool smoke result must be 0/1 for {}({}), got {v}",
+                    spec.name,
+                    spec.n_arg
+                );
+            }
+            (_, got) => panic!(
+                "unexpected smoke return class for {}({}): expected {:?}, got {:?}",
+                spec.name, spec.n_arg, spec.return_class, got
+            ),
+        }
     }
 
     #[test]
@@ -1956,7 +2102,7 @@ mod tests {
     }
 
     #[test]
-    fn register_functions_covers_full_catalog() {
+    fn register_functions_semantic_smoke_covers_full_catalog() {
         unsafe {
             let db = open_db();
 
@@ -1964,56 +2110,40 @@ mod tests {
             assert_eq!(rc, SQLITE_OK, "register_functions should succeed");
 
             for spec in SQLITE_DETERMINISTIC_FUNCTIONS {
-                let sql = null_call_sql(spec.name, spec.n_arg);
-                let result = query_i64(db, &sql);
-                assert!(
-                    result.is_ok(),
-                    "deterministic function registration missing or invalid for {}({}): {result:?}",
-                    spec.name,
-                    spec.n_arg
-                );
+                let value = query_value(db, spec.smoke_sql).unwrap_or_else(|err| {
+                    panic!(
+                        "deterministic function semantic smoke failed for {}({}) using `{}`: {err}",
+                        spec.name, spec.n_arg, spec.smoke_sql
+                    )
+                });
+                assert_return_class(spec, value);
             }
 
-            // Direct-only callbacks are validated with valid SQL to avoid
-            // false failures from argument validation paths.
+            close_db(db);
+        }
+    }
+
+    #[test]
+    fn register_functions_direct_only_semantic_smoke() {
+        unsafe {
+            let db = open_db();
+
+            let rc = register_functions(db);
+            assert_eq!(rc, SQLITE_OK, "register_functions should succeed");
+
             assert_eq!(
                 exec_sql_inner(db, "CREATE TABLE _rt(geom BLOB)", None),
                 SQLITE_OK
             );
 
-            let mut created = false;
             for spec in SQLITE_DIRECT_ONLY_FUNCTIONS {
-                match (spec.name, spec.n_arg) {
-                    ("CreateSpatialIndex", 2) => {
-                        let result = query_i64(db, "SELECT CreateSpatialIndex('_rt', 'geom')");
-                        assert!(
-                            result.is_ok(),
-                            "direct-only function registration missing or invalid for CreateSpatialIndex(2): {result:?}"
-                        );
-                        created = true;
-                    }
-                    ("DropSpatialIndex", 2) => {
-                        if !created {
-                            let create_result =
-                                query_i64(db, "SELECT CreateSpatialIndex('_rt', 'geom')");
-                            assert!(
-                                create_result.is_ok(),
-                                "direct-only function registration missing or invalid for CreateSpatialIndex(2): {create_result:?}"
-                            );
-                            created = true;
-                        }
-
-                        let result = query_i64(db, "SELECT DropSpatialIndex('_rt', 'geom')");
-                        assert!(
-                            result.is_ok(),
-                            "direct-only function registration missing or invalid for DropSpatialIndex(2): {result:?}"
-                        );
-                    }
-                    _ => panic!(
-                        "unhandled direct-only function in coverage test: {}({})",
-                        spec.name, spec.n_arg
-                    ),
-                }
+                let value = query_value(db, spec.smoke_sql).unwrap_or_else(|err| {
+                    panic!(
+                        "direct-only function semantic smoke failed for {}({}) using `{}`: {err}",
+                        spec.name, spec.n_arg, spec.smoke_sql
+                    )
+                });
+                assert_return_class(spec, value);
             }
 
             close_db(db);
