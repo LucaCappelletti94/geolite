@@ -1,0 +1,81 @@
+name: Packaging
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "30 5 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  symbol-exports:
+    name: Symbol Exports (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build geolite-sqlite cdylib
+        run: cargo build -p geolite-sqlite
+
+      - name: Locate shared library artifact
+        id: artifact
+        run: |
+          set -euo pipefail
+          target_root="${CARGO_TARGET_DIR:-target}"
+          build_dir="${target_root}/debug"
+          artifact=""
+          candidates=(
+            "${build_dir}/libgeolite_sqlite.so"
+            "${build_dir}/deps/libgeolite_sqlite.so"
+          )
+          for candidate in "${candidates[@]}"; do
+            if [[ -f "${candidate}" ]]; then
+              artifact="${candidate}"
+              break
+            fi
+          done
+          if [[ -z "${artifact}" ]]; then
+            found="$(find "${build_dir}" -maxdepth 3 -type f -name "libgeolite_sqlite.so" | head -n 1 || true)"
+            if [[ -n "${found}" ]]; then
+              artifact="${found}"
+            fi
+          fi
+          if [[ -z "${artifact}" ]]; then
+            echo "::error::Could not locate libgeolite_sqlite.so under ${build_dir}"
+            find "${build_dir}" -maxdepth 3 -type f -name "*geolite*" -print || true
+            exit 1
+          fi
+          echo "artifact=${artifact}" >> "${GITHUB_OUTPUT}"
+          echo "Using artifact: ${artifact}"
+
+      - name: Verify exported SQLite entrypoint symbols
+        run: |
+          set -euo pipefail
+          if ! command -v nm >/dev/null 2>&1; then
+            echo "nm not available on runner; skipping symbol export check"
+            exit 0
+          fi
+          artifact="${{ steps.artifact.outputs.artifact }}"
+          symbols="$(nm -D "${artifact}")"
+          if ! grep -q "sqlite3_geolite_init" <<< "${symbols}"; then
+            echo "::error::missing sqlite3_geolite_init export in ${artifact}"
+            exit 1
+          fi
+          if ! grep -q "sqlite3_geolitesqlite_init" <<< "${symbols}"; then
+            echo "::error::missing sqlite3_geolitesqlite_init export in ${artifact}"
+            exit 1
+          fi
+          echo "Required entrypoint symbols are present in ${artifact}"
