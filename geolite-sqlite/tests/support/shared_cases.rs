@@ -498,6 +498,41 @@ fn st_x_y_point_empty_returns_null() {
 }
 
 #[$test_attr]
+fn st_z_contract() {
+    let db = ActiveTestDb::open();
+
+    assert!(db.query_is_null("SELECT ST_Z(ST_Point(3.0, 4.0))"));
+    assert!(db.query_is_null("SELECT ST_Z(ST_GeomFromText('POINT EMPTY'))"));
+
+    let z = db.query_f64("SELECT ST_Z(X'0101000080000000000000F03F00000000000000400000000000000840')");
+    assert!((z - 3.0).abs() < 1e-10, "z = {z}");
+
+    let zm =
+        db.query_f64("SELECT ST_Z(X'01010000C0000000000000F03F000000000000004000000000000008400000000000001040')");
+    assert!((zm - 3.0).abs() < 1e-10, "zm z = {zm}");
+
+    assert!(db.query_is_null(
+        "SELECT ST_Z(X'0101000040000000000000F03F00000000000000400000000000001040')"
+    ));
+}
+
+#[$test_attr]
+fn st_z_supports_big_endian_ewkb() {
+    let db = ActiveTestDb::open();
+    let z = db.query_f64("SELECT ST_Z(X'00800000013FF000000000000040000000000000004008000000000000')");
+    assert!((z - 3.0).abs() < 1e-10, "z = {z}");
+}
+
+#[$test_attr]
+fn st_z_rejects_non_point() {
+    let db = ActiveTestDb::open();
+    let err = db
+        .try_query_i64("SELECT CAST(ST_Z(ST_GeomFromText('LINESTRING(0 0,1 1)')) AS INTEGER)")
+        .expect_err("ST_Z on non-point input must error");
+    assert!(err.contains("Point"), "unexpected error message: {err}");
+}
+
+#[$test_attr]
 fn st_is_empty() {
     let db = ActiveTestDb::open();
     let e = db.query_i64("SELECT ST_IsEmpty(ST_GeomFromText('POINT(0 0)'))");
