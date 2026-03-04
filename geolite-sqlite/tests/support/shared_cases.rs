@@ -155,6 +155,34 @@ fn geomfromgeojson_default_srid() {
     assert_eq!(srid, 4326);
 }
 
+#[$test_attr]
+fn geomfromgeojson_srid_override_uses_setsrid() {
+    let db = ActiveTestDb::open();
+    let srid = db.query_i64(
+        "SELECT ST_SRID(ST_SetSRID(ST_GeomFromGeoJSON('{\"type\":\"Point\",\"coordinates\":[1,2]}'), 3857))",
+    );
+    assert_eq!(srid, 3857);
+}
+
+#[$test_attr]
+fn geomfromgeojson_rejects_two_arg_signature() {
+    let db = ActiveTestDb::open();
+    let err = db
+        .try_query_i64(
+            "SELECT ST_SRID(ST_GeomFromGeoJSON('{\"type\":\"Point\",\"coordinates\":[1,2]}', 3857))",
+        )
+        .expect_err("two-arg ST_GeomFromGeoJSON should not be registered");
+    let normalized = err.to_ascii_lowercase();
+    assert!(
+        normalized.contains("wrong number of arguments"),
+        "unexpected error message: {err}"
+    );
+    assert!(
+        err.contains("ST_GeomFromGeoJSON"),
+        "error should mention ST_GeomFromGeoJSON: {err}"
+    );
+}
+
 // ── Constructors ──────────────────────────────────────────────────────────────
 
 #[$test_attr]
