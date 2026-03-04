@@ -1123,12 +1123,157 @@ unsafe fn sqlite_master_lookup_text(
     Ok(result)
 }
 
-unsafe fn ensure_spatial_index_name_not_colliding(
+const SPATIAL_INDEX_CATALOG_TABLE: &str = "geolite_spatial_index_catalog";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SpatialIndexOwnership {
+    Owned,
+    Absent,
+}
+
+unsafe fn ensure_spatial_index_catalog_table(
+    db: *mut sqlite3,
+    ctx: *mut sqlite3_context,
+    label: &str,
+) -> bool {
+    let sql = format!(
+        "CREATE TABLE IF NOT EXISTS [{SPATIAL_INDEX_CATALOG_TABLE}] (\
+         prefix TEXT PRIMARY KEY, \
+         table_name TEXT NOT NULL, \
+         column_name TEXT NOT NULL, \
+         UNIQUE(table_name, column_name)\
+         )"
+    );
+    if exec_sql_silent(db, &sql) == SQLITE_OK {
+        return true;
+    }
+
+    let err = CStr::from_ptr(sqlite3_errmsg(db))
+        .to_string_lossy()
+        .into_owned();
+    set_error(
+        ctx,
+        &format!("{label}: failed to ensure spatial index catalog: {err}"),
+    );
+    false
+}
+
+unsafe fn lookup_spatial_index_catalog_owner(
+    db: *mut sqlite3,
+    prefix: &str,
+) -> std::result::Result<Option<(String, String)>, String> {
+    let sql = format!(
+        "SELECT table_name FROM [{SPATIAL_INDEX_CATALOG_TABLE}] \
+         WHERE prefix = '{prefix}' LIMIT 1"
+    );
+    let owner_table = sqlite_master_lookup_text(db, &sql)?;
+    let Some(owner_table) = owner_table else {
+        return Ok(None);
+    };
+
+    let sql = format!(
+        "SELECT column_name FROM [{SPATIAL_INDEX_CATALOG_TABLE}] \
+         WHERE prefix = '{prefix}' LIMIT 1"
+    );
+    let owner_column = sqlite_master_lookup_text(db, &sql)?;
+    let Some(owner_column) = owner_column else {
+        return Err(format!(
+            "internal error: catalog row for prefix [{prefix}] is missing column_name"
+        ));
+    };
+    Ok(Some((owner_table, owner_column)))
+}
+
+unsafe fn managed_spatial_index_objects_exist(
+    db: *mut sqlite3,
+    prefix: &str,
+) -> std::result::Result<bool, String> {
+    let rtree_name = format!("{prefix}_rtree");
+    let sql = format!(
+        "SELECT name FROM sqlite_master WHERE name IN (\
+         '{rtree_name}', \
+         '{rtree_name}_node', \
+         '{rtree_name}_parent', \
+         '{rtree_name}_rowid', \
+         '{prefix}_insert', \
+         '{prefix}_update', \
+         '{prefix}_delete'\
+         ) LIMIT 1"
+    );
+    Ok(sqlite_master_lookup_text(db, &sql)?.is_some())
+}
+
+unsafe fn ensure_spatial_index_table_shape(
+    db: *mut sqlite3,
+    ctx: *mut sqlite3_context,
+    prefix: &str,
+    label: &str,
+) -> bool {
+    // The managed object `{prefix}_rtree` must be either absent or a real
+    // SQLite table backed by the expected R-tree shadow tables.
+    let rtree_name = format!("{prefix}_rtree");
+    let sql = format!("SELECT type FROM sqlite_master WHERE name = '{rtree_name}' LIMIT 1");
+    let object_type = match sqlite_master_lookup_text(db, &sql) {
+        Ok(v) => v,
+        Err(e) => {
+            set_error(
+                ctx,
+                &format!("{label}: failed to inspect sqlite_master: {e}"),
+            );
+            return false;
+        }
+    };
+    if let Some(object_type) = object_type {
+        if object_type != "table" {
+            set_error(
+                ctx,
+                &format!(
+                    "{label}: unexpected sqlite_master entry for [{rtree_name}] \
+                     (type [{object_type}]); expected table"
+                ),
+            );
+            return false;
+        }
+
+        for shadow_suffix in &["_node", "_parent", "_rowid"] {
+            let shadow_name = format!("{rtree_name}{shadow_suffix}");
+            let sql = format!(
+                "SELECT name FROM sqlite_master \
+                 WHERE type = 'table' AND name = '{shadow_name}' LIMIT 1"
+            );
+            let shadow_exists = match sqlite_master_lookup_text(db, &sql) {
+                Ok(v) => v,
+                Err(e) => {
+                    set_error(
+                        ctx,
+                        &format!("{label}: failed to inspect sqlite_master: {e}"),
+                    );
+                    return false;
+                }
+            };
+            if shadow_exists.is_none() {
+                set_error(
+                    ctx,
+                    &format!(
+                        "{label}: existing table [{rtree_name}] is not an R-tree index \
+                         managed by geolite (missing shadow table [{shadow_name}])"
+                    ),
+                );
+                return false;
+            }
+        }
+    }
+
+    true
+}
+
+unsafe fn ensure_spatial_index_objects_owned_by_table(
     db: *mut sqlite3,
     ctx: *mut sqlite3_context,
     table: &str,
     column: &str,
-) -> bool {
+    label: &str,
+) -> Option<SpatialIndexOwnership> {
     // Object names are built as `{table}_{column}_...`. Different input pairs
     // can collide (e.g. `a_b`+`c` vs `a`+`b_c`). Detect and fail fast instead
     // of silently reusing another table's triggers/index objects.
@@ -1144,9 +1289,9 @@ unsafe fn ensure_spatial_index_name_not_colliding(
             Err(e) => {
                 set_error(
                     ctx,
-                    &format!("CreateSpatialIndex: failed to inspect sqlite_master: {e}"),
+                    &format!("{label}: failed to inspect sqlite_master: {e}"),
                 );
-                return false;
+                return None;
             }
         };
         if let Some(owner) = owner {
@@ -1154,15 +1299,62 @@ unsafe fn ensure_spatial_index_name_not_colliding(
                 set_error(
                     ctx,
                     &format!(
-                        "CreateSpatialIndex: naming collision for trigger [{trigger_name}] \
+                        "{label}: naming collision for trigger [{trigger_name}] \
                          between tables [{owner}] and [{table}]"
                     ),
                 );
-                return false;
+                return None;
             }
         }
     }
-    true
+
+    if !ensure_spatial_index_table_shape(db, ctx, &prefix, label) {
+        return None;
+    }
+
+    let owner = match lookup_spatial_index_catalog_owner(db, &prefix) {
+        Ok(v) => v,
+        Err(e) => {
+            set_error(ctx, &format!("{label}: failed to inspect catalog: {e}"));
+            return None;
+        }
+    };
+    if let Some((owner_table, owner_column)) = owner {
+        if owner_table == table && owner_column == column {
+            return Some(SpatialIndexOwnership::Owned);
+        }
+        set_error(
+            ctx,
+            &format!(
+                "{label}: naming collision for managed prefix [{prefix}] \
+                 between [{owner_table}.{owner_column}] and [{table}.{column}]"
+            ),
+        );
+        return None;
+    }
+
+    let objects_exist = match managed_spatial_index_objects_exist(db, &prefix) {
+        Ok(v) => v,
+        Err(e) => {
+            set_error(
+                ctx,
+                &format!("{label}: failed to inspect sqlite_master: {e}"),
+            );
+            return None;
+        }
+    };
+    if objects_exist {
+        set_error(
+            ctx,
+            &format!(
+                "{label}: cannot prove ownership for [{prefix}] because managed objects exist \
+                 without an ownership marker"
+            ),
+        );
+        return None;
+    }
+
+    Some(SpatialIndexOwnership::Absent)
 }
 
 // ── Spatial index callbacks ──────────────────────────────────────────────────
@@ -1230,14 +1422,23 @@ unsafe extern "C" fn create_spatial_index_xfunc(
         };
 
         let db = sqlite3_context_db_handle(ctx);
-        let rtree = format!("{table}_{column}_rtree");
+        let prefix = format!("{table}_{column}");
+        let rtree = format!("{prefix}_rtree");
         let savepoint = "geolite_create_spatial_index";
 
-        if !ensure_spatial_index_name_not_colliding(db, ctx, table, column) {
+        if exec_sql(db, ctx, &format!("SAVEPOINT {savepoint}")) != SQLITE_OK {
             return;
         }
 
-        if exec_sql(db, ctx, &format!("SAVEPOINT {savepoint}")) != SQLITE_OK {
+        if !ensure_spatial_index_catalog_table(db, ctx, "CreateSpatialIndex") {
+            rollback_savepoint(db, ctx, savepoint);
+            return;
+        }
+
+        if ensure_spatial_index_objects_owned_by_table(db, ctx, table, column, "CreateSpatialIndex")
+            .is_none()
+        {
+            rollback_savepoint(db, ctx, savepoint);
             return;
         }
 
@@ -1317,6 +1518,18 @@ unsafe extern "C" fn create_spatial_index_xfunc(
             return;
         }
 
+        let sql = format!(
+            "INSERT INTO [{SPATIAL_INDEX_CATALOG_TABLE}] (prefix, table_name, column_name) \
+             VALUES ('{prefix}', '{table}', '{column}') \
+             ON CONFLICT(prefix) DO UPDATE SET \
+             table_name = excluded.table_name, \
+             column_name = excluded.column_name"
+        );
+        if exec_sql(db, ctx, &sql) != SQLITE_OK {
+            rollback_savepoint(db, ctx, savepoint);
+            return;
+        }
+
         if exec_sql(db, ctx, &format!("RELEASE {savepoint}")) != SQLITE_OK {
             return;
         }
@@ -1336,14 +1549,41 @@ unsafe extern "C" fn drop_spatial_index_xfunc(
         };
 
         let db = sqlite3_context_db_handle(ctx);
+        let prefix = format!("{table}_{column}");
         let savepoint = "geolite_drop_spatial_index";
 
         if exec_sql(db, ctx, &format!("SAVEPOINT {savepoint}")) != SQLITE_OK {
             return;
         }
 
-        // Drop triggers first, then the R-tree table
-        let prefix = format!("{table}_{column}");
+        if !ensure_spatial_index_catalog_table(db, ctx, "DropSpatialIndex") {
+            rollback_savepoint(db, ctx, savepoint);
+            return;
+        }
+
+        let ownership = match ensure_spatial_index_objects_owned_by_table(
+            db,
+            ctx,
+            table,
+            column,
+            "DropSpatialIndex",
+        ) {
+            Some(v) => v,
+            None => {
+                rollback_savepoint(db, ctx, savepoint);
+                return;
+            }
+        };
+        if ownership == SpatialIndexOwnership::Absent {
+            if exec_sql(db, ctx, &format!("RELEASE {savepoint}")) != SQLITE_OK {
+                return;
+            }
+            set_i32(ctx, 1);
+            return;
+        }
+
+        // Drop triggers first, then the R-tree table. Ownership has already
+        // been verified to avoid cross-table collisions on derived names.
         for suffix in &["_insert", "_update", "_delete"] {
             let sql = format!("DROP TRIGGER IF EXISTS [{prefix}{suffix}]");
             if exec_sql(db, ctx, &sql) != SQLITE_OK {
@@ -1352,6 +1592,12 @@ unsafe extern "C" fn drop_spatial_index_xfunc(
             }
         }
         let sql = format!("DROP TABLE IF EXISTS [{prefix}_rtree]");
+        if exec_sql(db, ctx, &sql) != SQLITE_OK {
+            rollback_savepoint(db, ctx, savepoint);
+            return;
+        }
+
+        let sql = format!("DELETE FROM [{SPATIAL_INDEX_CATALOG_TABLE}] WHERE prefix = '{prefix}'");
         if exec_sql(db, ctx, &sql) != SQLITE_OK {
             rollback_savepoint(db, ctx, savepoint);
             return;

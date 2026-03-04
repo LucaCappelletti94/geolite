@@ -12,6 +12,9 @@
 //! - An R-tree virtual table named `my_table_geom_rtree` with columns
 //!   `(id, xmin, xmax, ymin, ymax)` storing 32-bit float bounding boxes.
 //! - Triggers that keep the R-tree in sync on INSERT/UPDATE/DELETE.
+//! - `CreateSpatialIndex` / `DropSpatialIndex` are geolite-specific SQLite
+//!   helper functions. Unlike PostGIS index DDL, they validate ownership of
+//!   managed trigger/index names before mutating schema objects.
 //! - In `geolite-diesel`, index lifecycle stays on the raw SQL path
 //!   (`diesel::sql_query`) on purpose. No typed wrappers are exported in
 //!   `geolite_diesel::functions` for these two lifecycle helpers.

@@ -2023,12 +2023,12 @@ fn spatial_index_create_rolls_back_when_population_fails() {
 }
 
 #[$test_attr]
-fn spatial_index_drop_rolls_back_when_drop_table_fails() {
+fn spatial_index_drop_rejects_non_rtree_object_with_managed_name() {
     let db = ActiveTestDb::open();
     db.exec("CREATE TABLE broken (id INTEGER PRIMARY KEY, geom BLOB)");
 
     // Simulate an unexpected schema shape: object exists with the expected rtree name,
-    // but it is a VIEW, so DROP TABLE will fail after trigger drops.
+    // but it is a VIEW instead of a managed R-tree table.
     db.exec("CREATE VIEW broken_geom_rtree AS SELECT 1 AS id, 0.0 AS xmin, 0.0 AS xmax, 0.0 AS ymin, 0.0 AS ymax");
     db.exec("CREATE TRIGGER broken_geom_insert AFTER INSERT ON broken BEGIN SELECT 1; END");
     db.exec("CREATE TRIGGER broken_geom_update AFTER UPDATE OF geom ON broken BEGIN SELECT 1; END");
@@ -2036,19 +2036,65 @@ fn spatial_index_drop_rolls_back_when_drop_table_fails() {
 
     let err = db
         .try_query_i64("SELECT DropSpatialIndex('broken', 'geom')")
-        .expect_err("dropping a view with DROP TABLE should fail");
-    assert!(err.contains("DROP VIEW"), "unexpected error message: {err}");
+        .expect_err("drop should reject non-table objects using managed names");
+    assert!(
+        err.contains("unexpected sqlite_master entry"),
+        "unexpected error message: {err}"
+    );
 
-    // Rollback should preserve pre-existing objects on failure.
+    // Safety check runs before any DROP statements, so all objects remain.
     let trigger_count = db.query_i64(
         "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'broken_geom_%'",
     );
-    assert_eq!(trigger_count, 3, "all triggers should remain after rollback");
+    assert_eq!(trigger_count, 3, "all triggers should remain after failed drop");
 
     let view_exists = db.query_i64(
         "SELECT COUNT(*) FROM sqlite_master WHERE type = 'view' AND name = 'broken_geom_rtree'",
     );
-    assert_eq!(view_exists, 1, "view should remain after rollback");
+    assert_eq!(view_exists, 1, "view should remain after failed drop");
+}
+
+#[$test_attr]
+fn spatial_index_drop_rolls_back_when_post_drop_catalog_delete_fails() {
+    let db = ActiveTestDb::open();
+    db.exec("CREATE TABLE broken (id INTEGER PRIMARY KEY, geom BLOB)");
+    db.exec("INSERT INTO broken (geom) VALUES (ST_Point(0, 0))");
+
+    let rc = db.query_i64("SELECT CreateSpatialIndex('broken', 'geom')");
+    assert_eq!(rc, 1);
+
+    db.exec(
+        "CREATE TRIGGER geolite_catalog_block_delete \
+         BEFORE DELETE ON geolite_spatial_index_catalog \
+         BEGIN \
+           SELECT RAISE(FAIL, 'catalog delete blocked'); \
+         END",
+    );
+
+    let err = db
+        .try_query_i64("SELECT DropSpatialIndex('broken', 'geom')")
+        .expect_err("drop should fail after entering savepoint and applying DROP statements");
+    assert!(
+        err.contains("catalog delete blocked"),
+        "unexpected error message: {err}"
+    );
+
+    // Rollback must restore all managed index objects dropped earlier in the savepoint.
+    let rtree_exists = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'broken_geom_rtree'",
+    );
+    assert_eq!(rtree_exists, 1, "rtree table should be restored by rollback");
+
+    let trigger_count = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'broken_geom_%'",
+    );
+    assert_eq!(trigger_count, 3, "managed triggers should be restored by rollback");
+
+    let catalog_row_count = db.query_i64(
+        "SELECT COUNT(*) FROM geolite_spatial_index_catalog \
+         WHERE prefix = 'broken_geom' AND table_name = 'broken' AND column_name = 'geom'",
+    );
+    assert_eq!(catalog_row_count, 1, "catalog marker should be restored by rollback");
 }
 
 #[$test_attr]
@@ -2226,6 +2272,166 @@ fn spatial_index_rejects_colliding_object_names() {
     // Existing index must remain intact and must still belong to a_b/c.
     let row_count = db.query_i64("SELECT COUNT(*) FROM a_b_c_rtree");
     assert_eq!(row_count, 1);
+    let trigger_count_on_a = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'a'",
+    );
+    assert_eq!(trigger_count_on_a, 0);
+}
+
+#[$test_attr]
+fn spatial_index_drop_rejects_colliding_object_names() {
+    let db = ActiveTestDb::open();
+    db.exec("CREATE TABLE a_b (id INTEGER PRIMARY KEY, c BLOB)");
+    db.exec("CREATE TABLE a (id INTEGER PRIMARY KEY, b_c BLOB)");
+    db.exec("INSERT INTO a_b (c) VALUES (ST_Point(0, 0))");
+    db.exec("INSERT INTO a (b_c) VALUES (ST_Point(1, 1)), (ST_Point(2, 2))");
+
+    let rc = db.query_i64("SELECT CreateSpatialIndex('a_b', 'c')");
+    assert_eq!(rc, 1);
+
+    let err = db
+        .try_query_i64("SELECT DropSpatialIndex('a', 'b_c')")
+        .expect_err("colliding index object names must be rejected on drop");
+    assert!(
+        err.contains("naming collision"),
+        "unexpected error message: {err}"
+    );
+
+    // Existing index must remain intact and must still belong to a_b/c.
+    let row_count = db.query_i64("SELECT COUNT(*) FROM a_b_c_rtree");
+    assert_eq!(row_count, 1);
+    let trigger_count_on_ab = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'a_b'",
+    );
+    assert_eq!(trigger_count_on_ab, 3);
+    let trigger_count_on_a = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'a'",
+    );
+    assert_eq!(trigger_count_on_a, 0);
+}
+
+#[$test_attr]
+fn spatial_index_rejects_colliding_create_when_all_owner_triggers_removed() {
+    let db = ActiveTestDb::open();
+    db.exec("CREATE TABLE a_b (id INTEGER PRIMARY KEY, c BLOB)");
+    db.exec("CREATE TABLE a (id INTEGER PRIMARY KEY, b_c BLOB)");
+    db.exec("INSERT INTO a_b (c) VALUES (ST_Point(0, 0))");
+    db.exec("INSERT INTO a (b_c) VALUES (ST_Point(1, 1)), (ST_Point(2, 2))");
+
+    let rc = db.query_i64("SELECT CreateSpatialIndex('a_b', 'c')");
+    assert_eq!(rc, 1);
+
+    db.exec("DROP TRIGGER a_b_c_insert");
+    db.exec("DROP TRIGGER a_b_c_update");
+    db.exec("DROP TRIGGER a_b_c_delete");
+
+    let err = db
+        .try_query_i64("SELECT CreateSpatialIndex('a', 'b_c')")
+        .expect_err("colliding create must still fail when all owner triggers are missing");
+    assert!(
+        err.contains("naming collision"),
+        "unexpected error message: {err}"
+    );
+
+    let row_count = db.query_i64("SELECT COUNT(*) FROM a_b_c_rtree");
+    assert_eq!(row_count, 1);
+    let trigger_count_on_a = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'a'",
+    );
+    assert_eq!(trigger_count_on_a, 0);
+}
+
+#[$test_attr]
+fn spatial_index_rejects_colliding_create_when_owner_triggers_partially_removed() {
+    let db = ActiveTestDb::open();
+    db.exec("CREATE TABLE a_b (id INTEGER PRIMARY KEY, c BLOB)");
+    db.exec("CREATE TABLE a (id INTEGER PRIMARY KEY, b_c BLOB)");
+    db.exec("INSERT INTO a_b (c) VALUES (ST_Point(0, 0))");
+    db.exec("INSERT INTO a (b_c) VALUES (ST_Point(1, 1)), (ST_Point(2, 2))");
+
+    let rc = db.query_i64("SELECT CreateSpatialIndex('a_b', 'c')");
+    assert_eq!(rc, 1);
+
+    db.exec("DROP TRIGGER a_b_c_update");
+
+    let err = db
+        .try_query_i64("SELECT CreateSpatialIndex('a', 'b_c')")
+        .expect_err("colliding create must fail when owner triggers are only partially present");
+    assert!(
+        err.contains("naming collision"),
+        "unexpected error message: {err}"
+    );
+
+    let row_count = db.query_i64("SELECT COUNT(*) FROM a_b_c_rtree");
+    assert_eq!(row_count, 1);
+    let trigger_count_on_ab = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'a_b'",
+    );
+    assert_eq!(trigger_count_on_ab, 2);
+    let trigger_count_on_a = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'a'",
+    );
+    assert_eq!(trigger_count_on_a, 0);
+}
+
+#[$test_attr]
+fn spatial_index_drop_rejects_colliding_drop_when_all_owner_triggers_removed() {
+    let db = ActiveTestDb::open();
+    db.exec("CREATE TABLE a_b (id INTEGER PRIMARY KEY, c BLOB)");
+    db.exec("CREATE TABLE a (id INTEGER PRIMARY KEY, b_c BLOB)");
+    db.exec("INSERT INTO a_b (c) VALUES (ST_Point(0, 0))");
+    db.exec("INSERT INTO a (b_c) VALUES (ST_Point(1, 1)), (ST_Point(2, 2))");
+
+    let rc = db.query_i64("SELECT CreateSpatialIndex('a_b', 'c')");
+    assert_eq!(rc, 1);
+
+    db.exec("DROP TRIGGER a_b_c_insert");
+    db.exec("DROP TRIGGER a_b_c_update");
+    db.exec("DROP TRIGGER a_b_c_delete");
+
+    let err = db
+        .try_query_i64("SELECT DropSpatialIndex('a', 'b_c')")
+        .expect_err("colliding drop must fail when all owner triggers are missing");
+    assert!(
+        err.contains("naming collision"),
+        "unexpected error message: {err}"
+    );
+
+    let rtree_exists = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'a_b_c_rtree'",
+    );
+    assert_eq!(rtree_exists, 1);
+}
+
+#[$test_attr]
+fn spatial_index_drop_rejects_colliding_drop_when_owner_triggers_partially_removed() {
+    let db = ActiveTestDb::open();
+    db.exec("CREATE TABLE a_b (id INTEGER PRIMARY KEY, c BLOB)");
+    db.exec("CREATE TABLE a (id INTEGER PRIMARY KEY, b_c BLOB)");
+    db.exec("INSERT INTO a_b (c) VALUES (ST_Point(0, 0))");
+    db.exec("INSERT INTO a (b_c) VALUES (ST_Point(1, 1)), (ST_Point(2, 2))");
+
+    let rc = db.query_i64("SELECT CreateSpatialIndex('a_b', 'c')");
+    assert_eq!(rc, 1);
+
+    db.exec("DROP TRIGGER a_b_c_delete");
+
+    let err = db
+        .try_query_i64("SELECT DropSpatialIndex('a', 'b_c')")
+        .expect_err("colliding drop must fail when owner triggers are only partially present");
+    assert!(
+        err.contains("naming collision"),
+        "unexpected error message: {err}"
+    );
+
+    let rtree_exists = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'a_b_c_rtree'",
+    );
+    assert_eq!(rtree_exists, 1);
+    let trigger_count_on_ab = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'a_b'",
+    );
+    assert_eq!(trigger_count_on_ab, 2);
     let trigger_count_on_a = db.query_i64(
         "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'a'",
     );
