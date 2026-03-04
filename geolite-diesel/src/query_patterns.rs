@@ -15,6 +15,9 @@
 //! - `CreateSpatialIndex` / `DropSpatialIndex` are geolite-specific SQLite
 //!   helper functions. Unlike PostGIS index DDL, they validate ownership of
 //!   managed trigger/index names before mutating schema objects.
+//! - Ownership markers are persisted in `geolite_spatial_index_catalog`.
+//!   Helpers fail closed if managed objects exist but ownership markers are
+//!   missing or externally modified.
 //! - In `geolite-diesel`, index lifecycle stays on the raw SQL path
 //!   (`diesel::sql_query`) on purpose. No typed wrappers are exported in
 //!   `geolite_diesel::functions` for these two lifecycle helpers.

@@ -99,6 +99,22 @@ Spatial index lifecycle in Diesel (`sqlite` feature):
   lifecycle helpers.
 - For migration-style setup/teardown, prefer SQL migrations.
 
+Spatial index catalog lifecycle semantics (`sqlite` feature):
+
+- Ownership for managed spatial index objects is tracked in
+  `geolite_spatial_index_catalog` using `prefix`, `table_name`, and
+  `column_name`.
+- `CreateSpatialIndex` and `DropSpatialIndex` both lazily create
+  `geolite_spatial_index_catalog` when it is missing.
+- `DropSpatialIndex` removes the ownership row for the requested index, but the
+  catalog table itself remains present even when it becomes empty.
+- Lifecycle helpers fail closed when ownership cannot be proven. If managed
+  objects exist without a matching catalog marker, create/drop returns an error
+  instead of mutating schema objects.
+- Manual catalog/object edits are treated as external drift. Operators should
+  clean up or rebuild managed objects/markers before calling lifecycle helpers
+  again.
+
 ```rust,no_run
 # #[cfg(feature = "sqlite")]
 # {
