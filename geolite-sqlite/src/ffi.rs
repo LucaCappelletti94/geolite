@@ -1125,6 +1125,7 @@ unsafe fn sqlite_master_lookup_text(
 }
 
 const SPATIAL_INDEX_CATALOG_TABLE: &str = "geolite_spatial_index_catalog";
+const SPATIAL_INDEX_CATALOG_REQUIRED_COLUMNS: [&str; 3] = ["prefix", "table_name", "column_name"];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SpatialIndexOwnership {
@@ -1132,11 +1133,156 @@ enum SpatialIndexOwnership {
     Absent,
 }
 
+unsafe fn lookup_sqlite_master_object_type(
+    db: *mut sqlite3,
+    object_name: &str,
+) -> std::result::Result<Option<String>, String> {
+    let sql = format!("SELECT type FROM sqlite_master WHERE name = '{object_name}' LIMIT 1");
+    sqlite_master_lookup_text(db, &sql)
+}
+
+unsafe fn inspect_spatial_index_catalog_columns(
+    db: *mut sqlite3,
+) -> std::result::Result<(bool, bool, bool), String> {
+    let sql = format!("PRAGMA table_info([{SPATIAL_INDEX_CATALOG_TABLE}])");
+    let c_sql = sql_to_cstring(&sql)
+        .map_err(|_| "internal error: generated SQL contains NUL byte".to_string())?;
+    let mut stmt: *mut sqlite3_stmt = std::ptr::null_mut();
+    let rc = sqlite3_prepare_v2(db, c_sql.as_ptr(), -1, &mut stmt, std::ptr::null_mut());
+    if rc != SQLITE_OK {
+        return Err(CStr::from_ptr(sqlite3_errmsg(db))
+            .to_string_lossy()
+            .into_owned());
+    }
+
+    let mut has_prefix = false;
+    let mut has_table_name = false;
+    let mut has_column_name = false;
+
+    loop {
+        let step = sqlite3_step(stmt);
+        if step == SQLITE_ROW {
+            if sqlite3_column_type(stmt, 1) != SQLITE_NULL {
+                let ptr = sqlite3_column_text(stmt, 1);
+                if !ptr.is_null() {
+                    let column_name = CStr::from_ptr(ptr.cast()).to_string_lossy();
+                    match column_name.as_ref() {
+                        "prefix" => has_prefix = true,
+                        "table_name" => has_table_name = true,
+                        "column_name" => has_column_name = true,
+                        _ => {}
+                    }
+                }
+            }
+            continue;
+        }
+        if step == SQLITE_DONE {
+            break;
+        }
+        let err = CStr::from_ptr(sqlite3_errmsg(db))
+            .to_string_lossy()
+            .into_owned();
+        let _ = sqlite3_finalize(stmt);
+        return Err(err);
+    }
+
+    let _ = sqlite3_finalize(stmt);
+    Ok((has_prefix, has_table_name, has_column_name))
+}
+
+unsafe fn validate_spatial_index_catalog_shape(
+    db: *mut sqlite3,
+    ctx: *mut sqlite3_context,
+    label: &str,
+) -> bool {
+    let object_type = match lookup_sqlite_master_object_type(db, SPATIAL_INDEX_CATALOG_TABLE) {
+        Ok(v) => v,
+        Err(e) => {
+            set_error(
+                ctx,
+                &format!("{label}: failed to inspect spatial index catalog metadata: {e}"),
+            );
+            return false;
+        }
+    };
+    let Some(object_type) = object_type else {
+        set_error(
+            ctx,
+            &format!(
+                "{label}: failed to inspect spatial index catalog metadata: \
+                 missing sqlite_master entry for [{SPATIAL_INDEX_CATALOG_TABLE}]"
+            ),
+        );
+        return false;
+    };
+    if object_type != "table" {
+        set_error(
+            ctx,
+            &format!(
+                "{label}: invalid spatial index catalog object type for \
+                 [{SPATIAL_INDEX_CATALOG_TABLE}] (expected table, found [{object_type}])"
+            ),
+        );
+        return false;
+    }
+
+    let (has_prefix, has_table_name, has_column_name) =
+        match inspect_spatial_index_catalog_columns(db) {
+            Ok(v) => v,
+            Err(e) => {
+                set_error(
+                    ctx,
+                    &format!("{label}: failed to inspect spatial index catalog metadata: {e}"),
+                );
+                return false;
+            }
+        };
+
+    let present = [has_prefix, has_table_name, has_column_name];
+    for (i, required_column) in SPATIAL_INDEX_CATALOG_REQUIRED_COLUMNS.iter().enumerate() {
+        if !present[i] {
+            set_error(
+                ctx,
+                &format!(
+                    "{label}: invalid spatial index catalog schema for \
+                     [{SPATIAL_INDEX_CATALOG_TABLE}] (missing required column [{required_column}])"
+                ),
+            );
+            return false;
+        }
+    }
+
+    true
+}
+
 unsafe fn ensure_spatial_index_catalog_table(
     db: *mut sqlite3,
     ctx: *mut sqlite3_context,
     label: &str,
 ) -> bool {
+    let object_type = match lookup_sqlite_master_object_type(db, SPATIAL_INDEX_CATALOG_TABLE) {
+        Ok(v) => v,
+        Err(e) => {
+            set_error(
+                ctx,
+                &format!("{label}: failed to inspect spatial index catalog metadata: {e}"),
+            );
+            return false;
+        }
+    };
+    if let Some(object_type) = object_type {
+        if object_type != "table" {
+            set_error(
+                ctx,
+                &format!(
+                    "{label}: invalid spatial index catalog object type for \
+                     [{SPATIAL_INDEX_CATALOG_TABLE}] (expected table, found [{object_type}])"
+                ),
+            );
+            return false;
+        }
+    }
+
     let sql = format!(
         "CREATE TABLE IF NOT EXISTS [{SPATIAL_INDEX_CATALOG_TABLE}] (\
          prefix TEXT PRIMARY KEY, \
@@ -1435,6 +1581,10 @@ unsafe extern "C" fn create_spatial_index_xfunc(
             rollback_savepoint(db, ctx, savepoint);
             return;
         }
+        if !validate_spatial_index_catalog_shape(db, ctx, "CreateSpatialIndex") {
+            rollback_savepoint(db, ctx, savepoint);
+            return;
+        }
 
         if ensure_spatial_index_objects_owned_by_table(db, ctx, table, column, "CreateSpatialIndex")
             .is_none()
@@ -1558,6 +1708,10 @@ unsafe extern "C" fn drop_spatial_index_xfunc(
         }
 
         if !ensure_spatial_index_catalog_table(db, ctx, "DropSpatialIndex") {
+            rollback_savepoint(db, ctx, savepoint);
+            return;
+        }
+        if !validate_spatial_index_catalog_shape(db, ctx, "DropSpatialIndex") {
             rollback_savepoint(db, ctx, savepoint);
             return;
         }

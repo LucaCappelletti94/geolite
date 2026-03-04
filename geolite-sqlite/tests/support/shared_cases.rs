@@ -2524,6 +2524,375 @@ fn spatial_index_drop_idempotent() {
     assert_eq!(rc, 1);
 }
 
+#[$test_attr]
+fn spatial_index_fresh_db_drop_creates_empty_catalog_and_succeeds() {
+    let db = ActiveTestDb::open();
+    db.exec("CREATE TABLE pts (id INTEGER PRIMARY KEY, geom BLOB)");
+
+    let rc = db.query_i64("SELECT DropSpatialIndex('pts', 'geom')");
+    assert_eq!(rc, 1);
+
+    let catalog_exists = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master \
+         WHERE type = 'table' AND name = 'geolite_spatial_index_catalog'",
+    );
+    assert_eq!(
+        catalog_exists, 1,
+        "drop on a fresh DB should lazily create the catalog table"
+    );
+
+    let catalog_rows = db.query_i64("SELECT COUNT(*) FROM geolite_spatial_index_catalog");
+    assert_eq!(catalog_rows, 0, "fresh drop should leave an empty catalog");
+
+    let managed_objects = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master \
+         WHERE name IN ('pts_geom_rtree', 'pts_geom_rtree_node', \
+                        'pts_geom_rtree_parent', 'pts_geom_rtree_rowid', \
+                        'pts_geom_insert', 'pts_geom_update', 'pts_geom_delete')",
+    );
+    assert_eq!(managed_objects, 0, "drop should not create managed objects");
+}
+
+#[$test_attr]
+fn spatial_index_fresh_db_create_initializes_catalog_marker() {
+    let db = ActiveTestDb::open();
+    db.exec("CREATE TABLE pts (id INTEGER PRIMARY KEY, geom BLOB)");
+    db.exec("INSERT INTO pts (geom) VALUES (ST_Point(1, 2)), (ST_Point(3, 4))");
+
+    let rc = db.query_i64("SELECT CreateSpatialIndex('pts', 'geom')");
+    assert_eq!(rc, 1);
+
+    let catalog_exists = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master \
+         WHERE type = 'table' AND name = 'geolite_spatial_index_catalog'",
+    );
+    assert_eq!(
+        catalog_exists, 1,
+        "create on a fresh DB should lazily create the catalog table"
+    );
+
+    let marker_count = db.query_i64(
+        "SELECT COUNT(*) FROM geolite_spatial_index_catalog \
+         WHERE prefix = 'pts_geom' AND table_name = 'pts' AND column_name = 'geom'",
+    );
+    assert_eq!(marker_count, 1, "create should persist exactly one ownership marker");
+
+    let rtree_exists = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'pts_geom_rtree'",
+    );
+    assert_eq!(rtree_exists, 1);
+
+    let trigger_count = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master \
+         WHERE type = 'trigger' AND name IN ('pts_geom_insert', 'pts_geom_update', 'pts_geom_delete')",
+    );
+    assert_eq!(trigger_count, 3);
+}
+
+#[$test_attr]
+fn spatial_index_drop_cleans_marker_but_keeps_catalog_table() {
+    let db = ActiveTestDb::open();
+    db.exec("CREATE TABLE pts (id INTEGER PRIMARY KEY, geom BLOB)");
+    db.exec("INSERT INTO pts (geom) VALUES (ST_Point(1, 2))");
+    db.exec("SELECT CreateSpatialIndex('pts', 'geom')");
+
+    let rc = db.query_i64("SELECT DropSpatialIndex('pts', 'geom')");
+    assert_eq!(rc, 1);
+
+    let marker_count = db.query_i64(
+        "SELECT COUNT(*) FROM geolite_spatial_index_catalog \
+         WHERE prefix = 'pts_geom'",
+    );
+    assert_eq!(marker_count, 0, "drop should remove the ownership marker");
+
+    let catalog_exists = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master \
+         WHERE type = 'table' AND name = 'geolite_spatial_index_catalog'",
+    );
+    assert_eq!(
+        catalog_exists, 1,
+        "drop should retain the catalog table even when empty"
+    );
+
+    let rtree_exists = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'pts_geom_rtree'",
+    );
+    assert_eq!(rtree_exists, 0);
+
+    let trigger_count = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master \
+         WHERE type = 'trigger' AND name IN ('pts_geom_insert', 'pts_geom_update', 'pts_geom_delete')",
+    );
+    assert_eq!(trigger_count, 0);
+
+    // Idempotent cleanup should keep the empty catalog table in place.
+    let rc = db.query_i64("SELECT DropSpatialIndex('pts', 'geom')");
+    assert_eq!(rc, 1);
+    let catalog_exists_after_second_drop = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master \
+         WHERE type = 'table' AND name = 'geolite_spatial_index_catalog'",
+    );
+    assert_eq!(catalog_exists_after_second_drop, 1);
+}
+
+#[$test_attr]
+fn spatial_index_create_fails_closed_when_catalog_marker_missing_but_objects_exist() {
+    let db = ActiveTestDb::open();
+    db.exec("CREATE TABLE pts (id INTEGER PRIMARY KEY, geom BLOB)");
+    db.exec("INSERT INTO pts (geom) VALUES (ST_Point(0, 0))");
+
+    let rc = db.query_i64("SELECT CreateSpatialIndex('pts', 'geom')");
+    assert_eq!(rc, 1);
+
+    db.exec("DELETE FROM geolite_spatial_index_catalog WHERE prefix = 'pts_geom'");
+
+    let err = db
+        .try_query_i64("SELECT CreateSpatialIndex('pts', 'geom')")
+        .expect_err("create must fail closed when ownership marker is missing");
+    assert!(
+        err.contains("cannot prove ownership"),
+        "unexpected error message: {err}"
+    );
+
+    let rtree_exists = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'pts_geom_rtree'",
+    );
+    assert_eq!(rtree_exists, 1, "existing managed table should remain untouched");
+
+    let trigger_count = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master \
+         WHERE type = 'trigger' AND name IN ('pts_geom_insert', 'pts_geom_update', 'pts_geom_delete')",
+    );
+    assert_eq!(
+        trigger_count, 3,
+        "existing managed triggers should remain untouched"
+    );
+}
+
+#[$test_attr]
+fn spatial_index_drop_fails_closed_when_catalog_marker_missing_but_objects_exist() {
+    let db = ActiveTestDb::open();
+    db.exec("CREATE TABLE pts (id INTEGER PRIMARY KEY, geom BLOB)");
+    db.exec("INSERT INTO pts (geom) VALUES (ST_Point(0, 0))");
+
+    let rc = db.query_i64("SELECT CreateSpatialIndex('pts', 'geom')");
+    assert_eq!(rc, 1);
+
+    db.exec("DELETE FROM geolite_spatial_index_catalog WHERE prefix = 'pts_geom'");
+
+    let err = db
+        .try_query_i64("SELECT DropSpatialIndex('pts', 'geom')")
+        .expect_err("drop must fail closed when ownership marker is missing");
+    assert!(
+        err.contains("cannot prove ownership"),
+        "unexpected error message: {err}"
+    );
+
+    let rtree_exists = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'pts_geom_rtree'",
+    );
+    assert_eq!(rtree_exists, 1, "drop must not proceed without ownership proof");
+
+    let trigger_count = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master \
+         WHERE type = 'trigger' AND name IN ('pts_geom_insert', 'pts_geom_update', 'pts_geom_delete')",
+    );
+    assert_eq!(trigger_count, 3, "drop must not remove triggers on ownership failure");
+}
+
+#[$test_attr]
+fn spatial_index_external_catalog_row_reassignment_is_rejected() {
+    let db = ActiveTestDb::open();
+    db.exec("CREATE TABLE pts (id INTEGER PRIMARY KEY, geom BLOB)");
+    db.exec("CREATE TABLE other (id INTEGER PRIMARY KEY, geom2 BLOB)");
+    db.exec("INSERT INTO pts (geom) VALUES (ST_Point(0, 0))");
+
+    let rc = db.query_i64("SELECT CreateSpatialIndex('pts', 'geom')");
+    assert_eq!(rc, 1);
+
+    db.exec(
+        "UPDATE geolite_spatial_index_catalog \
+         SET table_name = 'other', column_name = 'geom2' \
+         WHERE prefix = 'pts_geom'",
+    );
+
+    let create_err = db
+        .try_query_i64("SELECT CreateSpatialIndex('pts', 'geom')")
+        .expect_err("create should reject externally reassigned catalog ownership");
+    assert!(
+        create_err.contains("naming collision"),
+        "unexpected error message: {create_err}"
+    );
+
+    let drop_err = db
+        .try_query_i64("SELECT DropSpatialIndex('pts', 'geom')")
+        .expect_err("drop should reject externally reassigned catalog ownership");
+    assert!(
+        drop_err.contains("naming collision"),
+        "unexpected error message: {drop_err}"
+    );
+
+    let marker_count = db.query_i64(
+        "SELECT COUNT(*) FROM geolite_spatial_index_catalog \
+         WHERE prefix = 'pts_geom' AND table_name = 'other' AND column_name = 'geom2'",
+    );
+    assert_eq!(marker_count, 1, "external marker rewrite should remain unchanged");
+
+    let rtree_exists = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'pts_geom_rtree'",
+    );
+    assert_eq!(rtree_exists, 1, "managed table should remain after rejected operations");
+
+    let trigger_count = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master \
+         WHERE type = 'trigger' AND name IN ('pts_geom_insert', 'pts_geom_update', 'pts_geom_delete')",
+    );
+    assert_eq!(
+        trigger_count, 3,
+        "managed triggers should remain after rejected operations"
+    );
+}
+
+#[$test_attr]
+fn spatial_index_create_fails_when_catalog_name_is_non_table_object() {
+    let db = ActiveTestDb::open();
+    db.exec("CREATE TABLE pts (id INTEGER PRIMARY KEY, geom BLOB)");
+    db.exec(
+        "CREATE VIEW geolite_spatial_index_catalog \
+         AS SELECT 'stub' AS prefix, 'pts' AS table_name, 'geom' AS column_name",
+    );
+
+    let err = db
+        .try_query_i64("SELECT CreateSpatialIndex('pts', 'geom')")
+        .expect_err("create should fail when catalog name resolves to a non-table object");
+    assert!(
+        err.contains("invalid spatial index catalog object type"),
+        "unexpected error message: {err}"
+    );
+
+    let rtree_exists = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'pts_geom_rtree'",
+    );
+    assert_eq!(
+        rtree_exists, 0,
+        "failed create should not leave rtree table when catalog ensure fails"
+    );
+
+    let trigger_count = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'pts_geom_%'",
+    );
+    assert_eq!(
+        trigger_count, 0,
+        "failed create should not leave managed triggers when catalog ensure fails"
+    );
+}
+
+#[$test_attr]
+fn spatial_index_drop_fails_when_catalog_name_is_non_table_object() {
+    let db = ActiveTestDb::open();
+    db.exec("CREATE TABLE pts (id INTEGER PRIMARY KEY, geom BLOB)");
+    db.exec("CREATE VIRTUAL TABLE pts_geom_rtree USING rtree(id, xmin, xmax, ymin, ymax)");
+    db.exec("CREATE TRIGGER pts_geom_insert AFTER INSERT ON pts BEGIN SELECT 1; END");
+    db.exec("CREATE TRIGGER pts_geom_update AFTER UPDATE ON pts BEGIN SELECT 1; END");
+    db.exec("CREATE TRIGGER pts_geom_delete AFTER DELETE ON pts BEGIN SELECT 1; END");
+    db.exec(
+        "CREATE VIEW geolite_spatial_index_catalog \
+         AS SELECT 'pts_geom' AS prefix, 'pts' AS table_name, 'geom' AS column_name",
+    );
+
+    let err = db
+        .try_query_i64("SELECT DropSpatialIndex('pts', 'geom')")
+        .expect_err("drop should fail when catalog name resolves to a non-table object");
+    assert!(
+        err.contains("invalid spatial index catalog object type"),
+        "unexpected error message: {err}"
+    );
+
+    let rtree_exists = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'pts_geom_rtree'",
+    );
+    assert_eq!(
+        rtree_exists, 1,
+        "drop should roll back managed table deletion when catalog delete fails"
+    );
+
+    let trigger_count = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master \
+         WHERE type = 'trigger' AND name IN ('pts_geom_insert', 'pts_geom_update', 'pts_geom_delete')",
+    );
+    assert_eq!(
+        trigger_count, 3,
+        "drop should roll back managed trigger deletion when catalog delete fails"
+    );
+}
+
+#[$test_attr]
+fn spatial_index_create_fails_when_catalog_schema_is_malformed() {
+    let db = ActiveTestDb::open();
+    db.exec("CREATE TABLE pts (id INTEGER PRIMARY KEY, geom BLOB)");
+    db.exec("CREATE TABLE geolite_spatial_index_catalog (prefix TEXT PRIMARY KEY)");
+
+    let err = db
+        .try_query_i64("SELECT CreateSpatialIndex('pts', 'geom')")
+        .expect_err("create should fail when catalog schema is missing required columns");
+    assert!(
+        err.contains("invalid spatial index catalog schema"),
+        "unexpected error message: {err}"
+    );
+
+    let rtree_exists = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'pts_geom_rtree'",
+    );
+    assert_eq!(
+        rtree_exists, 0,
+        "failed create should not leave rtree table when catalog inspection fails"
+    );
+
+    let trigger_count = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'pts_geom_%'",
+    );
+    assert_eq!(
+        trigger_count, 0,
+        "failed create should not leave managed triggers when catalog inspection fails"
+    );
+}
+
+#[$test_attr]
+fn spatial_index_drop_fails_when_catalog_schema_is_malformed_without_dropping_managed_objects() {
+    let db = ActiveTestDb::open();
+    db.exec("CREATE TABLE pts (id INTEGER PRIMARY KEY, geom BLOB)");
+    db.exec("CREATE VIRTUAL TABLE pts_geom_rtree USING rtree(id, xmin, xmax, ymin, ymax)");
+    db.exec("CREATE TRIGGER pts_geom_insert AFTER INSERT ON pts BEGIN SELECT 1; END");
+    db.exec("CREATE TRIGGER pts_geom_update AFTER UPDATE ON pts BEGIN SELECT 1; END");
+    db.exec("CREATE TRIGGER pts_geom_delete AFTER DELETE ON pts BEGIN SELECT 1; END");
+    db.exec("CREATE TABLE geolite_spatial_index_catalog (prefix TEXT PRIMARY KEY)");
+
+    let err = db
+        .try_query_i64("SELECT DropSpatialIndex('pts', 'geom')")
+        .expect_err("drop should fail when catalog schema is missing required columns");
+    assert!(
+        err.contains("invalid spatial index catalog schema"),
+        "unexpected error message: {err}"
+    );
+
+    let rtree_exists = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'pts_geom_rtree'",
+    );
+    assert_eq!(
+        rtree_exists, 1,
+        "drop should fail before mutating managed table when catalog inspection fails"
+    );
+
+    let trigger_count = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master \
+         WHERE type = 'trigger' AND name IN ('pts_geom_insert', 'pts_geom_update', 'pts_geom_delete')",
+    );
+    assert_eq!(
+        trigger_count, 3,
+        "drop should fail before mutating managed triggers when catalog inspection fails"
+    );
+}
+
 // ── Boolean operations ────────────────────────────────────────────────────────
 
 #[$test_attr]
