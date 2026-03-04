@@ -188,6 +188,11 @@ diesel::define_sql_function! {
 }
 
 diesel::define_sql_function! {
+    /// Return the Z coordinate of a Point geometry when present.
+    fn st_z(geom: Nullable<Geometry>) -> Nullable<Double>;
+}
+
+diesel::define_sql_function! {
     /// Return whether the geometry is empty.
     fn st_isempty(geom: Nullable<Geometry>) -> Nullable<diesel::sql_types::Bool>;
 }

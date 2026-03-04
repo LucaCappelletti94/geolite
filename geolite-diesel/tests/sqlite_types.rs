@@ -504,6 +504,12 @@ fn debug_query_st_y() {
 }
 
 #[test]
+fn debug_query_st_z() {
+    use geolite_diesel::functions::*;
+    assert_sql_contains!(diesel::dsl::select(st_z(g!())), "st_z");
+}
+
+#[test]
 fn debug_query_st_isempty() {
     use geolite_diesel::functions::*;
     assert_sql_contains!(diesel::dsl::select(st_isempty(g!())), "st_isempty");

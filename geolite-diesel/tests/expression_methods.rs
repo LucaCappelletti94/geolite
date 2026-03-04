@@ -302,6 +302,7 @@ assert_unary_cases!(
     method_st_geometrytype => st_geometrytype,
     method_st_x => st_x,
     method_st_y => st_y,
+    method_st_z => st_z,
     method_st_isempty => st_isempty,
     method_st_ndims => st_ndims,
     method_st_coorddim => st_coorddim,

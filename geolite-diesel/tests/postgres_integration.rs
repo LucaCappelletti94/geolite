@@ -324,6 +324,22 @@ macro_rules! postgis_tests {
                     .unwrap();
                 assert!((y.unwrap() - 7.25).abs() < 1e-10);
 
+                // ST_Z (Point Z -> value; Point XY -> NULL)
+                let z: Option<f64> = diesel::dsl::select(st_z(st_geomfromewkb(
+                    diesel::dsl::sql::<diesel::sql_types::Nullable<diesel::sql_types::Binary>>(
+                        "decode('0101000080000000000000F03F00000000000000400000000000000840','hex')",
+                    ),
+                )))
+                .get_result(&mut c)
+                .unwrap();
+                assert_eq!(z, Some(3.0));
+
+                let z_xy: Option<f64> =
+                    diesel::dsl::select(st_z(st_point(3.5, 7.25).nullable()))
+                        .get_result(&mut c)
+                        .unwrap();
+                assert_eq!(z_xy, None);
+
                 // ST_Area (polygon)
                 let area: Option<f64> =
                     diesel::dsl::select(st_area(st_geomfromtext("POLYGON((0 0,1 0,1 1,0 1,0 0))")))

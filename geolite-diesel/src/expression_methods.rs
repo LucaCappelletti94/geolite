@@ -125,6 +125,11 @@ pub trait GeometryExpressionMethods: Expression<SqlType = Nullable<Geometry>> + 
         functions::st_y(self)
     }
 
+    /// Return the Z coordinate of a Point geometry when present.
+    fn st_z(self) -> functions::st_z<Self> {
+        functions::st_z(self)
+    }
+
     /// Return whether the geometry is empty.
     fn st_isempty(self) -> functions::st_isempty<Self> {
         functions::st_isempty(self)
