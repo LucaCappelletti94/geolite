@@ -3,31 +3,55 @@
 //! Import [`GeometryExpressionMethods`] (or `use geolite_diesel::prelude::*`)
 //! to call spatial functions as methods on any `Nullable<Geometry>` expression:
 //!
-//! ```rust,ignore
+//! ```rust
+//! # #[cfg(feature = "sqlite")]
+//! # {
+//! use diesel::debug_query;
+//! use diesel::prelude::*;
+//! use diesel::sqlite::Sqlite;
+//! use diesel::NullableExpressionMethods;
 //! use geolite_diesel::prelude::*;
 //!
-//! features::table
-//!     .filter(features::geom.st_dwithin(st_point(13.4050, 52.5200), 1000.0))
-//!     .select((features::id, features::geom.st_astext()))
-//!     .load(&mut conn)?;
+//! diesel::table! {
+//!     features (id) {
+//!         id -> Integer,
+//!         geom -> Nullable<geolite_diesel::Geometry>,
+//!     }
+//! }
+//!
+//! let query = features::table
+//!     .filter(features::geom.st_dwithin(st_point(13.4050, 52.5200).nullable(), 1000.0).eq(true))
+//!     .select((features::id, features::geom.st_astext()));
+//! let sql = debug_query::<Sqlite, _>(&query).to_string().to_lowercase();
+//! assert!(sql.contains("st_dwithin"));
+//! # }
 //! ```
 //!
 //! Geometry-pair DE-9IM matching is available in method form:
 //!
-//! ```rust,ignore
-//! use diesel::prelude::*;
+//! ```rust
+//! # #[cfg(feature = "sqlite")]
+//! # {
+//! use diesel::debug_query;
+//! use diesel::dsl::select;
+//! use diesel::sqlite::Sqlite;
+//! use diesel::NullableExpressionMethods;
 //! use geolite_diesel::prelude::*;
 //!
 //! let pattern = "T*****FF*";
 //!
-//! let via_match_geoms: Option<bool> = diesel::dsl::select(
+//! let via_match_geoms = select(
 //!     st_point(0.0, 0.0)
 //!         .nullable()
 //!         .st_relate_match_geoms(st_point(0.0, 0.0).nullable(), pattern),
-//! )
-//! .get_result(&mut conn)?;
+//! );
+//! let geoms_sql = debug_query::<Sqlite, _>(&via_match_geoms).to_string().to_lowercase();
+//! assert!(geoms_sql.contains("st_relate"));
 //!
-//! assert_eq!(via_match_geoms, Some(true));
+//! let via_matrix = select(st_relate_match("T********", pattern));
+//! let matrix_sql = debug_query::<Sqlite, _>(&via_matrix).to_string().to_lowercase();
+//! assert!(matrix_sql.contains("st_relatematch"));
+//! # }
 //! ```
 
 use diesel::expression::{AsExpression, Expression};

@@ -8,13 +8,15 @@
 
 /// Diesel SQL type for a geometry column (stored as EWKB BLOB).
 ///
-/// ```rust,ignore
-/// table! {
+/// ```rust
+/// diesel::table! {
 ///     features (id) {
 ///         id   -> Integer,
 ///         geom -> geolite_diesel::Geometry,
 ///     }
 /// }
+///
+/// let _table = features::table;
 /// ```
 #[derive(diesel::sql_types::SqlType, diesel::query_builder::QueryId, Debug, Clone, Copy)]
 #[diesel(sqlite_type(name = "Binary"))]

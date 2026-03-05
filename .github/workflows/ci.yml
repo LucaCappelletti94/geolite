@@ -98,6 +98,10 @@ jobs:
             cmd: cargo test --workspace
           - target: diesel-sqlite
             cmd: cargo test -p geolite-diesel --features sqlite
+          - target: doctest-workspace
+            cmd: cargo test --doc --workspace
+          - target: doctest-diesel-sqlite
+            cmd: cargo test --doc -p geolite-diesel --features sqlite
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

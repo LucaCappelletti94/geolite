@@ -10,19 +10,38 @@
 //!
 //! # Example
 //!
-//! ```rust,ignore
+//! ```rust
+//! # #[cfg(feature = "sqlite")]
+//! # {
 //! use geolite_diesel::functions::*;
+//! use diesel::debug_query;
 //! use diesel::prelude::*;
+//! use diesel::sqlite::Sqlite;
+//! use diesel::NullableExpressionMethods;
 //!
-//! let nearby: Vec<Feature> = features::table
-//!     .filter(st_dwithin(features::geom, st_point(lon, lat), 1000.0))
-//!     .load(&mut conn)?;
+//! diesel::table! {
+//!     features (id) {
+//!         id -> Integer,
+//!         geom -> Nullable<geolite_diesel::Geometry>,
+//!     }
+//! }
+//!
+//! let nearby = features::table
+//!     .filter(st_dwithin(features::geom, st_point(13.4, 52.5).nullable(), 1000.0).eq(true))
+//!     .select(features::geom);
+//! let sql = debug_query::<Sqlite, _>(&nearby).to_string().to_lowercase();
+//! assert!(sql.contains("st_dwithin"));
+//! # }
 //! ```
 //!
 //! The relate aliases are available in free-function form:
 //!
-//! ```rust,ignore
-//! use diesel::prelude::*;
+//! ```rust
+//! # #[cfg(feature = "sqlite")]
+//! # {
+//! use diesel::debug_query;
+//! use diesel::dsl::select;
+//! use diesel::sqlite::Sqlite;
 //! use geolite_diesel::functions::*;
 //!
 //! let a = st_geomfromtext("POINT(1 1)");
@@ -30,16 +49,15 @@
 //! let pattern = "T*****FF*";
 //!
 //! // Alias for ST_Relate(a, b, pattern)
-//! let via_geoms: Option<bool> = diesel::dsl::select(st_relate_match_geoms(a, b, pattern))
-//!     .get_result(&mut conn)?;
+//! let via_geoms = select(st_relate_match_geoms(a, b, pattern));
+//! let geoms_sql = debug_query::<Sqlite, _>(&via_geoms).to_string().to_lowercase();
+//! assert!(geoms_sql.contains("st_relate"));
 //!
 //! // Alias for ST_RelateMatch(matrix, pattern)
-//! let matrix = st_relate(
-//!     st_geomfromtext("POINT(1 1)"),
-//!     st_geomfromtext("POLYGON((0 0,0 3,3 3,3 0,0 0))"),
-//! );
-//! let via_matrix: Option<bool> = diesel::dsl::select(st_relate_match(matrix, pattern))
-//!     .get_result(&mut conn)?;
+//! let via_matrix = select(st_relate_match("T********", pattern));
+//! let matrix_sql = debug_query::<Sqlite, _>(&via_matrix).to_string().to_lowercase();
+//! assert!(matrix_sql.contains("st_relatematch"));
+//! # }
 //! ```
 //!
 //! # Spatial index lifecycle is raw SQL only

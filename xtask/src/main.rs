@@ -116,6 +116,16 @@ fn precommit(full: bool) -> Result<(), String> {
             "--features",
             "sqlite",
         ],
+        vec!["cargo", "test", "--doc", "--workspace"],
+        vec![
+            "cargo",
+            "test",
+            "--doc",
+            "-p",
+            "geolite-diesel",
+            "--features",
+            "sqlite",
+        ],
     ];
 
     if full {

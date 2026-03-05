@@ -57,36 +57,35 @@
 //!
 //! ### Diesel Example
 //!
-//! ```rust,ignore
-//! use diesel::prelude::*;
+//! ```rust
+//! # #[cfg(feature = "sqlite")]
+//! # {
+//! use diesel::debug_query;
 //! use diesel::sql_types::Double;
-//!
-//! #[derive(QueryableByName, Debug)]
-//! struct Row {
-//!     #[diesel(sql_type = diesel::sql_types::Integer)]
-//!     id: i32,
-//!     #[diesel(sql_type = diesel::sql_types::Text)]
-//!     name: String,
-//! }
+//! use diesel::sqlite::Sqlite;
 //!
 //! let (xmin, ymin, xmax, ymax) = (2.0, 2.0, 5.0, 5.0);
 //!
-//! let results: Vec<Row> = diesel::sql_query(
+//! let query = diesel::sql_query(
 //!     "SELECT t.id, t.name FROM my_table t \
 //!      JOIN my_table_geom_rtree r ON t.rowid = r.id \
 //!      WHERE r.xmax >= ? AND r.xmin <= ? \
 //!        AND r.ymax >= ? AND r.ymin <= ? \
-//!        AND ST_Intersects(t.geom, ST_MakeEnvelope(?, ?, ?, ?)) = 1"
+//!        AND ST_Intersects(t.geom, ST_MakeEnvelope(?, ?, ?, ?)) = 1",
 //! )
-//!     .bind::<Double, _>(xmin)
-//!     .bind::<Double, _>(xmax)
-//!     .bind::<Double, _>(ymin)
-//!     .bind::<Double, _>(ymax)
-//!     .bind::<Double, _>(xmin)
-//!     .bind::<Double, _>(ymin)
-//!     .bind::<Double, _>(xmax)
-//!     .bind::<Double, _>(ymax)
-//!     .load(&mut conn)?;
+//! .bind::<Double, _>(xmin)
+//! .bind::<Double, _>(xmax)
+//! .bind::<Double, _>(ymin)
+//! .bind::<Double, _>(ymax)
+//! .bind::<Double, _>(xmin)
+//! .bind::<Double, _>(ymin)
+//! .bind::<Double, _>(xmax)
+//! .bind::<Double, _>(ymax);
+//!
+//! let sql = debug_query::<Sqlite, _>(&query).to_string();
+//! assert!(sql.contains("my_table_geom_rtree"));
+//! assert!(sql.contains("ST_Intersects"));
+//! # }
 //! ```
 //!
 //! ### PostGIS Equivalent
@@ -126,15 +125,22 @@
 //!
 //! ### Diesel Example
 //!
-//! ```rust,ignore
-//! let results: Vec<Row> = diesel::sql_query(
+//! ```rust
+//! # #[cfg(feature = "sqlite")]
+//! # {
+//! use diesel::debug_query;
+//! use diesel::sqlite::Sqlite;
+//!
+//! let query = diesel::sql_query(
 //!     "SELECT t.id, t.name FROM my_table t \
 //!      JOIN my_table_geom_rtree r ON t.rowid = r.id \
 //!      WHERE r.xmax >= 0.0 AND r.xmin <= 10.0 \
 //!        AND r.ymax >= 0.0 AND r.ymin <= 10.0 \
-//!        AND ST_Within(t.geom, ST_GeomFromText('POLYGON((0 0,10 0,10 10,0 10,0 0))')) = 1"
-//! )
-//!     .load(&mut conn)?;
+//!        AND ST_Within(t.geom, ST_GeomFromText('POLYGON((0 0,10 0,10 10,0 10,0 0))')) = 1",
+//! );
+//! let sql = debug_query::<Sqlite, _>(&query).to_string();
+//! assert!(sql.contains("ST_Within"));
+//! # }
 //! ```
 //!
 //! ### PostGIS Equivalent
@@ -173,25 +179,32 @@
 //!
 //! ### Diesel Example
 //!
-//! ```rust,ignore
+//! ```rust
+//! # #[cfg(feature = "sqlite")]
+//! # {
+//! use diesel::debug_query;
 //! use diesel::sql_types::Double;
+//! use diesel::sqlite::Sqlite;
 //!
 //! let (px, py) = (5.0, 5.0);
 //!
-//! let results: Vec<Row> = diesel::sql_query(
+//! let query = diesel::sql_query(
 //!     "SELECT t.id, t.name FROM my_table t \
 //!      JOIN my_table_geom_rtree r ON t.rowid = r.id \
 //!      WHERE r.xmin <= ? AND r.xmax >= ? \
 //!        AND r.ymin <= ? AND r.ymax >= ? \
-//!        AND ST_Contains(t.geom, ST_Point(?, ?)) = 1"
+//!        AND ST_Contains(t.geom, ST_Point(?, ?)) = 1",
 //! )
-//!     .bind::<Double, _>(px)
-//!     .bind::<Double, _>(px)
-//!     .bind::<Double, _>(py)
-//!     .bind::<Double, _>(py)
-//!     .bind::<Double, _>(px)
-//!     .bind::<Double, _>(py)
-//!     .load(&mut conn)?;
+//! .bind::<Double, _>(px)
+//! .bind::<Double, _>(px)
+//! .bind::<Double, _>(py)
+//! .bind::<Double, _>(py)
+//! .bind::<Double, _>(px)
+//! .bind::<Double, _>(py);
+//!
+//! let sql = debug_query::<Sqlite, _>(&query).to_string();
+//! assert!(sql.contains("ST_Contains"));
+//! # }
 //! ```
 //!
 //! ### PostGIS Equivalent
@@ -245,29 +258,36 @@
 //!
 //! ### Diesel Example
 //!
-//! ```rust,ignore
+//! ```rust
+//! # #[cfg(feature = "sqlite")]
+//! # {
+//! use diesel::debug_query;
 //! use diesel::sql_types::Double;
+//! use diesel::sqlite::Sqlite;
 //!
-//! let (lon, lat) = (-0.1278, 51.5074); // London
-//! let radius_m = 400_000.0;
+//! let (lon, lat) = (-0.1278f64, 51.5074f64); // London
+//! let radius_m = 400_000.0f64;
 //! let dlat = radius_m / 111_320.0;
 //! let dlon = radius_m / (111_320.0 * lat.to_radians().cos());
 //!
-//! let results: Vec<Row> = diesel::sql_query(
+//! let query = diesel::sql_query(
 //!     "SELECT t.id, t.name FROM my_table t \
 //!      JOIN my_table_geom_rtree r ON t.rowid = r.id \
 //!      WHERE r.xmax >= ? AND r.xmin <= ? \
 //!        AND r.ymax >= ? AND r.ymin <= ? \
-//!        AND ST_DWithinSphere(t.geom, ST_Point(?, ?, 4326), ?) = 1"
+//!        AND ST_DWithinSphere(t.geom, ST_Point(?, ?, 4326), ?) = 1",
 //! )
-//!     .bind::<Double, _>(lon - dlon)    // xmax >= lon - dlon
-//!     .bind::<Double, _>(lon + dlon)    // xmin <= lon + dlon
-//!     .bind::<Double, _>(lat - dlat)    // ymax >= lat - dlat
-//!     .bind::<Double, _>(lat + dlat)    // ymin <= lat + dlat
-//!     .bind::<Double, _>(lon)
-//!     .bind::<Double, _>(lat)
-//!     .bind::<Double, _>(radius_m)
-//!     .load(&mut conn)?;
+//! .bind::<Double, _>(lon - dlon) // xmax >= lon - dlon
+//! .bind::<Double, _>(lon + dlon) // xmin <= lon + dlon
+//! .bind::<Double, _>(lat - dlat) // ymax >= lat - dlat
+//! .bind::<Double, _>(lat + dlat) // ymin <= lat + dlat
+//! .bind::<Double, _>(lon)
+//! .bind::<Double, _>(lat)
+//! .bind::<Double, _>(radius_m);
+//!
+//! let sql = debug_query::<Sqlite, _>(&query).to_string();
+//! assert!(sql.contains("ST_DWithinSphere"));
+//! # }
 //! ```
 //!
 //! ### PostGIS Equivalent
@@ -318,37 +338,37 @@
 //!
 //! ### Diesel Example
 //!
-//! ```rust,ignore
+//! ```rust
+//! # #[cfg(feature = "sqlite")]
+//! # {
+//! use diesel::debug_query;
 //! use diesel::sql_types::{Double, Integer};
-//!
-//! #[derive(QueryableByName, Debug)]
-//! struct NearRow {
-//!     #[diesel(sql_type = diesel::sql_types::Integer)]
-//!     id: i32,
-//!     #[diesel(sql_type = diesel::sql_types::Double)]
-//!     dist: f64,
-//! }
+//! use diesel::sqlite::Sqlite;
 //!
 //! let (px, py) = (5.0, 5.0);
 //! let half_w = 3.0;
 //! let n = 5i32;
 //!
-//! let results: Vec<NearRow> = diesel::sql_query(
+//! let query = diesel::sql_query(
 //!     "SELECT t.id, ST_Distance(t.geom, ST_Point(?, ?)) AS dist \
 //!      FROM my_table t \
 //!      JOIN my_table_geom_rtree r ON t.rowid = r.id \
 //!      WHERE r.xmax >= ? AND r.xmin <= ? \
 //!        AND r.ymax >= ? AND r.ymin <= ? \
-//!      ORDER BY dist LIMIT ?"
+//!      ORDER BY dist LIMIT ?",
 //! )
-//!     .bind::<Double, _>(px)
-//!     .bind::<Double, _>(py)
-//!     .bind::<Double, _>(px - half_w)
-//!     .bind::<Double, _>(px + half_w)
-//!     .bind::<Double, _>(py - half_w)
-//!     .bind::<Double, _>(py + half_w)
-//!     .bind::<Integer, _>(n)
-//!     .load(&mut conn)?;
+//! .bind::<Double, _>(px)
+//! .bind::<Double, _>(py)
+//! .bind::<Double, _>(px - half_w)
+//! .bind::<Double, _>(px + half_w)
+//! .bind::<Double, _>(py - half_w)
+//! .bind::<Double, _>(py + half_w)
+//! .bind::<Integer, _>(n);
+//!
+//! let sql = debug_query::<Sqlite, _>(&query).to_string();
+//! assert!(sql.contains("ORDER BY dist LIMIT ?"));
+//! assert!(sql.contains("ST_Distance"));
+//! # }
 //! ```
 //!
 //! ### PostGIS Equivalent
@@ -395,39 +415,39 @@
 //!
 //! ### Diesel Example
 //!
-//! ```rust,ignore
+//! ```rust
+//! # #[cfg(feature = "sqlite")]
+//! # {
+//! use diesel::debug_query;
 //! use diesel::sql_types::{Double, Integer};
+//! use diesel::sqlite::Sqlite;
 //!
-//! #[derive(QueryableByName, Debug)]
-//! struct GeoNearRow {
-//!     #[diesel(sql_type = diesel::sql_types::Integer)]
-//!     id: i32,
-//!     #[diesel(sql_type = diesel::sql_types::Double)]
-//!     dist: f64,
-//! }
-//!
-//! let (lon, lat) = (2.3522, 48.8566); // Paris
-//! let search_radius_m = 1_000_000.0; // 1000 km
+//! let (lon, lat) = (2.3522f64, 48.8566f64); // Paris
+//! let search_radius_m = 1_000_000.0f64; // 1000 km
 //! let dlat = search_radius_m / 111_320.0;
 //! let dlon = search_radius_m / (111_320.0 * lat.to_radians().cos());
 //! let n = 3i32;
 //!
-//! let results: Vec<GeoNearRow> = diesel::sql_query(
+//! let query = diesel::sql_query(
 //!     "SELECT t.id, ST_DistanceSphere(t.geom, ST_Point(?, ?, 4326)) AS dist \
 //!      FROM my_table t \
 //!      JOIN my_table_geom_rtree r ON t.rowid = r.id \
 //!      WHERE r.xmax >= ? AND r.xmin <= ? \
 //!        AND r.ymax >= ? AND r.ymin <= ? \
-//!      ORDER BY dist LIMIT ?"
+//!      ORDER BY dist LIMIT ?",
 //! )
-//!     .bind::<Double, _>(lon)
-//!     .bind::<Double, _>(lat)
-//!     .bind::<Double, _>(lon - dlon)
-//!     .bind::<Double, _>(lon + dlon)
-//!     .bind::<Double, _>(lat - dlat)
-//!     .bind::<Double, _>(lat + dlat)
-//!     .bind::<Integer, _>(n)
-//!     .load(&mut conn)?;
+//! .bind::<Double, _>(lon)
+//! .bind::<Double, _>(lat)
+//! .bind::<Double, _>(lon - dlon)
+//! .bind::<Double, _>(lon + dlon)
+//! .bind::<Double, _>(lat - dlat)
+//! .bind::<Double, _>(lat + dlat)
+//! .bind::<Integer, _>(n);
+//!
+//! let sql = debug_query::<Sqlite, _>(&query).to_string();
+//! assert!(sql.contains("ST_DistanceSphere"));
+//! assert!(sql.contains("ORDER BY dist LIMIT ?"));
+//! # }
 //! ```
 //!
 //! ### PostGIS Equivalent
@@ -458,20 +478,35 @@
 //!
 //! ### Algorithm
 //!
-//! ```rust,ignore
-//! let mut half_w = initial_half_w;
-//! let n = 5;
+//! ```rust
+//! fn run_knn_query(_px: f64, _py: f64, half_w: f64, n: i32) -> Result<Vec<i32>, &'static str> {
+//!     let approx = if half_w < 2.0 {
+//!         2
+//!     } else if half_w < 4.0 {
+//!         4
+//!     } else {
+//!         n as usize
+//!     };
+//!     Ok((0..approx.min(n as usize)).map(|i| i as i32).collect())
+//! }
 //!
-//! loop {
-//!     let results = run_knn_query(px, py, half_w, n, &mut conn)?;
+//! let (px, py) = (5.0, 5.0);
+//! let mut half_w = 1.0;
+//! let max_half_w = 8.0;
+//! let n = 5i32;
+//!
+//! let final_results = loop {
+//!     let results = run_knn_query(px, py, half_w, n).expect("mock query should succeed");
 //!     if results.len() >= n as usize {
-//!         return Ok(results);
+//!         break results;
 //!     }
 //!     half_w *= 2.0;
 //!     if half_w > max_half_w {
-//!         return Ok(results); // return best effort
+//!         break results; // return best effort
 //!     }
-//! }
+//! };
+//!
+//! assert_eq!(final_results.len(), n as usize);
 //! ```
 //!
 //! ### Notes

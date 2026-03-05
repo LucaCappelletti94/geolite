@@ -55,7 +55,7 @@ assert!((st_distance(&a, &b).unwrap() - 5.0).abs() < 1e-10);
 geolite-diesel = { path = "geolite-diesel", features = ["sqlite"] }
 ```
 
-```rust,no_run
+```rust
 # #[cfg(feature = "sqlite")]
 # {
 use diesel::debug_query;
@@ -79,8 +79,8 @@ let query = features::table
     )
     .select(features::geom.st_astext());
 
-let sql = debug_query::<Sqlite, _>(&query).to_string();
-assert!(sql.contains("ST_DWithin"));
+let sql = debug_query::<Sqlite, _>(&query).to_string().to_lowercase();
+assert!(sql.contains("st_dwithin"));
 # }
 ```
 
@@ -115,11 +115,26 @@ Spatial index catalog lifecycle semantics (`sqlite` feature):
   clean up or rebuild managed objects/markers before calling lifecycle helpers
   again.
 
-```rust,no_run
+```rust
 # #[cfg(feature = "sqlite")]
 # {
 use diesel::prelude::*;
 use diesel::sql_query;
+# use std::sync::Once;
+#
+# static INIT: Once = Once::new();
+#
+# unsafe extern "C" fn geolite_init(
+#     db: *mut libsqlite3_sys::sqlite3,
+#     _pz_err_msg: *mut *mut std::ffi::c_char,
+#     _p_api: *const libsqlite3_sys::sqlite3_api_routines,
+# ) -> std::ffi::c_int {
+#     geolite_sqlite::register_functions(db)
+# }
+#
+# INIT.call_once(|| unsafe {
+#     libsqlite3_sys::sqlite3_auto_extension(Some(geolite_init));
+# });
 
 let mut conn = SqliteConnection::establish(":memory:").unwrap();
 sql_query("CREATE TABLE places (id INTEGER PRIMARY KEY, geom BLOB)")
