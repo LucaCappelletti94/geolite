@@ -3,10 +3,11 @@
 use std::sync::Once;
 use std::time::Duration;
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use diesel::prelude::*;
 use diesel::sql_query;
 use geolite_diesel::prelude::*;
+use std::hint::black_box;
 
 diesel::table! {
     sw_grid (id) {
