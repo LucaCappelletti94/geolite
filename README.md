@@ -182,7 +182,27 @@ cargo test -p geolite-sqlite spatial_index_accelerates_knn -- --ignored --exact 
 cargo test -p geolite-sqlite type_partitioned_vs_mixed_index -- --ignored --exact --nocapture
 cargo test -p geolite-diesel --features sqlite indexed_intersects_window_is_faster -- --ignored --exact --nocapture
 cargo test -p geolite-diesel --features sqlite indexed_knn_is_faster -- --ignored --exact --nocapture
+
+# Diesel Criterion benches
+cargo bench -p geolite-diesel --features sqlite --benches
 ```
+
+### Latest Diesel benchmark run
+
+Command:
+
+```sh
+cargo bench -p geolite-diesel --features sqlite --benches
+```
+
+Measured on March 5, 2026:
+
+| Scenario | Indexed (ORM + R-tree join) | Non-indexed (ORM) | Approx speedup |
+|---|---:|---:|---:|
+| `intersects_window` | `156.43 µs` | `9.3577 ms` | `~59.8x` |
+| `knn` | `84.271 µs` | `5.4050 ms` | `~64.1x` |
+
+Values above are Criterion central estimates from one run and can vary by host/load.
 
 ## Development
 
