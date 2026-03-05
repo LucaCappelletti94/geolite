@@ -28,7 +28,7 @@ diesel = { version = "2", default-features = false }
 
 [dev-dependencies]
 chrono = "0.4"
-criterion = "0.5"
+criterion = "0.8.2"
 geolite-core = { version = "0.1.0", path = "../geolite-core" }
 geolite-sqlite = { version = "0.1.0", path = "../geolite-sqlite" }
 
