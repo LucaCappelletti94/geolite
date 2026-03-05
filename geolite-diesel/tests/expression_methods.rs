@@ -9,6 +9,8 @@ use geolite_core::function_catalog::SQLITE_DETERMINISTIC_FUNCTIONS;
 use geolite_diesel::prelude::*;
 use std::collections::BTreeSet;
 
+const DIESEL_FUNCTIONS_SRC: &str = include_str!("../src/generated/functions.rs");
+
 /// Geometry literal helper (not Clone, so create fresh each time via macro).
 macro_rules! g {
     () => {
@@ -144,7 +146,7 @@ fn diesel_sql_signatures(src: &str) -> BTreeSet<(String, usize)> {
 
 #[test]
 fn diesel_functions_and_methods_surface_parity() {
-    let sql_surface = geometry_first_sql_functions(include_str!("../src/functions.rs"));
+    let sql_surface = geometry_first_sql_functions(DIESEL_FUNCTIONS_SRC);
     let method_surface = geometry_expression_methods(include_str!("../src/expression_methods.rs"));
 
     let missing_methods: Vec<_> = sql_surface.difference(&method_surface).cloned().collect();
@@ -162,7 +164,7 @@ fn diesel_functions_and_methods_surface_parity() {
 
 #[test]
 fn diesel_sql_functions_are_backed_by_sqlite_catalog() {
-    let diesel_signatures = diesel_sql_signatures(include_str!("../src/functions.rs"));
+    let diesel_signatures = diesel_sql_signatures(DIESEL_FUNCTIONS_SRC);
     let catalog_signatures: BTreeSet<(String, usize)> = SQLITE_DETERMINISTIC_FUNCTIONS
         .iter()
         .map(|spec| (spec.name.to_ascii_uppercase(), spec.n_arg as usize))
@@ -186,7 +188,7 @@ fn catalog_functions_are_covered_by_diesel_declarations() {
         .map(|spec| (spec.name.to_ascii_uppercase(), spec.n_arg as usize))
         .collect();
 
-    let diesel_signatures = diesel_sql_signatures(include_str!("../src/functions.rs"));
+    let diesel_signatures = diesel_sql_signatures(DIESEL_FUNCTIONS_SRC);
 
     let missing_diesel: Vec<_> = catalog_signatures
         .difference(&diesel_signatures)

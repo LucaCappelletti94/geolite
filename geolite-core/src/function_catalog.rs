@@ -9,6 +9,25 @@ pub enum SqliteReturnClass {
     Bool,
 }
 
+/// Expected semantic outcome for a SQL case.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SemanticExpectation {
+    Null,
+    NumericFinite,
+    TextNonEmpty,
+    BlobNonEmpty,
+    Bool01,
+    ErrorContains(&'static str),
+}
+
+/// Canonical semantic SQL case.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SemanticCase {
+    pub id: &'static str,
+    pub sql: &'static str,
+    pub expected: SemanticExpectation,
+}
+
 /// Canonical SQLite function declaration metadata.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SqliteFunctionSpec {
@@ -18,15 +37,102 @@ pub struct SqliteFunctionSpec {
     /// Semantic smoke SQL used to validate that callback wiring matches
     /// signature + return class (not just NULL short-circuit behavior).
     pub smoke_sql: &'static str,
+    /// Semantic-golden SQL cases used by cross-surface parity tests.
+    pub semantic_cases: &'static [SemanticCase],
+}
+
+macro_rules! case {
+    ($id:literal, $sql:expr, $expected:expr) => {
+        SemanticCase {
+            id: $id,
+            sql: $sql,
+            expected: $expected,
+        }
+    };
+}
+
+macro_rules! null_sql {
+    ($name:literal, 1) => {
+        concat!("SELECT ", $name, "(NULL)")
+    };
+    ($name:literal, 2) => {
+        concat!("SELECT ", $name, "(NULL, NULL)")
+    };
+    ($name:literal, 3) => {
+        concat!("SELECT ", $name, "(NULL, NULL, NULL)")
+    };
+    ($name:literal, 4) => {
+        concat!("SELECT ", $name, "(NULL, NULL, NULL, NULL)")
+    };
+    ($name:literal, 5) => {
+        concat!("SELECT ", $name, "(NULL, NULL, NULL, NULL, NULL)")
+    };
+}
+
+macro_rules! expected_for_return_class {
+    (Numeric) => {
+        SemanticExpectation::NumericFinite
+    };
+    (Text) => {
+        SemanticExpectation::TextNonEmpty
+    };
+    (Blob) => {
+        SemanticExpectation::BlobNonEmpty
+    };
+    (Bool) => {
+        SemanticExpectation::Bool01
+    };
 }
 
 macro_rules! spec {
-    ($name:literal, $n_arg:literal, $return_class:ident, $smoke_sql:literal) => {
+    ($name:literal, $n_arg:tt, $return_class:ident, $smoke_sql:literal) => {
         SqliteFunctionSpec {
             name: $name,
             n_arg: $n_arg,
             return_class: SqliteReturnClass::$return_class,
             smoke_sql: $smoke_sql,
+            semantic_cases: &[
+                case!(
+                    "smoke",
+                    $smoke_sql,
+                    expected_for_return_class!($return_class)
+                ),
+                case!(
+                    "null_input",
+                    null_sql!($name, $n_arg),
+                    SemanticExpectation::Null
+                ),
+            ],
+        }
+    };
+}
+
+macro_rules! direct_spec {
+    (
+        $name:literal,
+        $n_arg:tt,
+        $return_class:ident,
+        $smoke_sql:literal,
+        $null_sql:literal,
+        $null_error_contains:literal
+    ) => {
+        SqliteFunctionSpec {
+            name: $name,
+            n_arg: $n_arg,
+            return_class: SqliteReturnClass::$return_class,
+            smoke_sql: $smoke_sql,
+            semantic_cases: &[
+                case!(
+                    "smoke",
+                    $smoke_sql,
+                    expected_for_return_class!($return_class)
+                ),
+                case!(
+                    "null_input_error",
+                    $null_sql,
+                    SemanticExpectation::ErrorContains($null_error_contains)
+                ),
+            ],
         }
     };
 }
@@ -511,16 +617,20 @@ pub const SQLITE_DETERMINISTIC_FUNCTIONS: &[SqliteFunctionSpec] = &[
 ];
 
 pub const SQLITE_DIRECT_ONLY_FUNCTIONS: &[SqliteFunctionSpec] = &[
-    spec!(
+    direct_spec!(
         "CreateSpatialIndex",
         2,
         Numeric,
-        "SELECT CreateSpatialIndex('_rt', 'geom')"
+        "SELECT CreateSpatialIndex('_rt', 'geom')",
+        "SELECT CreateSpatialIndex(NULL, 'geom')",
+        "table name must not be NULL"
     ),
-    spec!(
+    direct_spec!(
         "DropSpatialIndex",
         2,
         Numeric,
-        "SELECT DropSpatialIndex('_rt', 'geom')"
+        "SELECT DropSpatialIndex('_rt', 'geom')",
+        "SELECT DropSpatialIndex(NULL, 'geom')",
+        "table name must not be NULL"
     ),
 ];

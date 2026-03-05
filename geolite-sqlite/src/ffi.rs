@@ -1787,107 +1787,8 @@ macro_rules! callback_spec {
     };
 }
 
-const SQLITE_DETERMINISTIC_CALLBACKS: &[SqliteCallbackSpec] = &[
-    // I/O
-    callback_spec!("ST_GeomFromText", 1, st_geomfromtext_1_xfunc),
-    callback_spec!("ST_GeomFromText", 2, st_geomfromtext_2_xfunc),
-    callback_spec!("ST_GeomFromWKB", 1, st_geomfromwkb_1_xfunc),
-    callback_spec!("ST_GeomFromWKB", 2, st_geomfromwkb_2_xfunc),
-    callback_spec!("ST_GeomFromEWKB", 1, st_geomfromewkb_xfunc),
-    callback_spec!("ST_GeomFromGeoJSON", 1, st_geomfromgeojson_xfunc),
-    callback_spec!("ST_AsText", 1, st_astext_xfunc),
-    callback_spec!("ST_AsEWKT", 1, st_asewkt_xfunc),
-    callback_spec!("ST_AsBinary", 1, st_asbinary_xfunc),
-    callback_spec!("ST_AsEWKB", 1, st_asewkb_xfunc),
-    callback_spec!("ST_AsGeoJSON", 1, st_asgeojson_xfunc),
-    // Constructors
-    callback_spec!("ST_Point", 2, st_point_2_xfunc),
-    callback_spec!("ST_Point", 3, st_point_3_xfunc),
-    callback_spec!("ST_MakePoint", 2, st_point_2_xfunc),
-    callback_spec!("ST_MakeLine", 2, st_makeline_xfunc),
-    callback_spec!("ST_MakePolygon", 1, st_makepolygon_xfunc),
-    callback_spec!("ST_MakeEnvelope", 4, st_makeenvelope_4_xfunc),
-    callback_spec!("ST_MakeEnvelope", 5, st_makeenvelope_5_xfunc),
-    callback_spec!("ST_Collect", 2, st_collect_xfunc),
-    callback_spec!("ST_TileEnvelope", 3, st_tileenvelope_xfunc),
-    // Accessors
-    callback_spec!("ST_SRID", 1, st_srid_xfunc),
-    callback_spec!("ST_SetSRID", 2, st_setsrid_xfunc),
-    callback_spec!("ST_GeometryType", 1, st_geometrytype_xfunc),
-    callback_spec!("GeometryType", 1, st_geometrytype_xfunc),
-    callback_spec!("ST_NDims", 1, st_ndims_xfunc),
-    callback_spec!("ST_CoordDim", 1, st_coorddim_xfunc),
-    callback_spec!("ST_Zmflag", 1, st_zmflag_xfunc),
-    callback_spec!("ST_IsEmpty", 1, st_isempty_xfunc),
-    callback_spec!("ST_MemSize", 1, st_memsize_xfunc),
-    callback_spec!("ST_X", 1, st_x_xfunc),
-    callback_spec!("ST_Y", 1, st_y_xfunc),
-    callback_spec!("ST_Z", 1, st_z_xfunc),
-    callback_spec!("ST_NumPoints", 1, st_numpoints_xfunc),
-    callback_spec!("ST_NPoints", 1, st_npoints_xfunc),
-    callback_spec!("ST_NumGeometries", 1, st_numgeometries_xfunc),
-    callback_spec!("ST_NumInteriorRings", 1, st_numinteriorrings_xfunc),
-    callback_spec!("ST_NumInteriorRing", 1, st_numinteriorrings_xfunc),
-    callback_spec!("ST_NumRings", 1, st_numrings_xfunc),
-    callback_spec!("ST_PointN", 2, st_pointn_xfunc),
-    callback_spec!("ST_StartPoint", 1, st_startpoint_xfunc),
-    callback_spec!("ST_EndPoint", 1, st_endpoint_xfunc),
-    callback_spec!("ST_ExteriorRing", 1, st_exteriorring_xfunc),
-    callback_spec!("ST_InteriorRingN", 2, st_interiorringn_xfunc),
-    callback_spec!("ST_GeometryN", 2, st_geometryn_xfunc),
-    callback_spec!("ST_Dimension", 1, st_dimension_xfunc),
-    callback_spec!("ST_Envelope", 1, st_envelope_xfunc),
-    callback_spec!("ST_IsValid", 1, st_isvalid_xfunc),
-    callback_spec!("ST_IsValidReason", 1, st_isvalidreason_xfunc),
-    // Measurement
-    callback_spec!("ST_Area", 1, st_area_xfunc),
-    callback_spec!("ST_Length", 1, st_length_xfunc),
-    callback_spec!("ST_Length2D", 1, st_length_xfunc),
-    callback_spec!("ST_Perimeter", 1, st_perimeter_xfunc),
-    callback_spec!("ST_Perimeter2D", 1, st_perimeter_xfunc),
-    callback_spec!("ST_Distance", 2, st_distance_xfunc),
-    callback_spec!("ST_Centroid", 1, st_centroid_xfunc),
-    callback_spec!("ST_PointOnSurface", 1, st_pointonsurface_xfunc),
-    callback_spec!("ST_HausdorffDistance", 2, st_hausdorffdistance_xfunc),
-    callback_spec!("ST_XMin", 1, st_xmin_xfunc),
-    callback_spec!("ST_XMax", 1, st_xmax_xfunc),
-    callback_spec!("ST_YMin", 1, st_ymin_xfunc),
-    callback_spec!("ST_YMax", 1, st_ymax_xfunc),
-    callback_spec!("ST_DistanceSphere", 2, st_distancesphere_xfunc),
-    callback_spec!("ST_DistanceSpheroid", 2, st_distancespheroid_xfunc),
-    callback_spec!("ST_LengthSphere", 1, st_lengthsphere_xfunc),
-    callback_spec!("ST_Azimuth", 2, st_azimuth_xfunc),
-    callback_spec!("ST_Project", 3, st_project_xfunc),
-    callback_spec!("ST_ClosestPoint", 2, st_closestpoint_xfunc),
-    // Operations
-    callback_spec!("ST_Union", 2, st_union_xfunc),
-    callback_spec!("ST_Intersection", 2, st_intersection_xfunc),
-    callback_spec!("ST_Difference", 2, st_difference_xfunc),
-    callback_spec!("ST_SymDifference", 2, st_symdifference_xfunc),
-    callback_spec!("ST_Buffer", 2, st_buffer_xfunc),
-    // Predicates
-    callback_spec!("ST_Intersects", 2, st_intersects_xfunc),
-    callback_spec!("ST_Contains", 2, st_contains_xfunc),
-    callback_spec!("ST_Within", 2, st_within_xfunc),
-    callback_spec!("ST_Disjoint", 2, st_disjoint_xfunc),
-    callback_spec!("ST_DWithin", 3, st_dwithin_xfunc),
-    callback_spec!("ST_DWithinSphere", 3, st_dwithinsphere_xfunc),
-    callback_spec!("ST_DWithinSpheroid", 3, st_dwithinspheroid_xfunc),
-    callback_spec!("ST_Covers", 2, st_covers_xfunc),
-    callback_spec!("ST_CoveredBy", 2, st_coveredby_xfunc),
-    callback_spec!("ST_Equals", 2, st_equals_xfunc),
-    callback_spec!("ST_Touches", 2, st_touches_xfunc),
-    callback_spec!("ST_Crosses", 2, st_crosses_xfunc),
-    callback_spec!("ST_Overlaps", 2, st_overlaps_xfunc),
-    callback_spec!("ST_Relate", 2, st_relate_2_xfunc),
-    callback_spec!("ST_Relate", 3, st_relate_3_xfunc),
-    callback_spec!("ST_RelateMatch", 2, st_relatematch_xfunc),
-];
-
-const SQLITE_DIRECT_ONLY_CALLBACKS: &[SqliteCallbackSpec] = &[
-    callback_spec!("CreateSpatialIndex", 2, create_spatial_index_xfunc),
-    callback_spec!("DropSpatialIndex", 2, drop_spatial_index_xfunc),
-];
+include!("generated/deterministic_callbacks.rs");
+include!("generated/direct_only_callbacks.rs");
 
 const fn const_str_eq(a: &str, b: &str) -> bool {
     let a_bytes = a.as_bytes();
@@ -2012,7 +1913,7 @@ pub unsafe extern "C" fn sqlite3_geolitesqlite_init(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use geolite_core::function_catalog::SqliteReturnClass;
+    use geolite_core::function_catalog::{SemanticCase, SemanticExpectation};
     use std::ffi::{CStr, CString};
     use std::ptr;
 
@@ -2135,45 +2036,120 @@ mod tests {
         Ok(value)
     }
 
-    fn assert_return_class(spec: &SqliteFunctionSpec, value: QueryValue) {
-        match (spec.return_class, value) {
-            (SqliteReturnClass::Numeric, QueryValue::Integer(_)) => {}
-            (SqliteReturnClass::Numeric, QueryValue::Float(v)) => {
-                assert!(
-                    v.is_finite(),
-                    "non-finite numeric for {}({})",
+    fn assert_semantic_expectation(
+        spec: &SqliteFunctionSpec,
+        case: &SemanticCase,
+        result: Result<QueryValue, String>,
+    ) {
+        match case.expected {
+            SemanticExpectation::Null => match result {
+                Ok(QueryValue::Null) => {}
+                Ok(got) => panic!(
+                    "expected NULL for {}({}) case `{}` via `{}`, got {:?}",
+                    spec.name, spec.n_arg, case.id, case.sql, got
+                ),
+                Err(err) => panic!(
+                    "expected NULL for {}({}) case `{}` via `{}`, got error: {err}",
+                    spec.name, spec.n_arg, case.id, case.sql
+                ),
+            },
+            SemanticExpectation::NumericFinite => match result {
+                Ok(QueryValue::Integer(_)) => {}
+                Ok(QueryValue::Float(v)) => {
+                    assert!(
+                        v.is_finite(),
+                        "non-finite numeric for {}({}) case `{}` via `{}`",
+                        spec.name,
+                        spec.n_arg,
+                        case.id,
+                        case.sql
+                    );
+                }
+                Ok(got) => panic!(
+                    "expected numeric for {}({}) case `{}` via `{}`, got {:?}",
+                    spec.name, spec.n_arg, case.id, case.sql, got
+                ),
+                Err(err) => panic!(
+                    "expected numeric for {}({}) case `{}` via `{}`, got error: {err}",
+                    spec.name, spec.n_arg, case.id, case.sql
+                ),
+            },
+            SemanticExpectation::TextNonEmpty => match result {
+                Ok(QueryValue::Text(v)) => {
+                    assert!(
+                        !v.is_empty(),
+                        "empty text result for {}({}) case `{}` via `{}`",
+                        spec.name,
+                        spec.n_arg,
+                        case.id,
+                        case.sql
+                    );
+                }
+                Ok(got) => panic!(
+                    "expected non-empty text for {}({}) case `{}` via `{}`, got {:?}",
+                    spec.name, spec.n_arg, case.id, case.sql, got
+                ),
+                Err(err) => panic!(
+                    "expected non-empty text for {}({}) case `{}` via `{}`, got error: {err}",
+                    spec.name, spec.n_arg, case.id, case.sql
+                ),
+            },
+            SemanticExpectation::BlobNonEmpty => match result {
+                Ok(QueryValue::Blob(v)) => {
+                    assert!(
+                        !v.is_empty(),
+                        "empty blob result for {}({}) case `{}` via `{}`",
+                        spec.name,
+                        spec.n_arg,
+                        case.id,
+                        case.sql
+                    );
+                }
+                Ok(got) => panic!(
+                    "expected non-empty blob for {}({}) case `{}` via `{}`, got {:?}",
+                    spec.name, spec.n_arg, case.id, case.sql, got
+                ),
+                Err(err) => panic!(
+                    "expected non-empty blob for {}({}) case `{}` via `{}`, got error: {err}",
+                    spec.name, spec.n_arg, case.id, case.sql
+                ),
+            },
+            SemanticExpectation::Bool01 => match result {
+                Ok(QueryValue::Integer(v)) => {
+                    assert!(
+                        v == 0 || v == 1,
+                        "bool result must be 0/1 for {}({}) case `{}` via `{}`, got {v}",
+                        spec.name,
+                        spec.n_arg,
+                        case.id,
+                        case.sql
+                    );
+                }
+                Ok(got) => panic!(
+                    "expected bool-as-int for {}({}) case `{}` via `{}`, got {:?}",
+                    spec.name, spec.n_arg, case.id, case.sql, got
+                ),
+                Err(err) => panic!(
+                    "expected bool-as-int for {}({}) case `{}` via `{}`, got error: {err}",
+                    spec.name, spec.n_arg, case.id, case.sql
+                ),
+            },
+            SemanticExpectation::ErrorContains(expected_substring) => match result {
+                Err(err) => assert!(
+                    err.contains(expected_substring),
+                    "error mismatch for {}({}) case `{}` via `{}`: expected substring `{}`, got `{}`",
                     spec.name,
-                    spec.n_arg
-                );
-            }
-            (SqliteReturnClass::Text, QueryValue::Text(v)) => {
-                assert!(
-                    !v.is_empty(),
-                    "empty text smoke result for {}({})",
-                    spec.name,
-                    spec.n_arg
-                );
-            }
-            (SqliteReturnClass::Blob, QueryValue::Blob(v)) => {
-                assert!(
-                    !v.is_empty(),
-                    "empty blob smoke result for {}({})",
-                    spec.name,
-                    spec.n_arg
-                );
-            }
-            (SqliteReturnClass::Bool, QueryValue::Integer(v)) => {
-                assert!(
-                    v == 0 || v == 1,
-                    "bool smoke result must be 0/1 for {}({}), got {v}",
-                    spec.name,
-                    spec.n_arg
-                );
-            }
-            (_, got) => panic!(
-                "unexpected smoke return class for {}({}): expected {:?}, got {:?}",
-                spec.name, spec.n_arg, spec.return_class, got
-            ),
+                    spec.n_arg,
+                    case.id,
+                    case.sql,
+                    expected_substring,
+                    err
+                ),
+                Ok(got) => panic!(
+                    "expected SQL error for {}({}) case `{}` via `{}`, got {:?}",
+                    spec.name, spec.n_arg, case.id, case.sql, got
+                ),
+            },
         }
     }
 
@@ -2266,13 +2242,10 @@ mod tests {
             assert_eq!(rc, SQLITE_OK, "register_functions should succeed");
 
             for spec in SQLITE_DETERMINISTIC_FUNCTIONS {
-                let value = query_value(db, spec.smoke_sql).unwrap_or_else(|err| {
-                    panic!(
-                        "deterministic function semantic smoke failed for {}({}) using `{}`: {err}",
-                        spec.name, spec.n_arg, spec.smoke_sql
-                    )
-                });
-                assert_return_class(spec, value);
+                for case in spec.semantic_cases {
+                    let result = query_value(db, case.sql);
+                    assert_semantic_expectation(spec, case, result);
+                }
             }
 
             close_db(db);
@@ -2293,13 +2266,10 @@ mod tests {
             );
 
             for spec in SQLITE_DIRECT_ONLY_FUNCTIONS {
-                let value = query_value(db, spec.smoke_sql).unwrap_or_else(|err| {
-                    panic!(
-                        "direct-only function semantic smoke failed for {}({}) using `{}`: {err}",
-                        spec.name, spec.n_arg, spec.smoke_sql
-                    )
-                });
-                assert_return_class(spec, value);
+                for case in spec.semantic_cases {
+                    let result = query_value(db, case.sql);
+                    assert_semantic_expectation(spec, case, result);
+                }
             }
 
             close_db(db);

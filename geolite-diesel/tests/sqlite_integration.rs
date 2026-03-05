@@ -9,6 +9,10 @@ use std::sync::Once;
 
 use diesel::prelude::*;
 use diesel::sql_query;
+use geolite_core::function_catalog::{
+    SemanticCase, SemanticExpectation, SqliteFunctionSpec, SQLITE_DETERMINISTIC_FUNCTIONS,
+    SQLITE_DIRECT_ONLY_FUNCTIONS,
+};
 
 mod predicate_bool_helpers;
 
@@ -16,6 +20,12 @@ mod predicate_bool_helpers;
 struct PlanRow {
     #[diesel(sql_type = diesel::sql_types::Text)]
     detail: String,
+}
+
+#[derive(QueryableByName, Debug)]
+struct BlobResult {
+    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Binary>)]
+    val: Option<Vec<u8>>,
 }
 
 // ── Auto-extension registration ──────────────────────────────────────────────
@@ -197,4 +207,167 @@ fn spatial_index_lifecycle_via_raw_sql() {
     .get_result(&mut c)
     .unwrap();
     assert_eq!(trigger_count.val, Some(0));
+}
+
+fn semantic_case_sql(sql: &str) -> String {
+    let trimmed = sql.trim();
+    let expr = trimmed
+        .strip_prefix("SELECT ")
+        .or_else(|| trimmed.strip_prefix("select "))
+        .unwrap_or(trimmed);
+    format!("SELECT ({expr}) AS val")
+}
+
+fn assert_semantic_case_via_diesel(
+    c: &mut SqliteConnection,
+    spec: &SqliteFunctionSpec,
+    case: &SemanticCase,
+) {
+    let sql = semantic_case_sql(case.sql);
+    match case.expected {
+        SemanticExpectation::Null => {
+            let row: TextResult = sql_query(&sql).get_result(c).unwrap_or_else(|e| {
+                panic!(
+                    "{}({}) case `{}` failed via `{}`: {e}",
+                    spec.name, spec.n_arg, case.id, case.sql
+                )
+            });
+            assert!(
+                row.val.is_none(),
+                "{}({}) case `{}` expected NULL via `{}`, got {:?}",
+                spec.name,
+                spec.n_arg,
+                case.id,
+                case.sql,
+                row.val
+            );
+        }
+        SemanticExpectation::NumericFinite => {
+            let row: F64Result = sql_query(&sql).get_result(c).unwrap_or_else(|e| {
+                panic!(
+                    "{}({}) case `{}` failed via `{}`: {e}",
+                    spec.name, spec.n_arg, case.id, case.sql
+                )
+            });
+            let value = row.val.unwrap_or_else(|| {
+                panic!(
+                    "{}({}) case `{}` expected numeric via `{}`, got NULL",
+                    spec.name, spec.n_arg, case.id, case.sql
+                )
+            });
+            assert!(
+                value.is_finite(),
+                "{}({}) case `{}` expected finite numeric via `{}`, got {}",
+                spec.name,
+                spec.n_arg,
+                case.id,
+                case.sql,
+                value
+            );
+        }
+        SemanticExpectation::TextNonEmpty => {
+            let row: TextResult = sql_query(&sql).get_result(c).unwrap_or_else(|e| {
+                panic!(
+                    "{}({}) case `{}` failed via `{}`: {e}",
+                    spec.name, spec.n_arg, case.id, case.sql
+                )
+            });
+            let value = row.val.unwrap_or_else(|| {
+                panic!(
+                    "{}({}) case `{}` expected text via `{}`, got NULL",
+                    spec.name, spec.n_arg, case.id, case.sql
+                )
+            });
+            assert!(
+                !value.is_empty(),
+                "{}({}) case `{}` expected non-empty text via `{}`",
+                spec.name,
+                spec.n_arg,
+                case.id,
+                case.sql
+            );
+        }
+        SemanticExpectation::BlobNonEmpty => {
+            let row: BlobResult = sql_query(&sql).get_result(c).unwrap_or_else(|e| {
+                panic!(
+                    "{}({}) case `{}` failed via `{}`: {e}",
+                    spec.name, spec.n_arg, case.id, case.sql
+                )
+            });
+            let value = row.val.unwrap_or_else(|| {
+                panic!(
+                    "{}({}) case `{}` expected blob via `{}`, got NULL",
+                    spec.name, spec.n_arg, case.id, case.sql
+                )
+            });
+            assert!(
+                !value.is_empty(),
+                "{}({}) case `{}` expected non-empty blob via `{}`",
+                spec.name,
+                spec.n_arg,
+                case.id,
+                case.sql
+            );
+        }
+        SemanticExpectation::Bool01 => {
+            let row: I32Result = sql_query(&sql).get_result(c).unwrap_or_else(|e| {
+                panic!(
+                    "{}({}) case `{}` failed via `{}`: {e}",
+                    spec.name, spec.n_arg, case.id, case.sql
+                )
+            });
+            let value = row.val.unwrap_or_else(|| {
+                panic!(
+                    "{}({}) case `{}` expected bool-as-int via `{}`, got NULL",
+                    spec.name, spec.n_arg, case.id, case.sql
+                )
+            });
+            assert!(
+                value == 0 || value == 1,
+                "{}({}) case `{}` expected bool-as-int via `{}`, got {}",
+                spec.name,
+                spec.n_arg,
+                case.id,
+                case.sql,
+                value
+            );
+        }
+        SemanticExpectation::ErrorContains(expected_substring) => {
+            let err = sql_query(&sql)
+                .get_result::<TextResult>(c)
+                .expect_err("semantic case expected to fail");
+            let msg = format!("{err}");
+            assert!(
+                msg.contains(expected_substring),
+                "{}({}) case `{}` expected error containing `{}` via `{}`, got `{}`",
+                spec.name,
+                spec.n_arg,
+                case.id,
+                expected_substring,
+                case.sql,
+                msg
+            );
+        }
+    }
+}
+
+#[test]
+fn catalog_semantic_goldens_via_diesel_sqlite() {
+    let mut c = conn();
+
+    sql_query("CREATE TABLE _rt(geom BLOB)")
+        .execute(&mut c)
+        .expect("semantic goldens require direct-only helper table");
+
+    for spec in SQLITE_DETERMINISTIC_FUNCTIONS {
+        for case in spec.semantic_cases {
+            assert_semantic_case_via_diesel(&mut c, spec, case);
+        }
+    }
+
+    for spec in SQLITE_DIRECT_ONLY_FUNCTIONS {
+        for case in spec.semantic_cases {
+            assert_semantic_case_via_diesel(&mut c, spec, case);
+        }
+    }
 }
