@@ -13,6 +13,7 @@ diesel::table! {
 }
 
 // Tables for index-aware query pattern tests
+diesel::table! { grid (id) { id -> Integer, name -> Text, geom -> Nullable<geolite_diesel::Geometry>, } }
 diesel::table! { iw_grid (id) { id -> Integer, geom -> Nullable<geolite_diesel::Geometry>, } }
 diesel::table! { ip_pts (id) { id -> Integer, name -> Text, geom -> Nullable<geolite_diesel::Geometry>, } }
 diesel::table! { ic_polys (id) { id -> Integer, name -> Text, geom -> Nullable<geolite_diesel::Geometry>, } }
@@ -21,6 +22,26 @@ diesel::table! { knn_grid (id) { id -> Integer, geom -> Nullable<geolite_diesel:
 diesel::table! { knn_cities (id) { id -> Integer, name -> Text, geom -> Nullable<geolite_diesel::Geometry>, } }
 diesel::table! { sw_grid (id) { id -> Integer, geom -> Nullable<geolite_diesel::Geometry>, } }
 diesel::table! { sk_grid (id) { id -> Integer, geom -> Nullable<geolite_diesel::Geometry>, } }
+
+diesel::table! { grid_geom_rtree (id) { id -> Integer, xmin -> Double, xmax -> Double, ymin -> Double, ymax -> Double, } }
+diesel::table! { iw_grid_geom_rtree (id) { id -> Integer, xmin -> Double, xmax -> Double, ymin -> Double, ymax -> Double, } }
+diesel::table! { ip_pts_geom_rtree (id) { id -> Integer, xmin -> Double, xmax -> Double, ymin -> Double, ymax -> Double, } }
+diesel::table! { ic_polys_geom_rtree (id) { id -> Integer, xmin -> Double, xmax -> Double, ymin -> Double, ymax -> Double, } }
+diesel::table! { igr_cities_geom_rtree (id) { id -> Integer, xmin -> Double, xmax -> Double, ymin -> Double, ymax -> Double, } }
+diesel::table! { knn_grid_geom_rtree (id) { id -> Integer, xmin -> Double, xmax -> Double, ymin -> Double, ymax -> Double, } }
+diesel::table! { knn_cities_geom_rtree (id) { id -> Integer, xmin -> Double, xmax -> Double, ymin -> Double, ymax -> Double, } }
+diesel::table! { sw_grid_geom_rtree (id) { id -> Integer, xmin -> Double, xmax -> Double, ymin -> Double, ymax -> Double, } }
+diesel::table! { sk_grid_geom_rtree (id) { id -> Integer, xmin -> Double, xmax -> Double, ymin -> Double, ymax -> Double, } }
+
+diesel::allow_tables_to_appear_in_same_query!(grid, grid_geom_rtree);
+diesel::allow_tables_to_appear_in_same_query!(iw_grid, iw_grid_geom_rtree);
+diesel::allow_tables_to_appear_in_same_query!(ip_pts, ip_pts_geom_rtree);
+diesel::allow_tables_to_appear_in_same_query!(ic_polys, ic_polys_geom_rtree);
+diesel::allow_tables_to_appear_in_same_query!(igr_cities, igr_cities_geom_rtree);
+diesel::allow_tables_to_appear_in_same_query!(knn_grid, knn_grid_geom_rtree);
+diesel::allow_tables_to_appear_in_same_query!(knn_cities, knn_cities_geom_rtree);
+diesel::allow_tables_to_appear_in_same_query!(sw_grid, sw_grid_geom_rtree);
+diesel::allow_tables_to_appear_in_same_query!(sk_grid, sk_grid_geom_rtree);
 
 #[derive(Queryable, Debug)]
 #[diesel(table_name = features)]
@@ -723,6 +744,8 @@ fn orm_null_geometry() {
 
 #[$test_attr]
 fn spatial_index_correctness() {
+    use geolite_diesel::prelude::*;
+
     let mut c = conn();
 
     diesel::sql_query(
@@ -752,18 +775,22 @@ fn spatial_index_correctness() {
         .execute(&mut c)
         .unwrap();
 
-    // Query using R-tree index join: find points inside envelope (2,2)-(5,5)
-    let results: Vec<I32Result> = diesel::sql_query(
-        "SELECT g.id AS val FROM grid g
-         JOIN grid_geom_rtree r ON g.rowid = r.id
-         WHERE r.xmin >= 2 AND r.xmax <= 5 AND r.ymin >= 2 AND r.ymax <= 5
-         AND ST_Intersects(g.geom, ST_MakeEnvelope(2, 2, 5, 5)) = 1
-         ORDER BY g.id",
-    )
-    .load(&mut c)
-    .unwrap();
-
-    let ids: Vec<i32> = results.iter().filter_map(|r| r.val).collect();
+    // Query using ORM R-tree join: find points inside envelope (2,2)-(5,5)
+    let ids: Vec<i32> = grid::table
+        .inner_join(grid_geom_rtree::table.on(grid::id.eq(grid_geom_rtree::id)))
+        .filter(grid_geom_rtree::xmin.ge(2.0))
+        .filter(grid_geom_rtree::xmax.le(5.0))
+        .filter(grid_geom_rtree::ymin.ge(2.0))
+        .filter(grid_geom_rtree::ymax.le(5.0))
+        .filter(
+            grid::geom
+                .st_intersects(st_makeenvelope(2.0, 2.0, 5.0, 5.0).nullable())
+                .eq(true),
+        )
+        .select(grid::id)
+        .order(grid::id.asc())
+        .load(&mut c)
+        .unwrap();
 
     // Points at (2..=5, 2..=5) should be found
     let mut expected = Vec::new();
@@ -904,8 +931,7 @@ fn st_perimeter2d_typed_diesel_function() {
 }
 
 // ── Index-aware query pattern tests ──────────────────────────────────────────
-// Indexed paths use sql_query (R-tree JOINs can't be expressed in DSL).
-// Non-indexed reference paths use the Diesel query builder.
+// Indexed and non-indexed paths both use the Diesel query builder.
 
 #[$test_attr]
 fn indexed_intersects_window() {
@@ -926,27 +952,34 @@ fn indexed_intersects_window() {
     diesel::sql_query("SELECT CreateSpatialIndex('iw_grid', 'geom')")
         .execute(&mut c).unwrap();
 
-    let envelope = st_makeenvelope(2.0, 2.0, 5.0, 5.0).nullable();
-
-    // Indexed: R-tree prefilter + ST_Intersects refinement (requires sql_query)
-    let indexed: Vec<I32Result> = diesel::sql_query(
-        "SELECT g.id AS val FROM iw_grid g \
-         JOIN iw_grid_geom_rtree r ON g.rowid = r.id \
-         WHERE r.xmax >= 2 AND r.xmin <= 5 \
-           AND r.ymax >= 2 AND r.ymin <= 5 \
-           AND ST_Intersects(g.geom, ST_MakeEnvelope(2, 2, 5, 5)) = 1 \
-         ORDER BY g.id",
-    ).load(&mut c).unwrap();
-
-    // Non-indexed: Diesel ORM
-    let non_ids: Vec<i32> = iw_grid::table
-        .filter(iw_grid::geom.st_intersects(envelope).eq(true))
+    let idx_ids: Vec<i32> = iw_grid::table
+        .inner_join(iw_grid_geom_rtree::table.on(iw_grid::id.eq(iw_grid_geom_rtree::id)))
+        .filter(iw_grid_geom_rtree::xmax.ge(2.0))
+        .filter(iw_grid_geom_rtree::xmin.le(5.0))
+        .filter(iw_grid_geom_rtree::ymax.ge(2.0))
+        .filter(iw_grid_geom_rtree::ymin.le(5.0))
+        .filter(
+            iw_grid::geom
+                .st_intersects(st_makeenvelope(2.0, 2.0, 5.0, 5.0).nullable())
+                .eq(true),
+        )
         .select(iw_grid::id)
         .order(iw_grid::id.asc())
         .load(&mut c)
         .unwrap();
 
-    let idx_ids: Vec<i32> = indexed.iter().filter_map(|r| r.val).collect();
+    // Non-indexed: Diesel ORM
+    let non_ids: Vec<i32> = iw_grid::table
+        .filter(
+            iw_grid::geom
+                .st_intersects(st_makeenvelope(2.0, 2.0, 5.0, 5.0).nullable())
+                .eq(true),
+        )
+        .select(iw_grid::id)
+        .order(iw_grid::id.asc())
+        .load(&mut c)
+        .unwrap();
+
     assert_eq!(idx_ids, non_ids, "indexed and non-indexed must match");
     assert_eq!(idx_ids.len(), 16); // (2..=5, 2..=5) = 4×4
 }
@@ -969,27 +1002,34 @@ fn indexed_inside_polygon() {
     diesel::sql_query("SELECT CreateSpatialIndex('ip_pts', 'geom')")
         .execute(&mut c).unwrap();
 
-    let search_poly = st_geomfromtext("POLYGON((0 0,10 0,10 10,0 10,0 0))");
-
-    // Indexed: R-tree prefilter + ST_Within refinement
-    let indexed: Vec<I32Result> = diesel::sql_query(
-        "SELECT p.id AS val FROM ip_pts p \
-         JOIN ip_pts_geom_rtree r ON p.rowid = r.id \
-         WHERE r.xmax >= 0 AND r.xmin <= 10 \
-           AND r.ymax >= 0 AND r.ymin <= 10 \
-           AND ST_Within(p.geom, ST_GeomFromText('POLYGON((0 0,10 0,10 10,0 10,0 0))')) = 1 \
-         ORDER BY p.id",
-    ).load(&mut c).unwrap();
-
-    // Non-indexed: Diesel ORM
-    let non_ids: Vec<i32> = ip_pts::table
-        .filter(ip_pts::geom.st_within(search_poly).eq(true))
+    let idx_ids: Vec<i32> = ip_pts::table
+        .inner_join(ip_pts_geom_rtree::table.on(ip_pts::id.eq(ip_pts_geom_rtree::id)))
+        .filter(ip_pts_geom_rtree::xmax.ge(0.0))
+        .filter(ip_pts_geom_rtree::xmin.le(10.0))
+        .filter(ip_pts_geom_rtree::ymax.ge(0.0))
+        .filter(ip_pts_geom_rtree::ymin.le(10.0))
+        .filter(
+            ip_pts::geom
+                .st_within(st_geomfromtext("POLYGON((0 0,10 0,10 10,0 10,0 0))"))
+                .eq(true),
+        )
         .select(ip_pts::id)
         .order(ip_pts::id.asc())
         .load(&mut c)
         .unwrap();
 
-    let idx_ids: Vec<i32> = indexed.iter().filter_map(|r| r.val).collect();
+    // Non-indexed: Diesel ORM
+    let non_ids: Vec<i32> = ip_pts::table
+        .filter(
+            ip_pts::geom
+                .st_within(st_geomfromtext("POLYGON((0 0,10 0,10 10,0 10,0 0))"))
+                .eq(true),
+        )
+        .select(ip_pts::id)
+        .order(ip_pts::id.asc())
+        .load(&mut c)
+        .unwrap();
+
     assert_eq!(idx_ids, non_ids);
     // Only interior point (5,5) is strictly within; boundary (0,5) is not
     assert_eq!(idx_ids, vec![1]);
@@ -1013,27 +1053,26 @@ fn indexed_contains_point() {
     diesel::sql_query("SELECT CreateSpatialIndex('ic_polys', 'geom')")
         .execute(&mut c).unwrap();
 
-    let query_pt = st_point(3.0, 3.0).nullable();
-
-    // Indexed: R-tree point containment + ST_Contains refinement
-    let indexed: Vec<I32Result> = diesel::sql_query(
-        "SELECT p.id AS val FROM ic_polys p \
-         JOIN ic_polys_geom_rtree r ON p.rowid = r.id \
-         WHERE r.xmin <= 3 AND r.xmax >= 3 \
-           AND r.ymin <= 3 AND r.ymax >= 3 \
-           AND ST_Contains(p.geom, ST_Point(3, 3)) = 1 \
-         ORDER BY p.id",
-    ).load(&mut c).unwrap();
-
-    // Non-indexed: Diesel ORM
-    let non_ids: Vec<i32> = ic_polys::table
-        .filter(ic_polys::geom.st_contains(query_pt).eq(true))
+    let idx_ids: Vec<i32> = ic_polys::table
+        .inner_join(ic_polys_geom_rtree::table.on(ic_polys::id.eq(ic_polys_geom_rtree::id)))
+        .filter(ic_polys_geom_rtree::xmin.le(3.0))
+        .filter(ic_polys_geom_rtree::xmax.ge(3.0))
+        .filter(ic_polys_geom_rtree::ymin.le(3.0))
+        .filter(ic_polys_geom_rtree::ymax.ge(3.0))
+        .filter(ic_polys::geom.st_contains(st_point(3.0, 3.0).nullable()).eq(true))
         .select(ic_polys::id)
         .order(ic_polys::id.asc())
         .load(&mut c)
         .unwrap();
 
-    let idx_ids: Vec<i32> = indexed.iter().filter_map(|r| r.val).collect();
+    // Non-indexed: Diesel ORM
+    let non_ids: Vec<i32> = ic_polys::table
+        .filter(ic_polys::geom.st_contains(st_point(3.0, 3.0).nullable()).eq(true))
+        .select(ic_polys::id)
+        .order(ic_polys::id.asc())
+        .load(&mut c)
+        .unwrap();
+
     assert_eq!(idx_ids, non_ids);
     // Point (3,3) inside both 'small' and 'big', not 'far'
     assert_eq!(idx_ids, vec![1, 2]);
@@ -1064,17 +1103,21 @@ fn indexed_geodesic_radius() {
     let dlat = radius_m / 111_320.0;
     let dlon = radius_m / (111_320.0 * lat.to_radians().cos());
 
-    // Indexed: degree-offset bbox + ST_DWithinSphere (requires sql_query for R-tree JOIN)
-    let indexed: Vec<I32Result> = diesel::sql_query(format!(
-        "SELECT c.id AS val FROM igr_cities c \
-         JOIN igr_cities_geom_rtree r ON c.rowid = r.id \
-         WHERE r.xmax >= {xmin} AND r.xmin <= {xmax} \
-           AND r.ymax >= {ymin} AND r.ymin <= {ymax} \
-           AND ST_DWithinSphere(c.geom, ST_Point({lon}, {lat}, 4326), {radius_m}) = 1 \
-         ORDER BY c.id",
-        xmin = lon - dlon, xmax = lon + dlon,
-        ymin = lat - dlat, ymax = lat + dlat,
-    )).load(&mut c).unwrap();
+    let idx_ids: Vec<i32> = igr_cities::table
+        .inner_join(igr_cities_geom_rtree::table.on(igr_cities::id.eq(igr_cities_geom_rtree::id)))
+        .filter(igr_cities_geom_rtree::xmax.ge(lon - dlon))
+        .filter(igr_cities_geom_rtree::xmin.le(lon + dlon))
+        .filter(igr_cities_geom_rtree::ymax.ge(lat - dlat))
+        .filter(igr_cities_geom_rtree::ymin.le(lat + dlat))
+        .filter(
+            igr_cities::geom
+                .st_dwithinsphere(st_point_srid(lon, lat, 4326).nullable(), radius_m)
+                .eq(true),
+        )
+        .select(igr_cities::id)
+        .order(igr_cities::id.asc())
+        .load(&mut c)
+        .unwrap();
 
     // Non-indexed: Diesel ORM
     let non_ids: Vec<i32> = igr_cities::table
@@ -1087,7 +1130,6 @@ fn indexed_geodesic_radius() {
         .load(&mut c)
         .unwrap();
 
-    let idx_ids: Vec<i32> = indexed.iter().filter_map(|r| r.val).collect();
     assert_eq!(idx_ids, non_ids);
     // London→Paris ≈ 344 km (within), London→Berlin ≈ 930 km (outside)
     assert_eq!(idx_ids, vec![1, 2]);
@@ -1112,19 +1154,23 @@ fn knn_nearest_n_planar() {
     diesel::sql_query("SELECT CreateSpatialIndex('knn_grid', 'geom')")
         .execute(&mut c).unwrap();
 
-    // Indexed KNN: R-tree bbox + ORDER BY distance
-    let results: Vec<F64Result> = diesel::sql_query(
-        "SELECT ST_Distance(g.geom, ST_Point(4.5, 4.5)) AS val \
-         FROM knn_grid g \
-         JOIN knn_grid_geom_rtree r ON g.rowid = r.id \
-         WHERE r.xmax >= 1.5 AND r.xmin <= 7.5 \
-           AND r.ymax >= 1.5 AND r.ymin <= 7.5 \
-         ORDER BY val \
-         LIMIT 5",
-    ).load(&mut c).unwrap();
+    let indexed_dists: Vec<Option<f64>> = knn_grid::table
+        .inner_join(knn_grid_geom_rtree::table.on(knn_grid::id.eq(knn_grid_geom_rtree::id)))
+        .filter(knn_grid_geom_rtree::xmax.ge(1.5))
+        .filter(knn_grid_geom_rtree::xmin.le(7.5))
+        .filter(knn_grid_geom_rtree::ymax.ge(1.5))
+        .filter(knn_grid_geom_rtree::ymin.le(7.5))
+        .select(knn_grid::geom.st_distance(st_point(4.5, 4.5).nullable()))
+        .order(knn_grid::geom.st_distance(st_point(4.5, 4.5).nullable()))
+        .limit(5)
+        .load(&mut c)
+        .unwrap();
 
-    assert_eq!(results.len(), 5);
-    let dists: Vec<f64> = results.iter().filter_map(|r| r.val).collect();
+    assert_eq!(indexed_dists.len(), 5);
+    let dists: Vec<f64> = indexed_dists
+        .iter()
+        .map(|d| d.expect("distance should not be NULL"))
+        .collect();
     let sqrt_half = (0.5_f64).sqrt();
     for d in &dists[..4] {
         assert!((*d - sqrt_half).abs() < 1e-10, "expected {sqrt_half}, got {d}");
@@ -1132,9 +1178,8 @@ fn knn_nearest_n_planar() {
     assert!(dists[4] > sqrt_half + 0.1);
 
     // Non-indexed: Diesel ORM
-    let query_pt = st_point(4.5, 4.5).nullable();
     let non_dists: Vec<Option<f64>> = knn_grid::table
-        .select(knn_grid::geom.st_distance(query_pt))
+        .select(knn_grid::geom.st_distance(st_point(4.5, 4.5).nullable()))
         .order(knn_grid::geom.st_distance(st_point(4.5, 4.5).nullable()))
         .limit(5)
         .load(&mut c)
@@ -1173,20 +1218,17 @@ fn knn_nearest_n_geodesic() {
     let dlat = search_radius_m / 111_320.0;
     let dlon = search_radius_m / (111_320.0 * lat.to_radians().cos());
 
-    // Indexed: degree-offset bbox + ORDER BY geodesic distance
-    let indexed: Vec<I32Result> = diesel::sql_query(format!(
-        "SELECT c.id AS val \
-         FROM knn_cities c \
-         JOIN knn_cities_geom_rtree r ON c.rowid = r.id \
-         WHERE r.xmax >= {xmin} AND r.xmin <= {xmax} \
-           AND r.ymax >= {ymin} AND r.ymin <= {ymax} \
-         ORDER BY ST_DistanceSphere(c.geom, ST_Point({lon}, {lat}, 4326)) \
-         LIMIT 3",
-        xmin = lon - dlon, xmax = lon + dlon,
-        ymin = lat - dlat, ymax = lat + dlat,
-    )).load(&mut c).unwrap();
-
-    let ids: Vec<i32> = indexed.iter().filter_map(|r| r.val).collect();
+    let ids: Vec<i32> = knn_cities::table
+        .inner_join(knn_cities_geom_rtree::table.on(knn_cities::id.eq(knn_cities_geom_rtree::id)))
+        .filter(knn_cities_geom_rtree::xmax.ge(lon - dlon))
+        .filter(knn_cities_geom_rtree::xmin.le(lon + dlon))
+        .filter(knn_cities_geom_rtree::ymax.ge(lat - dlat))
+        .filter(knn_cities_geom_rtree::ymin.le(lat + dlat))
+        .order(knn_cities::geom.st_distancesphere(st_point_srid(lon, lat, 4326).nullable()))
+        .select(knn_cities::id)
+        .limit(3)
+        .load(&mut c)
+        .unwrap();
     assert_eq!(ids.len(), 3);
     assert_eq!(ids[0], 2, "Paris should be nearest to itself");
     assert_eq!(ids[1], 1, "London should be second");
@@ -1235,44 +1277,57 @@ fn indexed_intersects_window_is_faster() {
     diesel::sql_query("SELECT CreateSpatialIndex('sw_grid', 'geom')")
         .execute(&mut c).unwrap();
 
-    let indexed_sql =
-        "SELECT g.id AS val FROM sw_grid g \
-         JOIN sw_grid_geom_rtree r ON g.rowid = r.id \
-         WHERE r.xmax >= 10 AND r.xmin <= 20 \
-           AND r.ymax >= 10 AND r.ymin <= 20 \
-           AND ST_Intersects(g.geom, ST_MakeEnvelope(10, 10, 20, 20)) = 1";
+    let run_indexed = |conn: &mut SqliteConnection| -> Vec<i32> {
+        sw_grid::table
+            .inner_join(sw_grid_geom_rtree::table.on(sw_grid::id.eq(sw_grid_geom_rtree::id)))
+            .filter(sw_grid_geom_rtree::xmax.ge(10.0))
+            .filter(sw_grid_geom_rtree::xmin.le(20.0))
+            .filter(sw_grid_geom_rtree::ymax.ge(10.0))
+            .filter(sw_grid_geom_rtree::ymin.le(20.0))
+            .filter(
+                sw_grid::geom
+                    .st_intersects(st_makeenvelope(10.0, 10.0, 20.0, 20.0).nullable())
+                    .eq(true),
+            )
+            .select(sw_grid::id)
+            .load(conn)
+            .unwrap()
+    };
+
+    let run_full = |conn: &mut SqliteConnection| -> Vec<i32> {
+        sw_grid::table
+            .filter(
+                sw_grid::geom
+                    .st_intersects(st_makeenvelope(10.0, 10.0, 20.0, 20.0).nullable())
+                    .eq(true),
+            )
+            .select(sw_grid::id)
+            .load(conn)
+            .unwrap()
+    };
 
     // Warmup
-    let _: Vec<I32Result> = diesel::sql_query(indexed_sql).load(&mut c).unwrap();
-    let _: Vec<i32> = sw_grid::table
-        .filter(sw_grid::geom.st_intersects(st_makeenvelope(10.0, 10.0, 20.0, 20.0).nullable()).eq(true))
-        .select(sw_grid::id)
-        .load(&mut c).unwrap();
+    let _: Vec<i32> = run_indexed(&mut c);
+    let _: Vec<i32> = run_full(&mut c);
 
     let n = 20;
     let mut indexed_best = std::time::Duration::MAX;
     for _ in 0..n {
         let t = chrono::Utc::now();
-        let _: Vec<I32Result> = diesel::sql_query(indexed_sql).load(&mut c).unwrap();
+        let _: Vec<i32> = run_indexed(&mut c);
         indexed_best = indexed_best.min(elapsed_since_utc(t));
     }
 
     let mut full_best = std::time::Duration::MAX;
     for _ in 0..n {
         let t = chrono::Utc::now();
-        let _: Vec<i32> = sw_grid::table
-            .filter(sw_grid::geom.st_intersects(st_makeenvelope(10.0, 10.0, 20.0, 20.0).nullable()).eq(true))
-            .select(sw_grid::id)
-            .load(&mut c).unwrap();
+        let _: Vec<i32> = run_full(&mut c);
         full_best = full_best.min(elapsed_since_utc(t));
     }
 
     // Both return 121 rows (11×11 points in [10,20])
-    let idx: Vec<I32Result> = diesel::sql_query(indexed_sql).load(&mut c).unwrap();
-    let full: Vec<i32> = sw_grid::table
-        .filter(sw_grid::geom.st_intersects(st_makeenvelope(10.0, 10.0, 20.0, 20.0).nullable()).eq(true))
-        .select(sw_grid::id)
-        .load(&mut c).unwrap();
+    let idx: Vec<i32> = run_indexed(&mut c);
+    let full: Vec<i32> = run_full(&mut c);
     assert_eq!(idx.len(), full.len());
     assert_eq!(idx.len(), 121);
 
@@ -1307,47 +1362,50 @@ fn indexed_knn_is_faster() {
     diesel::sql_query("SELECT CreateSpatialIndex('sk_grid', 'geom')")
         .execute(&mut c).unwrap();
 
-    let indexed_sql =
-        "SELECT g.id AS val FROM sk_grid g \
-         JOIN sk_grid_geom_rtree r ON g.rowid = r.id \
-         WHERE r.xmax >= 45 AND r.xmin <= 55 \
-           AND r.ymax >= 45 AND r.ymin <= 55 \
-         ORDER BY ST_Distance(g.geom, ST_Point(50, 50)) \
-         LIMIT 5";
+    let run_indexed = |conn: &mut SqliteConnection| -> Vec<i32> {
+        sk_grid::table
+            .inner_join(sk_grid_geom_rtree::table.on(sk_grid::id.eq(sk_grid_geom_rtree::id)))
+            .filter(sk_grid_geom_rtree::xmax.ge(45.0))
+            .filter(sk_grid_geom_rtree::xmin.le(55.0))
+            .filter(sk_grid_geom_rtree::ymax.ge(45.0))
+            .filter(sk_grid_geom_rtree::ymin.le(55.0))
+            .order(sk_grid::geom.st_distance(st_point(50.0, 50.0).nullable()))
+            .select(sk_grid::id)
+            .limit(5)
+            .load(conn)
+            .unwrap()
+    };
+
+    let run_full = |conn: &mut SqliteConnection| -> Vec<i32> {
+        sk_grid::table
+            .order(sk_grid::geom.st_distance(st_point(50.0, 50.0).nullable()))
+            .select(sk_grid::id)
+            .limit(5)
+            .load(conn)
+            .unwrap()
+    };
 
     // Warmup
-    let _: Vec<I32Result> = diesel::sql_query(indexed_sql).load(&mut c).unwrap();
-    let _: Vec<i32> = sk_grid::table
-        .order(sk_grid::geom.st_distance(st_point(50.0, 50.0).nullable()))
-        .select(sk_grid::id)
-        .limit(5)
-        .load(&mut c).unwrap();
+    let _: Vec<i32> = run_indexed(&mut c);
+    let _: Vec<i32> = run_full(&mut c);
 
     let n = 20;
     let mut indexed_best = std::time::Duration::MAX;
     for _ in 0..n {
         let t = chrono::Utc::now();
-        let _: Vec<I32Result> = diesel::sql_query(indexed_sql).load(&mut c).unwrap();
+        let _: Vec<i32> = run_indexed(&mut c);
         indexed_best = indexed_best.min(elapsed_since_utc(t));
     }
 
     let mut full_best = std::time::Duration::MAX;
     for _ in 0..n {
         let t = chrono::Utc::now();
-        let _: Vec<i32> = sk_grid::table
-            .order(sk_grid::geom.st_distance(st_point(50.0, 50.0).nullable()))
-            .select(sk_grid::id)
-            .limit(5)
-            .load(&mut c).unwrap();
+        let _: Vec<i32> = run_full(&mut c);
         full_best = full_best.min(elapsed_since_utc(t));
     }
 
-    let idx: Vec<I32Result> = diesel::sql_query(indexed_sql).load(&mut c).unwrap();
-    let full: Vec<i32> = sk_grid::table
-        .order(sk_grid::geom.st_distance(st_point(50.0, 50.0).nullable()))
-        .select(sk_grid::id)
-        .limit(5)
-        .load(&mut c).unwrap();
+    let idx: Vec<i32> = run_indexed(&mut c);
+    let full: Vec<i32> = run_full(&mut c);
     assert_eq!(idx.len(), full.len());
 
     eprintln!("knn 10K: indexed={indexed_best:?}  full_scan={full_best:?}  speedup={:.1}x", full_best.as_nanos() as f64 / indexed_best.as_nanos() as f64);

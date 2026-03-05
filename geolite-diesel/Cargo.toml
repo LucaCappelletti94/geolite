@@ -28,6 +28,7 @@ diesel = { version = "2", default-features = false }
 
 [dev-dependencies]
 chrono = "0.4"
+criterion = "0.5"
 geolite-core = { version = "0.1.0", path = "../geolite-core" }
 geolite-sqlite = { version = "0.1.0", path = "../geolite-sqlite" }
 
@@ -63,6 +64,12 @@ required-features = ["sqlite"]
 [[test]]
 name = "wasm_integration"
 path = "tests/wasm_integration.rs"
+required-features = ["sqlite"]
+
+[[bench]]
+name = "spatial_index"
+path = "benches/spatial_index.rs"
+harness = false
 required-features = ["sqlite"]
 
 [features]

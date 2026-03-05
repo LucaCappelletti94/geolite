@@ -28,6 +28,10 @@ struct BlobResult {
     val: Option<Vec<u8>>,
 }
 
+diesel::table! { perf_grid (id) { id -> Integer, geom -> Nullable<geolite_diesel::Geometry>, } }
+diesel::table! { perf_grid_geom_rtree (id) { id -> Integer, xmin -> Double, xmax -> Double, ymin -> Double, ymax -> Double, } }
+diesel::allow_tables_to_appear_in_same_query!(perf_grid, perf_grid_geom_rtree);
+
 // ── Auto-extension registration ──────────────────────────────────────────────
 
 static INIT: Once = Once::new();
@@ -63,6 +67,8 @@ fn shared_predicates_and_relate_bool_semantics() {
 
 #[test]
 fn spatial_index_narrows_candidates_deterministically() {
+    use geolite_diesel::prelude::*;
+
     let mut c = conn();
 
     // Create table with 10K points on a 100x100 grid
@@ -91,10 +97,8 @@ fn spatial_index_narrows_candidates_deterministically() {
         WHERE ST_Intersects(geom, ST_MakeEnvelope(20, 20, 30, 30)) = 1";
 
     // Baseline table cardinality (all rows)
-    let full_scan_count: I32Result = sql_query("SELECT COUNT(*) AS val FROM perf_grid")
-        .get_result(&mut c)
-        .unwrap();
-    assert_eq!(full_scan_count.val, Some(10_000));
+    let full_scan_count = perf_grid::table.count().get_result::<i64>(&mut c).unwrap();
+    assert_eq!(full_scan_count, 10_000);
 
     // Create spatial index
     sql_query("SELECT CreateSpatialIndex('perf_grid', 'geom')")
@@ -108,25 +112,44 @@ fn spatial_index_narrows_candidates_deterministically() {
         AND ST_Intersects(g.geom, ST_MakeEnvelope(20, 20, 30, 30)) = 1";
 
     // Deterministic coarse candidate count from the R-tree join only.
-    let candidate_sql = "SELECT COUNT(*) AS val FROM perf_grid g
-        JOIN perf_grid_geom_rtree r ON g.rowid = r.id
-        WHERE r.xmin >= 20 AND r.xmax <= 30 AND r.ymin >= 20 AND r.ymax <= 30";
-    let candidate_count: I32Result = sql_query(candidate_sql).get_result(&mut c).unwrap();
-    assert_eq!(candidate_count.val, Some(121));
-    assert!(
-        candidate_count
-            .val
-            .expect("candidate count should not be NULL")
-            < full_scan_count
-                .val
-                .expect("full scan count should not be NULL")
-    );
+    let candidate_count = perf_grid::table
+        .inner_join(perf_grid_geom_rtree::table.on(perf_grid::id.eq(perf_grid_geom_rtree::id)))
+        .filter(perf_grid_geom_rtree::xmin.ge(20.0))
+        .filter(perf_grid_geom_rtree::xmax.le(30.0))
+        .filter(perf_grid_geom_rtree::ymin.ge(20.0))
+        .filter(perf_grid_geom_rtree::ymax.le(30.0))
+        .count()
+        .get_result::<i64>(&mut c)
+        .unwrap();
+    assert_eq!(candidate_count, 121);
+    assert!(candidate_count < full_scan_count);
 
     // Verify correctness: both should return 11*11 = 121 points (20..=30 inclusive).
-    let non_indexed_count: I32Result = sql_query(non_indexed_sql).get_result(&mut c).unwrap();
-    let indexed_count: I32Result = sql_query(indexed_sql).get_result(&mut c).unwrap();
-    assert_eq!(non_indexed_count.val, indexed_count.val);
-    assert_eq!(non_indexed_count.val, Some(121));
+    let non_indexed_count = perf_grid::table
+        .filter(
+            perf_grid::geom
+                .st_intersects(st_makeenvelope(20.0, 20.0, 30.0, 30.0).nullable())
+                .eq(true),
+        )
+        .count()
+        .get_result::<i64>(&mut c)
+        .unwrap();
+    let indexed_count = perf_grid::table
+        .inner_join(perf_grid_geom_rtree::table.on(perf_grid::id.eq(perf_grid_geom_rtree::id)))
+        .filter(perf_grid_geom_rtree::xmin.ge(20.0))
+        .filter(perf_grid_geom_rtree::xmax.le(30.0))
+        .filter(perf_grid_geom_rtree::ymin.ge(20.0))
+        .filter(perf_grid_geom_rtree::ymax.le(30.0))
+        .filter(
+            perf_grid::geom
+                .st_intersects(st_makeenvelope(20.0, 20.0, 30.0, 30.0).nullable())
+                .eq(true),
+        )
+        .count()
+        .get_result::<i64>(&mut c)
+        .unwrap();
+    assert_eq!(non_indexed_count, indexed_count);
+    assert_eq!(non_indexed_count, 121);
 
     // Query-plan sanity checks (deterministic structure, not wall-clock timing).
     let non_indexed_plan: Vec<PlanRow> = sql_query(format!("EXPLAIN QUERY PLAN {non_indexed_sql}"))

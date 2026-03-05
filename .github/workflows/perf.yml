@@ -43,3 +43,6 @@ jobs:
 
       - name: geolite-diesel knn perf
         run: cargo test -p geolite-diesel --features sqlite indexed_knn_is_faster -- --ignored --exact --nocapture --test-threads=1
+
+      - name: geolite-diesel criterion benches
+        run: cargo bench -p geolite-diesel --features sqlite --benches
