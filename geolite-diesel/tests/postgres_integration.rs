@@ -4,6 +4,7 @@
 use diesel::connection::SimpleConnection;
 use diesel::prelude::*;
 use geolite_diesel::functions::*;
+use std::time::Duration;
 use testcontainers_modules::postgres::Postgres;
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
 use testcontainers_modules::testcontainers::ImageExt;
@@ -26,12 +27,33 @@ async fn pg_conn(
     testcontainers_modules::testcontainers::ContainerAsync<Postgres>,
     PgConnection,
 ) {
-    let container = Postgres::default()
-        .with_name("postgis/postgis")
-        .with_tag(tag)
-        .start()
-        .await
-        .expect("failed to start PostGIS container");
+    let mut last_start_err = None;
+    let mut container = None;
+    for attempt in 1..=3 {
+        match Postgres::default()
+            .with_name("postgis/postgis")
+            .with_tag(tag)
+            .start()
+            .await
+        {
+            Ok(c) => {
+                container = Some(c);
+                break;
+            }
+            Err(err) => {
+                last_start_err = Some(err.to_string());
+                if attempt < 3 {
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                }
+            }
+        }
+    }
+    let container = container.unwrap_or_else(|| {
+        panic!(
+            "failed to start PostGIS container after retries: {}",
+            last_start_err.unwrap_or_else(|| "unknown start error".to_string())
+        )
+    });
 
     let host = container.get_host().await.unwrap();
     let port = container.get_host_port_ipv4(5432).await.unwrap();
