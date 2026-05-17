@@ -39,6 +39,11 @@ pub struct SqliteFunctionSpec {
     pub smoke_sql: &'static str,
     /// Semantic-golden SQL cases used by cross-surface parity tests.
     pub semantic_cases: &'static [SemanticCase],
+    /// Explicit Rust `*_xfunc` symbol to bind for this `(name, n_arg)`. `None`
+    /// means the SQLite callback generator derives the symbol from `name`
+    /// (lowercased, with an arity suffix when the same SQL name is overloaded).
+    /// Used for aliases like `ST_MakePoint → st_point_2_xfunc`.
+    pub xfunc_override: Option<&'static str>,
 }
 
 macro_rules! case {
@@ -103,6 +108,37 @@ macro_rules! spec {
                     SemanticExpectation::Null
                 ),
             ],
+            xfunc_override: None,
+        }
+    };
+}
+
+macro_rules! spec_override {
+    (
+        $name:literal,
+        $n_arg:tt,
+        $return_class:ident,
+        $smoke_sql:literal,
+        $xfunc:literal
+    ) => {
+        SqliteFunctionSpec {
+            name: $name,
+            n_arg: $n_arg,
+            return_class: SqliteReturnClass::$return_class,
+            smoke_sql: $smoke_sql,
+            semantic_cases: &[
+                case!(
+                    "smoke",
+                    $smoke_sql,
+                    expected_for_return_class!($return_class)
+                ),
+                case!(
+                    "null_input",
+                    null_sql!($name, $n_arg),
+                    SemanticExpectation::Null
+                ),
+            ],
+            xfunc_override: Some($xfunc),
         }
     };
 }
@@ -114,7 +150,8 @@ macro_rules! direct_spec {
         $return_class:ident,
         $smoke_sql:literal,
         $null_sql:literal,
-        $null_error_contains:literal
+        $null_error_contains:literal,
+        $xfunc:literal
     ) => {
         SqliteFunctionSpec {
             name: $name,
@@ -133,6 +170,7 @@ macro_rules! direct_spec {
                     SemanticExpectation::ErrorContains($null_error_contains)
                 ),
             ],
+            xfunc_override: Some($xfunc),
         }
     };
 }
@@ -205,7 +243,13 @@ pub const SQLITE_DETERMINISTIC_FUNCTIONS: &[SqliteFunctionSpec] = &[
     // Constructors
     spec!("ST_Point", 2, Blob, "SELECT ST_Point(1, 2)"),
     spec!("ST_Point", 3, Blob, "SELECT ST_Point(1, 2, 4326)"),
-    spec!("ST_MakePoint", 2, Blob, "SELECT ST_MakePoint(1, 2)"),
+    spec_override!(
+        "ST_MakePoint",
+        2,
+        Blob,
+        "SELECT ST_MakePoint(1, 2)",
+        "st_point_2_xfunc"
+    ),
     spec!(
         "ST_MakeLine",
         2,
@@ -256,11 +300,12 @@ pub const SQLITE_DETERMINISTIC_FUNCTIONS: &[SqliteFunctionSpec] = &[
         Text,
         "SELECT ST_GeometryType(ST_Point(1, 2))"
     ),
-    spec!(
+    spec_override!(
         "GeometryType",
         1,
         Text,
-        "SELECT GeometryType(ST_Point(1, 2))"
+        "SELECT GeometryType(ST_Point(1, 2))",
+        "st_geometrytype_xfunc"
     ),
     spec!("ST_NDims", 1, Numeric, "SELECT ST_NDims(ST_Point(1, 2))"),
     spec!("ST_CoordDim", 1, Numeric, "SELECT ST_CoordDim(ST_Point(1, 2))"),
@@ -299,11 +344,12 @@ pub const SQLITE_DETERMINISTIC_FUNCTIONS: &[SqliteFunctionSpec] = &[
         Numeric,
         "SELECT ST_NumInteriorRings(ST_GeomFromText('POLYGON((0 0,3 0,3 3,0 3,0 0),(1 1,2 1,2 2,1 2,1 1))'))"
     ),
-    spec!(
+    spec_override!(
         "ST_NumInteriorRing",
         1,
         Numeric,
-        "SELECT ST_NumInteriorRing(ST_GeomFromText('POLYGON((0 0,3 0,3 3,0 3,0 0),(1 1,2 1,2 2,1 2,1 1))'))"
+        "SELECT ST_NumInteriorRing(ST_GeomFromText('POLYGON((0 0,3 0,3 3,0 3,0 0),(1 1,2 1,2 2,1 2,1 1))'))",
+        "st_numinteriorrings_xfunc"
     ),
     spec!(
         "ST_NumRings",
@@ -384,11 +430,12 @@ pub const SQLITE_DETERMINISTIC_FUNCTIONS: &[SqliteFunctionSpec] = &[
         Numeric,
         "SELECT ST_Length(ST_GeomFromText('LINESTRING(0 0,1 1)'))"
     ),
-    spec!(
+    spec_override!(
         "ST_Length2D",
         1,
         Numeric,
-        "SELECT ST_Length2D(ST_GeomFromText('LINESTRING(0 0,1 1)'))"
+        "SELECT ST_Length2D(ST_GeomFromText('LINESTRING(0 0,1 1)'))",
+        "st_length_xfunc"
     ),
     spec!(
         "ST_Perimeter",
@@ -396,11 +443,12 @@ pub const SQLITE_DETERMINISTIC_FUNCTIONS: &[SqliteFunctionSpec] = &[
         Numeric,
         "SELECT ST_Perimeter(ST_GeomFromText('POLYGON((0 0,1 0,1 1,0 1,0 0))'))"
     ),
-    spec!(
+    spec_override!(
         "ST_Perimeter2D",
         1,
         Numeric,
-        "SELECT ST_Perimeter2D(ST_GeomFromText('POLYGON((0 0,1 0,1 1,0 1,0 0))'))"
+        "SELECT ST_Perimeter2D(ST_GeomFromText('POLYGON((0 0,1 0,1 1,0 1,0 0))'))",
+        "st_perimeter_xfunc"
     ),
     spec!(
         "ST_Distance",
@@ -623,7 +671,8 @@ pub const SQLITE_DIRECT_ONLY_FUNCTIONS: &[SqliteFunctionSpec] = &[
         Numeric,
         "SELECT CreateSpatialIndex('_rt', 'geom')",
         "SELECT CreateSpatialIndex(NULL, 'geom')",
-        "table name must not be NULL"
+        "table name must not be NULL",
+        "create_spatial_index_xfunc"
     ),
     direct_spec!(
         "DropSpatialIndex",
@@ -631,6 +680,7 @@ pub const SQLITE_DIRECT_ONLY_FUNCTIONS: &[SqliteFunctionSpec] = &[
         Numeric,
         "SELECT DropSpatialIndex('_rt', 'geom')",
         "SELECT DropSpatialIndex(NULL, 'geom')",
-        "table name must not be NULL"
+        "table name must not be NULL",
+        "drop_spatial_index_xfunc"
     ),
 ];

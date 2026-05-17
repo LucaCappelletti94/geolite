@@ -33,7 +33,6 @@ fn run() -> Result<(), String> {
             for arg in args {
                 match arg.as_str() {
                     "--full" => full = true,
-                    "--ci" => {}
                     _ => return Err(format!("unknown precommit flag: {arg}")),
                 }
             }
@@ -62,10 +61,10 @@ fn run() -> Result<(), String> {
 }
 
 fn print_usage() {
-    eprintln!("xtask commands:");
-    eprintln!("  precommit [--full] [--ci]");
-    eprintln!("  install-hooks");
-    eprintln!("  gen-function-surfaces [--check]");
+    println!("xtask commands:");
+    println!("  precommit [--full]");
+    println!("  install-hooks");
+    println!("  gen-function-surfaces [--check]");
 }
 
 fn repo_root() -> PathBuf {
@@ -76,17 +75,11 @@ fn repo_root() -> PathBuf {
 }
 
 fn precommit(full: bool) -> Result<(), String> {
+    eprintln!("+ xtask gen-function-surfaces --check");
+    gen_function_surfaces(true)?;
+
     let root = repo_root();
     let mut steps: Vec<Vec<&str>> = vec![
-        vec![
-            "cargo",
-            "run",
-            "-p",
-            "xtask",
-            "--",
-            "gen-function-surfaces",
-            "--check",
-        ],
         vec!["cargo", "fmt", "--all", "--", "--check"],
         vec![
             "cargo",
@@ -266,8 +259,7 @@ fn gen_function_surfaces(check: bool) -> Result<(), String> {
 
 fn write_or_check(path: &Path, content: &str, check: bool) -> Result<(), String> {
     if check {
-        let current =
-            fs::read_to_string(path).map_err(|e| format!("{}: {}", path.display(), io_err(e)))?;
+        let current = fs::read_to_string(path).map_err(|e| format!("{}: {}", path.display(), e))?;
         if current != content {
             return Err(format!(
                 "generated file is stale: {} (run `cargo run -p xtask -- gen-function-surfaces`)",
@@ -303,7 +295,7 @@ fn render_sqlite_callbacks(const_name: &str, specs: &[SqliteFunctionSpec]) -> St
 
     for spec in specs {
         let overloaded = name_counts.get(spec.name).copied().unwrap_or(0) > 1;
-        let xfunc = callback_symbol(spec.name, spec.n_arg, overloaded);
+        let xfunc = callback_symbol(spec, overloaded);
         out.push_str(&format!(
             "    callback_spec!(\"{}\", {}, {}),\n",
             spec.name, spec.n_arg, xfunc
@@ -314,35 +306,22 @@ fn render_sqlite_callbacks(const_name: &str, specs: &[SqliteFunctionSpec]) -> St
     out
 }
 
-fn callback_symbol(name: &str, n_arg: i32, overloaded: bool) -> String {
-    if let Some(override_name) = callback_override(name, n_arg) {
+fn callback_symbol(spec: &SqliteFunctionSpec, overloaded: bool) -> String {
+    if let Some(override_name) = spec.xfunc_override {
         return override_name.to_string();
     }
 
     let mut base = String::new();
-    for ch in name.chars() {
+    for ch in spec.name.chars() {
         if ch.is_ascii_alphanumeric() || ch == '_' {
             base.push(ch.to_ascii_lowercase());
         }
     }
 
     if overloaded {
-        format!("{base}_{n_arg}_xfunc")
+        format!("{base}_{}_xfunc", spec.n_arg)
     } else {
         format!("{base}_xfunc")
-    }
-}
-
-fn callback_override(name: &str, n_arg: i32) -> Option<&'static str> {
-    match (name, n_arg) {
-        ("ST_MakePoint", 2) => Some("st_point_2_xfunc"),
-        ("GeometryType", 1) => Some("st_geometrytype_xfunc"),
-        ("ST_NumInteriorRing", 1) => Some("st_numinteriorrings_xfunc"),
-        ("ST_Length2D", 1) => Some("st_length_xfunc"),
-        ("ST_Perimeter2D", 1) => Some("st_perimeter_xfunc"),
-        ("CreateSpatialIndex", 2) => Some("create_spatial_index_xfunc"),
-        ("DropSpatialIndex", 2) => Some("drop_spatial_index_xfunc"),
-        _ => None,
     }
 }
 
