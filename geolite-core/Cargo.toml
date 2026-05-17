@@ -17,7 +17,7 @@ name = "geolite_core"
 
 [dependencies]
 # Core geometry engine
-geo          = { version = "0.32", default-features = false }
+geo          = { workspace = true }
 
 # I/O and format conversion (WKT, WKB, GeoJSON, SVG)
 geozero      = { version = "0.15", features = ["with-wkt", "with-geojson", "with-svg", "with-geo", "with-wkb"] }

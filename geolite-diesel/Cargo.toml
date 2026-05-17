@@ -22,7 +22,7 @@ name = "geolite_diesel"
 
 [dependencies]
 geolite-core = { version = "0.1.0", path = "../geolite-core" }
-geo           = { version = "0.32", default-features = false }
+geo           = { workspace = true }
 # Diesel base (no backend enabled) — backends are opt-in via features.
 diesel = { version = "2", default-features = false }
 
@@ -33,7 +33,7 @@ geolite-sqlite = { version = "0.1.0", path = "../geolite-sqlite" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 criterion = { version = "0.8.2", default-features = false, features = ["plotters", "cargo_bench_support"] }
-libsqlite3-sys = { version = ">=0.17.2, <0.36.0" }
+libsqlite3-sys = { workspace = true }
 testcontainers-modules = { version = "0.15", features = ["postgres"] }
 tokio = { version = "1", features = ["rt", "macros"] }
 

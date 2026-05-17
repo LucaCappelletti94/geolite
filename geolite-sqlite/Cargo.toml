@@ -21,7 +21,7 @@ geolite-core = { version = "0.1.0", path = "../geolite-core" }
 
 # Native: libsqlite3-sys directly, same version range as diesel 2.3 (<0.36)
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-libsqlite3-sys = { version = ">=0.17.2, <0.36.0", features = ["bundled_bindings"] }
+libsqlite3-sys = { workspace = true, features = ["bundled_bindings"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 sqlite-wasm-rs = "0.5"
@@ -31,7 +31,7 @@ getrandom = { version = "0.2", features = ["js"] }
 chrono = "0.4"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-libsqlite3-sys = { version = ">=0.17.2, <0.36.0", features = ["bundled_bindings"] }
+libsqlite3-sys = { workspace = true, features = ["bundled_bindings"] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 sqlite-wasm-rs = "0.5"
