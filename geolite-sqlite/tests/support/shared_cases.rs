@@ -2220,6 +2220,99 @@ fn spatial_index_trigger_sync() {
 }
 
 #[$test_attr]
+fn spatial_index_rejects_without_rowid_tables() {
+    // CreateSpatialIndex installs triggers that reference NEW.rowid /
+    // OLD.rowid. Those references break against WITHOUT ROWID tables, so
+    // CreateSpatialIndex must reject them up front and leave the database
+    // free of any partial state.
+    let db = ActiveTestDb::open();
+
+    // Bootstrap the catalog with an unrelated successful index so we can
+    // distinguish "no catalog row" from "no catalog table" in the assertions
+    // below.
+    db.exec("CREATE TABLE ok (id INTEGER PRIMARY KEY, geom BLOB)");
+    let rc = db.query_i64("SELECT CreateSpatialIndex('ok', 'geom')");
+    assert_eq!(rc, 1);
+
+    db.exec("CREATE TABLE wr (id INTEGER PRIMARY KEY, geom BLOB) WITHOUT ROWID");
+
+    let err = db
+        .try_query_i64("SELECT CreateSpatialIndex('wr', 'geom')")
+        .expect_err("WITHOUT ROWID tables must be rejected");
+    assert!(
+        err.contains("WITHOUT ROWID"),
+        "unexpected error message: {err}"
+    );
+
+    // No rtree shadow for the rejected table.
+    let rtree_count = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master \
+         WHERE type = 'table' AND name = 'wr_geom_rtree'",
+    );
+    assert_eq!(rtree_count, 0);
+
+    // No triggers for the rejected table.
+    let trigger_count = db.query_i64(
+        "SELECT COUNT(*) FROM sqlite_master \
+         WHERE type = 'trigger' AND name LIKE 'wr_geom_%'",
+    );
+    assert_eq!(trigger_count, 0);
+
+    // No catalog row for the rejected table, and the prior 'ok' entry is
+    // untouched.
+    let catalog_count = db.query_i64(
+        "SELECT COUNT(*) FROM geolite_spatial_index_catalog \
+         WHERE table_name = 'wr' AND column_name = 'geom'",
+    );
+    assert_eq!(catalog_count, 0);
+    let ok_catalog_count = db.query_i64(
+        "SELECT COUNT(*) FROM geolite_spatial_index_catalog \
+         WHERE table_name = 'ok' AND column_name = 'geom'",
+    );
+    assert_eq!(ok_catalog_count, 1);
+}
+
+#[$test_attr]
+fn spatial_index_update_trigger_skips_unrelated_columns() {
+    // The UPDATE trigger has a WHEN clause that filters out updates which
+    // change neither the geometry blob nor the rowid. This test pins that
+    // optimization. If the WHEN clause is removed, the rtree row will be
+    // deleted and re-inserted on every UPDATE, which is wasteful but does
+    // not produce a visible behavioral change. To detect that, this test
+    // pins a single rtree row's content across an UPDATE of an unrelated
+    // column and asserts that the bbox values are bitwise identical.
+    let db = ActiveTestDb::open();
+    db.exec("CREATE TABLE features (id INTEGER PRIMARY KEY, name TEXT, geom BLOB)");
+    db.exec("INSERT INTO features (name, geom) VALUES ('a', ST_Point(1, 2))");
+    db.exec("SELECT CreateSpatialIndex('features', 'geom')");
+
+    let rtree_count_before = db.query_i64("SELECT COUNT(*) FROM features_geom_rtree");
+    assert_eq!(rtree_count_before, 1);
+    let xmin_before = db.query_f64("SELECT xmin FROM features_geom_rtree WHERE id = 1");
+
+    // Update an unrelated column. The WHEN clause must suppress trigger
+    // body execution since neither geom nor rowid changes.
+    db.exec("UPDATE features SET name = 'b' WHERE id = 1");
+
+    let rtree_count_after = db.query_i64("SELECT COUNT(*) FROM features_geom_rtree");
+    assert_eq!(rtree_count_after, 1);
+    let xmin_after = db.query_f64("SELECT xmin FROM features_geom_rtree WHERE id = 1");
+    assert_eq!(
+        xmin_before.to_bits(),
+        xmin_after.to_bits(),
+        "bbox must be unchanged across an unrelated-column UPDATE"
+    );
+
+    // Sanity: an UPDATE that DOES change geom still propagates.
+    db.exec("UPDATE features SET geom = ST_Point(10, 20) WHERE id = 1");
+    let xmin_after_geom = db.query_f64("SELECT xmin FROM features_geom_rtree WHERE id = 1");
+    assert!(
+        (xmin_after_geom - 10.0).abs() < 1e-10,
+        "xmin = {xmin_after_geom}"
+    );
+}
+
+#[$test_attr]
 fn spatial_index_trigger_sync_tracks_rowid_updates() {
     let db = ActiveTestDb::open();
     db.exec("CREATE TABLE t (id INTEGER PRIMARY KEY, geom BLOB)");

@@ -232,6 +232,130 @@ fn spatial_index_lifecycle_via_raw_sql() {
     assert_eq!(trigger_count.val, Some(0));
 }
 
+#[test]
+fn spatial_index_stays_in_sync_across_writes() {
+    // End-to-end sync verification. The structural test above proves the
+    // triggers exist after CreateSpatialIndex. This one proves they fire on
+    // the right events and produce the right rtree contents across INSERT,
+    // UPDATE, DELETE, and post-drop writes. Failure here means the rtree has
+    // drifted from the base table -- the silent-corruption mode the trigger
+    // installation is meant to prevent.
+    let mut c = conn();
+    sql_query("CREATE TABLE pts (id INTEGER PRIMARY KEY, geom BLOB)")
+        .execute(&mut c)
+        .unwrap();
+
+    // 1. CreateSpatialIndex on an empty table installs triggers and an empty
+    // rtree.
+    sql_query("SELECT CreateSpatialIndex('pts', 'geom')")
+        .execute(&mut c)
+        .unwrap();
+    let rtree_count: I32Result = sql_query("SELECT COUNT(*) AS val FROM pts_geom_rtree")
+        .get_result(&mut c)
+        .unwrap();
+    assert_eq!(rtree_count.val, Some(0));
+
+    // 2. INSERT 100 rows. AFTER INSERT must populate the rtree row by row.
+    for i in 0..100 {
+        sql_query(format!(
+            "INSERT INTO pts (id, geom) VALUES ({i}, ST_Point({i}, {i}))"
+        ))
+        .execute(&mut c)
+        .unwrap();
+    }
+    let rtree_count: I32Result = sql_query("SELECT COUNT(*) AS val FROM pts_geom_rtree")
+        .get_result(&mut c)
+        .unwrap();
+    assert_eq!(rtree_count.val, Some(100));
+
+    // 3. UPDATE 10 geometries to move them out to (1000+i, 1000+i). AFTER
+    // UPDATE must re-bound their bboxes so the moved rows are findable at
+    // their new positions and absent at their old ones.
+    for i in 0..10 {
+        sql_query(format!(
+            "UPDATE pts SET geom = ST_Point({}, {}) WHERE id = {i}",
+            i + 1000,
+            i + 1000
+        ))
+        .execute(&mut c)
+        .unwrap();
+    }
+    let moved_in_rtree: I32Result = sql_query(
+        "SELECT COUNT(*) AS val FROM pts_geom_rtree \
+         WHERE xmin >= 1000 AND xmax <= 1009 AND ymin >= 1000 AND ymax <= 1009",
+    )
+    .get_result(&mut c)
+    .unwrap();
+    assert_eq!(moved_in_rtree.val, Some(10));
+    let stale_in_rtree: I32Result = sql_query(
+        "SELECT COUNT(*) AS val FROM pts_geom_rtree \
+         WHERE id < 10 AND xmin < 100",
+    )
+    .get_result(&mut c)
+    .unwrap();
+    assert_eq!(
+        stale_in_rtree.val,
+        Some(0),
+        "moved rows must not appear at their pre-update positions"
+    );
+
+    // 4. DELETE 25 rows. AFTER DELETE must remove their rtree entries.
+    sql_query("DELETE FROM pts WHERE id >= 75")
+        .execute(&mut c)
+        .unwrap();
+    let rtree_count: I32Result = sql_query("SELECT COUNT(*) AS val FROM pts_geom_rtree")
+        .get_result(&mut c)
+        .unwrap();
+    assert_eq!(rtree_count.val, Some(75));
+
+    // 5. Cross-check: an rtree-windowed join must return the same count as
+    // a full-table-scan predicate evaluation for the same window.
+    let full_scan: I32Result = sql_query(
+        "SELECT COUNT(*) AS val FROM pts \
+         WHERE ST_Intersects(geom, ST_MakeEnvelope(0, 0, 50, 50)) = 1",
+    )
+    .get_result(&mut c)
+    .unwrap();
+    let rtree_join: I32Result = sql_query(
+        "SELECT COUNT(*) AS val FROM pts p \
+         JOIN pts_geom_rtree r ON p.id = r.id \
+         WHERE r.xmin <= 50 AND r.xmax >= 0 AND r.ymin <= 50 AND r.ymax >= 0 \
+           AND ST_Intersects(p.geom, ST_MakeEnvelope(0, 0, 50, 50)) = 1",
+    )
+    .get_result(&mut c)
+    .unwrap();
+    assert_eq!(full_scan.val, rtree_join.val);
+    assert!(
+        full_scan.val.expect("full_scan should not be NULL") > 0,
+        "window must catch some rows"
+    );
+
+    // 6. DropSpatialIndex removes the rtree and all three triggers.
+    sql_query("SELECT DropSpatialIndex('pts', 'geom')")
+        .execute(&mut c)
+        .unwrap();
+    let rtree_table_count: I32Result = sql_query(
+        "SELECT COUNT(*) AS val FROM sqlite_master \
+         WHERE type = 'table' AND name = 'pts_geom_rtree'",
+    )
+    .get_result(&mut c)
+    .unwrap();
+    assert_eq!(rtree_table_count.val, Some(0));
+    let trigger_count: I32Result = sql_query(
+        "SELECT COUNT(*) AS val FROM sqlite_master \
+         WHERE type = 'trigger' AND name LIKE 'pts_geom_%'",
+    )
+    .get_result(&mut c)
+    .unwrap();
+    assert_eq!(trigger_count.val, Some(0));
+
+    // 7. After drop, subsequent writes on the base table must not error and
+    // must not try to talk to the missing rtree.
+    sql_query("INSERT INTO pts (id, geom) VALUES (9999, ST_Point(0, 0))")
+        .execute(&mut c)
+        .unwrap();
+}
+
 fn semantic_case_sql(sql: &str) -> String {
     let trimmed = sql.trim();
     let expr = trimmed

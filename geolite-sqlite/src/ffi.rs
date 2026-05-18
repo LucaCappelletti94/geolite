@@ -1593,6 +1593,26 @@ unsafe extern "C" fn create_spatial_index_xfunc(
             return;
         }
 
+        // Reject WITHOUT ROWID tables before creating any state. The
+        // maintenance triggers reference NEW.rowid and OLD.rowid, which only
+        // exist on regular rowid tables. SQLite refuses to prepare a SELECT
+        // of rowid against a WITHOUT ROWID table, so the probe fails cleanly
+        // at parse time. A successful probe also incidentally proves the
+        // table exists.
+        let probe = format!("SELECT rowid FROM [{table}] LIMIT 0");
+        if exec_sql_silent(db, &probe) != SQLITE_OK {
+            set_error(
+                ctx,
+                &format!(
+                    "CreateSpatialIndex: table [{table}] has no rowid column. \
+                     WITHOUT ROWID tables are not supported. Recreate the table \
+                     without the WITHOUT ROWID clause, or verify the table exists."
+                ),
+            );
+            rollback_savepoint(db, ctx, savepoint);
+            return;
+        }
+
         // 1. Create the R-tree virtual table if missing.
         let sql = format!(
             "CREATE VIRTUAL TABLE IF NOT EXISTS [{rtree}] USING rtree(id, xmin, xmax, ymin, ymax)"
@@ -1638,10 +1658,16 @@ unsafe extern "C" fn create_spatial_index_xfunc(
             return;
         }
 
-        // 4. AFTER UPDATE trigger
+        // 4. AFTER UPDATE trigger. Broad UPDATE so that rowid changes
+        // (UPDATE ... SET rowid = ... or via INTEGER PRIMARY KEY rewrite)
+        // still propagate to the index. The WHEN clause skips the DELETE
+        // plus INSERT when neither the geometry blob nor the rowid changed,
+        // which is the common case for UPDATEs that only touch unrelated
+        // columns.
         let trigger_update = format!("{table}_{column}_update");
         let sql = format!(
             "CREATE TRIGGER IF NOT EXISTS [{trigger_update}] AFTER UPDATE ON [{table}] \
+             WHEN OLD.[{column}] IS NOT NEW.[{column}] OR OLD.rowid IS NOT NEW.rowid \
              BEGIN \
                DELETE FROM [{rtree}] WHERE id = OLD.rowid; \
                INSERT INTO [{rtree}] \
