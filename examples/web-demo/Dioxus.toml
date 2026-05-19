@@ -9,7 +9,12 @@ title = "geolite -- SQLite spatial queries in the browser"
 reload_html = true
 watch_path = ["src", "public"]
 
+# Static stylesheet link injected into index.html's <head> at build time so
+# the browser fetches CSS in parallel with the WASM bundle. Without this, the
+# stylesheet is appended at runtime by Dioxus and the first paint is unstyled
+# (FOUC). public/app.css is the source of truth; assets/app.css is unused.
 [web.resource]
+style = ["/app.css"]
 
 [web.resource.dev]
 

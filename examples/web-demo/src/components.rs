@@ -3,6 +3,12 @@
 use dioxus::prelude::*;
 use dioxus_code::{CodeTheme, Theme};
 use dioxus_code_editor::{CodeEditor, Language};
+use dioxus_free_icons::icons::fa_solid_icons::{
+    FaArrowsRotate, FaBullseye, FaChevronLeft, FaChevronRight, FaCircleCheck, FaCircleDot, FaCode,
+    FaCompass, FaDatabase, FaFileCode, FaFlag, FaFont, FaMagnifyingGlass, FaPlay, FaSitemap,
+    FaTableCells, FaTriangleExclamation, FaVectorSquare,
+};
+use dioxus_free_icons::Icon;
 
 use crate::db;
 use crate::runner::{self, QueryOutcome};
@@ -18,20 +24,15 @@ pub fn SchemaPanel(on_reset: EventHandler<Result<(), String>>) -> Element {
     let mut status = use_signal(|| String::new());
 
     rsx! {
-        section {
-            h2 { "Schema" }
-            CodeEditor {
-                value: sql(),
-                language: Language::Sql,
-                theme: sql_theme(),
-                line_numbers: true,
-                spellcheck: false,
-                aria_label: "Schema SQL".to_string(),
-                class: "editor".to_string(),
-                oninput: move |v| sql.set(v),
-            }
-            div { class: "controls",
+        section { class: "schema-panel",
+            div { class: "panel-header",
+                h2 {
+                    Icon { width: 16, height: 16, icon: FaDatabase, class: "section-icon".to_string() }
+                    "Schema"
+                }
                 button {
+                    aria_label: "Reset database and reapply the schema",
+                    title: "Reset database and reapply the schema",
                     onclick: move |_| {
                         // Re-open the connection so DROP TABLE etc. start from
                         // a clean slate, then apply the (possibly edited) schema.
@@ -47,55 +48,106 @@ pub fn SchemaPanel(on_reset: EventHandler<Result<(), String>>) -> Element {
                         }
                         on_reset.call(result);
                     },
+                    Icon { width: 13, height: 13, icon: FaArrowsRotate, class: "btn-icon".to_string() }
                     "Reset DB"
                 }
-                span { class: "meta", "{status}" }
+            }
+            CodeEditor {
+                value: sql(),
+                language: Language::Sql,
+                theme: sql_theme(),
+                line_numbers: true,
+                spellcheck: false,
+                aria_label: "Schema SQL".to_string(),
+                class: "editor".to_string(),
+                oninput: move |v| sql.set(v),
+            }
+            // Only render the status row when there's something to say --
+            // an empty <p> would still reserve line-height + padding at the
+            // bottom of the panel and reintroduce the gap we just removed.
+            if !status.read().is_empty() {
+                p { class: "meta", "{status}" }
             }
         }
     }
 }
 
 const PRESET_KNN: &str = "\
--- 10 nearest cities to your location by geodesic distance.
--- `lon` and `lat` columns are picked up by the map to highlight result rows.
+-- 10 nearest cities by geodesic distance. lon/lat drive the map highlight.
 SELECT name, country, population,
-       ROUND(ST_DistanceSphere(geom, ST_Point(:lon, :lat, 4326)) / 1000.0, 1)
-         AS km,
-       ST_X(geom) AS lon,
-       ST_Y(geom) AS lat
-FROM places
-ORDER BY km
-LIMIT 10;
-";
+       ROUND(ST_DistanceSphere(geom, ST_Point(:lon, :lat, 4326)) / 1000.0, 1) AS km,
+       ST_X(geom) AS lon, ST_Y(geom) AS lat
+FROM places ORDER BY km LIMIT 10;";
 
 const PRESET_RADIUS: &str = "\
 -- Cities within 200 km of your location.
-SELECT name, country, population,
-       ST_X(geom) AS lon,
-       ST_Y(geom) AS lat
+SELECT name, country, population, ST_X(geom) AS lon, ST_Y(geom) AS lat
 FROM places
 WHERE ST_DWithinSphere(geom, ST_Point(:lon, :lat, 4326), 200000.0)
-ORDER BY population DESC;
-";
+ORDER BY population DESC;";
 
 const PRESET_ENVELOPE: &str = "\
--- Cities inside a bounding box (Western Europe).
-SELECT name, country, population,
-       ST_X(geom) AS lon,
-       ST_Y(geom) AS lat
+-- Cities inside a 10x10 degree box centered on the probe point.
+SELECT name, country, population, ST_X(geom) AS lon, ST_Y(geom) AS lat
 FROM places
-WHERE ST_Intersects(geom, ST_MakeEnvelope(-10.0, 35.0, 15.0, 60.0, 4326))
-ORDER BY population DESC
-LIMIT 200;
-";
+WHERE ST_Intersects(geom, ST_MakeEnvelope(:lon - 5.0, :lat - 5.0, :lon + 5.0, :lat + 5.0, 4326))
+ORDER BY population DESC LIMIT 200;";
 
 const PRESET_ASTEXT: &str = "\
 -- Round-trip: BLOB geometry to human-readable WKT.
-SELECT name, ST_AsText(geom) AS wkt
+SELECT name, ST_AsText(geom) AS wkt FROM places ORDER BY name LIMIT 8;";
+
+const PRESET_RTREE: &str = "\
+-- 10 nearest cities via explicit R-tree prefilter then geodesic refinement.
+-- The JOIN against places_geom_rtree narrows candidates by bounding box in
+-- O(log N); ST_DistanceSphere then refines to the true geodesic order.
+SELECT p.name, p.country, p.population,
+       ROUND(ST_DistanceSphere(p.geom, ST_Point(:lon, :lat, 4326)) / 1000.0, 1) AS km,
+       ST_X(p.geom) AS lon, ST_Y(p.geom) AS lat
+FROM places p JOIN places_geom_rtree r ON p.rowid = r.id
+WHERE r.xmax >= :lon - 10 AND r.xmin <= :lon + 10
+  AND r.ymax >= :lat - 10 AND r.ymin <= :lat + 10
+ORDER BY km LIMIT 10;";
+
+const PRESET_EXPLAIN: &str = "\
+-- See how SQLite plans the index-aware lookup. Look for
+-- `VIRTUAL TABLE INDEX places_geom_rtree` in the output.
+EXPLAIN QUERY PLAN
+SELECT p.name FROM places p
+JOIN places_geom_rtree r ON p.rowid = r.id
+WHERE r.xmax >= :lon - 5 AND r.xmin <= :lon + 5
+  AND r.ymax >= :lat - 5 AND r.ymin <= :lat + 5;";
+
+const PRESET_COUNTRIES: &str = "\
+-- Top 10 countries by city count within 1000 km of the probe.
+SELECT country, COUNT(*) AS cities, SUM(population) AS total_pop
 FROM places
-ORDER BY name
-LIMIT 8;
-";
+WHERE ST_DWithinSphere(geom, ST_Point(:lon, :lat, 4326), 1000000.0)
+GROUP BY country
+ORDER BY cities DESC LIMIT 10;";
+
+const PRESET_RINGS: &str = "\
+-- Population in concentric distance rings around the probe (up to 750 km).
+SELECT
+  CASE
+    WHEN d <= 100000  THEN '0-100 km'
+    WHEN d <= 250000  THEN '100-250 km'
+    WHEN d <= 500000  THEN '250-500 km'
+    ELSE                   '500-750 km'
+  END AS ring,
+  COUNT(*) AS cities,
+  SUM(population) AS total_pop
+FROM (
+  SELECT population, ST_DistanceSphere(geom, ST_Point(:lon, :lat, 4326)) AS d
+  FROM places
+  WHERE ST_DWithinSphere(geom, ST_Point(:lon, :lat, 4326), 750000.0)
+)
+GROUP BY ring ORDER BY MIN(d);";
+
+const PRESET_GEOJSON: &str = "\
+-- Serialize geometries to GeoJSON, ready to drop into Leaflet or Mapbox.
+SELECT name, country, ST_AsGeoJSON(geom) AS geojson
+FROM places ORDER BY population DESC LIMIT 5;";
 
 #[component]
 pub fn QueryPanel(
@@ -121,8 +173,117 @@ pub fn QueryPanel(
     });
 
     rsx! {
-        section {
-            h2 { "Query" }
+        section { class: "query-panel",
+            div { class: "panel-header",
+                div { class: "header-left",
+                    h2 {
+                        Icon { width: 16, height: 16, icon: FaCode, class: "section-icon".to_string() }
+                        "Query"
+                    }
+                    div { class: "presets",
+                        PresetChip {
+                            label: "KNN",
+                            description: "Find the 10 cities closest to the probe point, ranked by geodesic distance on the WGS84 ellipsoid",
+                            icon: rsx! { Icon { width: 12, height: 12, icon: FaBullseye, class: "btn-icon".to_string() } },
+                            on_pick: move |_| {
+                                let new_sql = PRESET_KNN.to_string();
+                                sql.set(new_sql.clone());
+                                on_outcome.call(runner::run(&new_sql, *user_lon.read(), *user_lat.read()));
+                            },
+                        }
+                        PresetChip {
+                            label: "Radius",
+                            description: "List every city within 200 km of the probe point, sorted by population",
+                            icon: rsx! { Icon { width: 12, height: 12, icon: FaCompass, class: "btn-icon".to_string() } },
+                            on_pick: move |_| {
+                                let new_sql = PRESET_RADIUS.to_string();
+                                sql.set(new_sql.clone());
+                                on_outcome.call(runner::run(&new_sql, *user_lon.read(), *user_lat.read()));
+                            },
+                        }
+                        PresetChip {
+                            label: "BBOX",
+                            description: "List cities inside a 10 by 10 degree box centered on the probe point, top 200 by population",
+                            icon: rsx! { Icon { width: 12, height: 12, icon: FaVectorSquare, class: "btn-icon".to_string() } },
+                            on_pick: move |_| {
+                                let new_sql = PRESET_ENVELOPE.to_string();
+                                sql.set(new_sql.clone());
+                                on_outcome.call(runner::run(&new_sql, *user_lon.read(), *user_lat.read()));
+                            },
+                        }
+                        PresetChip {
+                            label: "AsText",
+                            description: "Convert the EWKB BLOB geometry column to readable WKT for the first 8 cities",
+                            icon: rsx! { Icon { width: 12, height: 12, icon: FaFont, class: "btn-icon".to_string() } },
+                            on_pick: move |_| {
+                                let new_sql = PRESET_ASTEXT.to_string();
+                                sql.set(new_sql.clone());
+                                on_outcome.call(runner::run(&new_sql, *user_lon.read(), *user_lat.read()));
+                            },
+                        }
+                        PresetChip {
+                            label: "RTree",
+                            description: "Same KNN result, but with an explicit JOIN against the R-tree shadow table so the SQLite virtual-table index actually drives the prefilter",
+                            icon: rsx! { Icon { width: 12, height: 12, icon: FaSitemap, class: "btn-icon".to_string() } },
+                            on_pick: move |_| {
+                                let new_sql = PRESET_RTREE.to_string();
+                                sql.set(new_sql.clone());
+                                on_outcome.call(runner::run(&new_sql, *user_lon.read(), *user_lat.read()));
+                            },
+                        }
+                        PresetChip {
+                            label: "Explain",
+                            description: "Show the query plan SQLite picks for an R-tree-backed lookup, useful to confirm the virtual table is in use",
+                            icon: rsx! { Icon { width: 12, height: 12, icon: FaMagnifyingGlass, class: "btn-icon".to_string() } },
+                            on_pick: move |_| {
+                                let new_sql = PRESET_EXPLAIN.to_string();
+                                sql.set(new_sql.clone());
+                                on_outcome.call(runner::run(&new_sql, *user_lon.read(), *user_lat.read()));
+                            },
+                        }
+                        PresetChip {
+                            label: "Countries",
+                            description: "Group cities within 1000 km of the probe by country and rank by city count and total population",
+                            icon: rsx! { Icon { width: 12, height: 12, icon: FaFlag, class: "btn-icon".to_string() } },
+                            on_pick: move |_| {
+                                let new_sql = PRESET_COUNTRIES.to_string();
+                                sql.set(new_sql.clone());
+                                on_outcome.call(runner::run(&new_sql, *user_lon.read(), *user_lat.read()));
+                            },
+                        }
+                        PresetChip {
+                            label: "Rings",
+                            description: "Aggregate city counts and total population into concentric distance bands around the probe",
+                            icon: rsx! { Icon { width: 12, height: 12, icon: FaCircleDot, class: "btn-icon".to_string() } },
+                            on_pick: move |_| {
+                                let new_sql = PRESET_RINGS.to_string();
+                                sql.set(new_sql.clone());
+                                on_outcome.call(runner::run(&new_sql, *user_lon.read(), *user_lat.read()));
+                            },
+                        }
+                        PresetChip {
+                            label: "GeoJSON",
+                            description: "Serialize the top 5 most populous cities as GeoJSON Point features",
+                            icon: rsx! { Icon { width: 12, height: 12, icon: FaFileCode, class: "btn-icon".to_string() } },
+                            on_pick: move |_| {
+                                let new_sql = PRESET_GEOJSON.to_string();
+                                sql.set(new_sql.clone());
+                                on_outcome.call(runner::run(&new_sql, *user_lon.read(), *user_lat.read()));
+                            },
+                        }
+                    }
+                }
+                button {
+                    aria_label: "Run the query against the loaded database",
+                    title: "Run the query against the loaded database",
+                    onclick: move |_| {
+                        let outcome = runner::run(&sql.read(), *user_lon.read(), *user_lat.read());
+                        on_outcome.call(outcome);
+                    },
+                    Icon { width: 13, height: 13, icon: FaPlay, class: "btn-icon".to_string() }
+                    "Run"
+                }
+            }
             CodeEditor {
                 value: sql(),
                 language: Language::Sql,
@@ -133,61 +294,23 @@ pub fn QueryPanel(
                 class: "editor".to_string(),
                 oninput: move |v| sql.set(v),
             }
-            div { class: "controls",
-                button {
-                    onclick: move |_| {
-                        let outcome = runner::run(&sql.read(), *user_lon.read(), *user_lat.read());
-                        on_outcome.call(outcome);
-                    },
-                    "Run"
-                }
-                PresetChip {
-                    label: "KNN distance",
-                    on_pick: move |_| {
-                        let new_sql = PRESET_KNN.to_string();
-                        sql.set(new_sql.clone());
-                        on_outcome.call(runner::run(&new_sql, *user_lon.read(), *user_lat.read()));
-                    },
-                }
-                PresetChip {
-                    label: "Radius 200 km",
-                    on_pick: move |_| {
-                        let new_sql = PRESET_RADIUS.to_string();
-                        sql.set(new_sql.clone());
-                        on_outcome.call(runner::run(&new_sql, *user_lon.read(), *user_lat.read()));
-                    },
-                }
-                PresetChip {
-                    label: "Bounding box",
-                    on_pick: move |_| {
-                        let new_sql = PRESET_ENVELOPE.to_string();
-                        sql.set(new_sql.clone());
-                        on_outcome.call(runner::run(&new_sql, *user_lon.read(), *user_lat.read()));
-                    },
-                }
-                PresetChip {
-                    label: "ST_AsText",
-                    on_pick: move |_| {
-                        let new_sql = PRESET_ASTEXT.to_string();
-                        sql.set(new_sql.clone());
-                        on_outcome.call(runner::run(&new_sql, *user_lon.read(), *user_lat.read()));
-                    },
-                }
-            }
-            p { class: "meta",
-                "`:lon` and `:lat` in the SQL bind to your current position "
-                "(lon={user_lon}, lat={user_lat}). Click anywhere on the map "
-                "to move the probe point and re-run the current query."
-            }
         }
     }
 }
 
 #[component]
-fn PresetChip(label: String, on_pick: EventHandler<()>) -> Element {
+fn PresetChip(
+    label: String,
+    description: String,
+    icon: Element,
+    on_pick: EventHandler<()>,
+) -> Element {
     rsx! {
         button {
+            aria_label: "{description}",
+            title: "{description}",
             onclick: move |_| on_pick.call(()),
+            {icon}
             "{label}"
         }
     }
@@ -195,42 +318,106 @@ fn PresetChip(label: String, on_pick: EventHandler<()>) -> Element {
 
 #[component]
 pub fn ResultsPanel(outcome: Option<QueryOutcome>) -> Element {
+    const PAGE_SIZE: usize = 10;
+    let mut page = use_signal(|| 0usize);
+
+    let row_count = match &outcome {
+        Some(QueryOutcome::Rows { result, .. }) => result.rows.len(),
+        _ => 0,
+    };
+    let total_pages = row_count.div_ceil(PAGE_SIZE).max(1);
+    // Clamp so navigation stays valid if a new query returns fewer rows than
+    // the previously displayed page would address.
+    let current = (*page.read()).min(total_pages - 1);
+    let start = current * PAGE_SIZE;
+    let end = (start + PAGE_SIZE).min(row_count);
+
+    let stats = match &outcome {
+        Some(QueryOutcome::Rows { result, elapsed_ms }) => {
+            let n = result.rows.len();
+            let ms = *elapsed_ms;
+            rsx! { span { class: "meta", "{n} row(s) | {ms:.1} ms" } }
+        }
+        Some(QueryOutcome::Affected { rows, elapsed_ms }) => {
+            let n = *rows;
+            let ms = *elapsed_ms;
+            rsx! {
+                span { class: "meta",
+                    Icon { width: 13, height: 13, icon: FaCircleCheck, class: "status-icon ok".to_string() }
+                    "OK | {n} row(s) affected | {ms:.1} ms"
+                }
+            }
+        }
+        _ => rsx! {},
+    };
     let body = match outcome {
         None => rsx! { p { class: "meta", "Run a query to see results here." } },
-        Some(QueryOutcome::Error(msg)) => rsx! { pre { class: "error", "{msg}" } },
-        Some(QueryOutcome::Affected { rows, elapsed_ms }) => rsx! {
-            p { class: "meta", "OK | {rows} row(s) affected | {elapsed_ms:.1} ms" }
+        Some(QueryOutcome::Error(msg)) => rsx! {
+            pre { class: "error",
+                Icon { width: 13, height: 13, icon: FaTriangleExclamation, class: "status-icon err".to_string() }
+                "{msg}"
+            }
         },
-        Some(QueryOutcome::Rows { result, elapsed_ms }) => rsx! {
-            p { class: "meta", "{result.rows.len()} row(s) | {elapsed_ms:.1} ms" }
-            div { style: "max-height: 360px; overflow: auto;",
-                table { class: "results",
-                    thead {
-                        tr {
-                            for col in result.columns.iter() {
-                                th { "{col}" }
+        Some(QueryOutcome::Affected { .. }) => rsx! {},
+        Some(QueryOutcome::Rows { result, .. }) => {
+            let columns = result.columns.clone();
+            let page_rows: Vec<_> = result.rows[start..end].to_vec();
+            rsx! {
+                div { class: "results-scroll",
+                    table { class: "results",
+                        thead {
+                            tr {
+                                for col in columns.iter() {
+                                    th { "{col}" }
+                                }
                             }
                         }
-                    }
-                    tbody {
-                        for row in result.rows.iter() {
-                            tr {
-                                for cell in row.iter() {
-                                    td { "{cell}" }
+                        tbody {
+                            for row in page_rows.iter() {
+                                tr {
+                                    for cell in row.iter() {
+                                        td { "{cell}" }
+                                    }
                                 }
                             }
                         }
                     }
                 }
+                if total_pages > 1 {
+                    div { class: "pagination",
+                        button {
+                            aria_label: "Show the previous page of results",
+                            title: "Previous page",
+                            disabled: current == 0,
+                            onclick: move |_| page.set(current.saturating_sub(1)),
+                            Icon { width: 12, height: 12, icon: FaChevronLeft, class: "btn-icon".to_string() }
+                            "Prev"
+                        }
+                        span { class: "meta", "Page {current + 1} of {total_pages}" }
+                        button {
+                            aria_label: "Show the next page of results",
+                            title: "Next page",
+                            disabled: current + 1 >= total_pages,
+                            onclick: move |_| page.set(current + 1),
+                            "Next"
+                            Icon { width: 12, height: 12, icon: FaChevronRight, class: "btn-icon".to_string() }
+                        }
+                    }
+                }
             }
-        },
+        }
     };
 
     rsx! {
-        section {
-            h2 { "Results" }
+        section { class: "results-panel",
+            div { class: "panel-header",
+                h2 {
+                    Icon { width: 16, height: 16, icon: FaTableCells, class: "section-icon".to_string() }
+                    "Results"
+                }
+                {stats}
+            }
             {body}
         }
     }
 }
-

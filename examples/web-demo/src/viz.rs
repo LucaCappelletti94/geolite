@@ -10,7 +10,7 @@ use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 const CANVAS_ID: &str = "geolite-map";
 const CANVAS_W: u32 = 1080;
 const CANVAS_H: u32 = 540;
-const MIN_ZOOM: f64 = 0.25;
+const MIN_ZOOM: f64 = 1.0;
 const MAX_ZOOM: f64 = 64.0;
 const ZOOM_STEP: f64 = 1.15;
 const CLICK_PX_THRESHOLD: f64 = 5.0;
@@ -45,13 +45,11 @@ pub fn WorldMap(
     });
 
     rsx! {
-        section {
-            h2 { "World map" }
-            canvas {
-                id: CANVAS_ID,
-                width: "{CANVAS_W}",
-                height: "{CANVAS_H}",
-                style: "cursor: grab; touch-action: none;",
+        canvas {
+            id: CANVAS_ID,
+            width: "{CANVAS_W}",
+            height: "{CANVAS_H}",
+            style: "cursor: grab; touch-action: none;",
                 onwheel: move |e| {
                     e.prevent_default();
                     let dy = e.data().delta().strip_units().y;
@@ -62,13 +60,22 @@ pub fn WorldMap(
                     let cy: f64 = pt.y.into();
                     let Some((w, h)) = display_size() else { return };
                     let old_z = *zoom.peek();
+                    let old_clon = *center_lon.peek();
+                    let old_clat = *center_lat.peek();
+                    // Reject zooms anchored outside the world rectangle. The
+                    // cursor's world coordinate is the fixed point of the zoom,
+                    // so anchoring outside [-180, 180] x [-90, 90] would let
+                    // the user drift the view into empty space.
+                    let world_lon = old_clon + (cx / w - 0.5) * (360.0 / old_z);
+                    let world_lat = old_clat - (cy / h - 0.5) * (180.0 / old_z);
+                    if !(-180.0..=180.0).contains(&world_lon)
+                        || !(-90.0..=90.0).contains(&world_lat)
+                    {
+                        return;
+                    }
                     let new_z = (old_z * factor).clamp(MIN_ZOOM, MAX_ZOOM);
                     if new_z == old_z { return; }
                     // Keep the world point under the cursor fixed across the zoom.
-                    let old_clon = *center_lon.peek();
-                    let old_clat = *center_lat.peek();
-                    let world_lon = old_clon + (cx / w - 0.5) * (360.0 / old_z);
-                    let world_lat = old_clat - (cy / h - 0.5) * (180.0 / old_z);
                     let new_clon = world_lon - (cx / w - 0.5) * (360.0 / new_z);
                     let new_clat = world_lat + (cy / h - 0.5) * (180.0 / new_z);
                     zoom.set(new_z);
@@ -118,16 +125,6 @@ pub fn WorldMap(
                     user_lat.set(lat);
                 },
                 onmouseleave: move |_| drag.set(None),
-            }
-            p { class: "meta",
-                "zoom={zoom:.2}x | center=({center_lon:.1}, {center_lat:.1}) | "
-                "scroll to zoom, drag to pan, click to drop the position pin"
-            }
-            p { class: "meta",
-                "Equirectangular projection. Gray dots: every city. "
-                "Orange: rows from the last query that exposed `lon` and `lat`. "
-                "Green: your position."
-            }
         }
     }
 }
@@ -141,7 +138,11 @@ fn display_size() -> Option<(f64, f64)> {
     let rect = canvas.get_bounding_client_rect();
     let w = rect.width();
     let h = rect.height();
-    if w <= 0.0 || h <= 0.0 { None } else { Some((w, h)) }
+    if w <= 0.0 || h <= 0.0 {
+        None
+    } else {
+        Some((w, h))
+    }
 }
 
 fn draw(

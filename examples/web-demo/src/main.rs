@@ -9,12 +9,14 @@ mod state;
 mod viz;
 
 use dioxus::prelude::*;
+use dioxus_free_icons::icons::fa_solid_icons::{
+    FaCircleNotch, FaHourglass, FaTriangleExclamation,
+};
+use dioxus_free_icons::Icon;
 
 use crate::components::{QueryPanel, ResultsPanel, SchemaPanel};
 use crate::runner::QueryOutcome;
 use crate::viz::WorldMap;
-
-const APP_CSS: Asset = asset!("/assets/app.css");
 
 fn main() {
     console_error_panic_hook::set_once();
@@ -51,7 +53,10 @@ fn App() -> Element {
                 stage.set(LoadStage::Error(format!("applying schema: {e}")));
                 return;
             }
-            stage.set(LoadStage::LoadingData { inserted: 0, total: 0 });
+            stage.set(LoadStage::LoadingData {
+                inserted: 0,
+                total: 0,
+            });
             let loader_result = loader::load_places(|n, total, coords| {
                 stage.set(LoadStage::LoadingData { inserted: n, total });
                 // Append the newly inserted batch to the live coord set so
@@ -85,54 +90,123 @@ fn App() -> Element {
     });
 
     rsx! {
-        document::Stylesheet { href: APP_CSS }
         main {
             header {
-                h1 { "geolite" }
-                p {
-                    "PostGIS-style spatial SQL on top of SQLite, running entirely in your "
-                    "browser via Diesel + sqlite-wasm-rs."
+                h1 {
+                    img {
+                        src: "/logo.svg",
+                        alt: "geolite logo",
+                        width: 36,
+                        height: 36,
+                        class: "title-icon",
+                    }
+                    "geolite"
+                }
+                p { class: "tagline",
+                    "Spatial SQL for SQLite, the PostGIS way."
+                }
+                p { class: "intro",
+                    "geolite is a pure-Rust SQLite extension that ships over 100 "
+                    "PostGIS-compatible spatial functions plus first-class "
+                    "Diesel ORM bindings. Geometries are stored as EWKB BLOBs "
+                    "(the PostGIS wire format), and queries support planar and "
+                    "geodesic distance, DE-9IM predicates, and R-tree spatial "
+                    "indexes. The full stack runs in this page through "
+                    "WebAssembly, so you can experiment with real spatial SQL "
+                    "without setting up Postgres."
+                }
+                div { class: "feature-pills",
+                    span { class: "pill", "100+ ST_* functions" }
+                    span { class: "pill", "Geodesic + planar distance" }
+                    span { class: "pill", "R-tree spatial indexes" }
+                    span { class: "pill", "DE-9IM predicates" }
+                    span { class: "pill", "Diesel ORM" }
+                    span { class: "pill", "Pure Rust" }
+                    span { class: "pill", "Native + WASM" }
+                }
+                nav { class: "quick-links", aria_label: "Project resources",
+                    a {
+                        href: "https://github.com/LucaCappelletti94/geolite",
+                        rel: "noopener",
+                        target: "_blank",
+                        "GitHub"
+                    }
+                    a {
+                        href: "https://docs.rs/geolite-core",
+                        rel: "noopener",
+                        target: "_blank",
+                        "docs.rs (core)"
+                    }
+                    a {
+                        href: "https://docs.rs/geolite-diesel",
+                        rel: "noopener",
+                        target: "_blank",
+                        "docs.rs (diesel)"
+                    }
+                    a {
+                        href: "https://docs.rs/geolite-sqlite",
+                        rel: "noopener",
+                        target: "_blank",
+                        "docs.rs (sqlite)"
+                    }
                 }
             }
             StatusBanner { stage: stage.read().clone() }
 
-            // Map is visible as soon as the DB is open so cities pop in as
-            // they get inserted during the load.
-            if !matches!(*stage.read(), LoadStage::Booting | LoadStage::Error(_)) {
-                WorldMap {
-                    coords: all_coords,
-                    highlighted,
-                    user_lon,
-                    user_lat,
+            // Loading view: centered stack with the map on top and the
+            // progress bar directly below it, both pinned to the same width.
+            if matches!(*stage.read(), LoadStage::LoadingData { .. }) {
+                div { class: "loading-stack",
+                    WorldMap {
+                        coords: all_coords,
+                        highlighted,
+                        user_lon,
+                        user_lat,
+                    }
+                    if let LoadStage::LoadingData { inserted, total } = *stage.read() {
+                        LoadingProgress { inserted, total }
+                    }
                 }
             }
 
+            // Ready view: 2x2 grid. Top row: Query | Schema. Bottom row:
+            // Results | Map. Two equally-sized columns so the map and
+            // results sit side by side instead of the map swallowing the
+            // viewport.
             if matches!(*stage.read(), LoadStage::Ready { .. }) {
-                SchemaPanel {
-                    on_reset: move |result: Result<(), String>| {
-                        match result {
-                            Ok(_) => {
-                                outcome.set(None);
+                div { class: "panel-grid",
+                    QueryPanel {
+                        user_lon,
+                        user_lat,
+                        on_outcome: move |o: QueryOutcome| {
+                            if let QueryOutcome::Rows { ref result, .. } = o {
+                                highlighted.set(runner::extract_lonlat(result));
+                            } else {
                                 highlighted.set(Vec::new());
-                                all_coords.set(Vec::new());
                             }
-                            Err(e) => outcome.set(Some(QueryOutcome::Error(e))),
+                            outcome.set(Some(o));
+                        },
+                    }
+                    SchemaPanel {
+                        on_reset: move |result: Result<(), String>| {
+                            match result {
+                                Ok(_) => {
+                                    outcome.set(None);
+                                    highlighted.set(Vec::new());
+                                    all_coords.set(Vec::new());
+                                }
+                                Err(e) => outcome.set(Some(QueryOutcome::Error(e))),
+                            }
                         }
                     }
+                    ResultsPanel { outcome: outcome.read().clone() }
+                    WorldMap {
+                        coords: all_coords,
+                        highlighted,
+                        user_lon,
+                        user_lat,
+                    }
                 }
-                QueryPanel {
-                    user_lon,
-                    user_lat,
-                    on_outcome: move |o: QueryOutcome| {
-                        if let QueryOutcome::Rows { ref result, .. } = o {
-                            highlighted.set(runner::extract_lonlat(result));
-                        } else {
-                            highlighted.set(Vec::new());
-                        }
-                        outcome.set(Some(o));
-                    },
-                }
-                ResultsPanel { outcome: outcome.read().clone() }
             }
         }
     }
@@ -140,25 +214,43 @@ fn App() -> Element {
 
 #[component]
 fn StatusBanner(stage: LoadStage) -> Element {
+    let body = match stage {
+        LoadStage::Booting => rsx! {
+            p {
+                Icon { width: 14, height: 14, icon: FaHourglass, class: "status-icon".to_string() }
+                "Initializing in-memory SQLite plus geolite extension..."
+            }
+        },
+        LoadStage::Error(msg) => rsx! {
+            p { class: "error",
+                Icon { width: 14, height: 14, icon: FaTriangleExclamation, class: "status-icon err".to_string() }
+                "Error: {msg}"
+            }
+        },
+        // LoadingData renders below the map via LoadingProgress; Ready is
+        // silent so the chrome gets out of the user's way once loading is done.
+        LoadStage::LoadingData { .. } | LoadStage::Ready { .. } => return rsx! {},
+    };
+    rsx! {
+        section { class: "status", {body} }
+    }
+}
+
+#[component]
+fn LoadingProgress(inserted: usize, total: usize) -> Element {
+    let pct = if total == 0 {
+        0.0
+    } else {
+        (inserted as f64 / total as f64) * 100.0
+    };
     rsx! {
         section { class: "status",
-            match stage {
-                LoadStage::Booting => rsx! {
-                    p { "Initializing in-memory SQLite plus geolite extension..." }
-                },
-                LoadStage::LoadingData { inserted, total } => {
-                    let pct = if total == 0 { 0.0 } else { (inserted as f64 / total as f64) * 100.0 };
-                    rsx! {
-                        p { "Loading cities5000 dataset... {inserted} / {total} rows" }
-                        div { class: "progress",
-                            div { class: "progress-fill", style: "width: {pct}%" }
-                        }
-                    }
-                },
-                LoadStage::Ready { rows, elapsed_ms } => rsx! {
-                    p { "DB ready | {rows} cities loaded in {elapsed_ms:.0} ms." }
-                },
-                LoadStage::Error(msg) => rsx! { p { class: "error", "Error: {msg}" } },
+            p {
+                Icon { width: 14, height: 14, icon: FaCircleNotch, class: "status-icon spin".to_string() }
+                "Loading cities5000 dataset... {inserted} / {total} rows"
+            }
+            div { class: "progress",
+                div { class: "progress-fill", style: "width: {pct}%" }
             }
         }
     }

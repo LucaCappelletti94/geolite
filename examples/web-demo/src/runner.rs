@@ -24,14 +24,8 @@ pub struct QueryRows {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum QueryOutcome {
-    Rows {
-        result: QueryRows,
-        elapsed_ms: f64,
-    },
-    Affected {
-        rows: i64,
-        elapsed_ms: f64,
-    },
+    Rows { result: QueryRows, elapsed_ms: f64 },
+    Affected { rows: i64, elapsed_ms: f64 },
     Error(String),
 }
 
@@ -95,7 +89,10 @@ pub fn run(sql: &str, user_lon: f64, user_lat: f64) -> QueryOutcome {
         if let Some(columns) = columns {
             let elapsed_ms = performance_now() - start;
             return Ok(QueryOutcome::Rows {
-                result: QueryRows { columns, rows: data },
+                result: QueryRows {
+                    columns,
+                    rows: data,
+                },
                 elapsed_ms,
             });
         }
@@ -128,8 +125,14 @@ struct ChangesRow {
 /// Pull `(lon, lat)` tuples out of a query result, if it exposed columns
 /// named `lon` and `lat`. Used to highlight rows on the canvas.
 pub fn extract_lonlat(result: &QueryRows) -> Vec<(f64, f64)> {
-    let lon_idx = result.columns.iter().position(|c| c.eq_ignore_ascii_case("lon"));
-    let lat_idx = result.columns.iter().position(|c| c.eq_ignore_ascii_case("lat"));
+    let lon_idx = result
+        .columns
+        .iter()
+        .position(|c| c.eq_ignore_ascii_case("lon"));
+    let lat_idx = result
+        .columns
+        .iter()
+        .position(|c| c.eq_ignore_ascii_case("lat"));
     let (Some(lon_idx), Some(lat_idx)) = (lon_idx, lat_idx) else {
         return Vec::new();
     };
