@@ -5,11 +5,7 @@
 [![MSRV](https://img.shields.io/badge/MSRV-1.86-blue)](https://github.com/LucaCappelletti94/sqlitegis)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](https://github.com/LucaCappelletti94/sqlitegis/blob/main/LICENSE)
 
-PostGIS-style spatial functions for SQLite in pure Rust. Ships as a SQLite loadable extension (native + WASM) and as a Diesel ORM integration. Geometries are stored as EWKB BLOBs, matching the PostGIS wire format. Everything lives in a single crate behind feature flags. The default feature is `diesel-sqlite`. The full feature matrix is documented on [docs.rs](https://docs.rs/sqlitegis).
-
-```sh
-cargo add sqlitegis
-```
+PostGIS-style spatial functions for SQLite in pure Rust. Ships as a SQLite loadable extension (native and WASM) and as a Diesel ORM integration. Geometries travel as EWKB BLOBs, matching the PostGIS wire format so queries port between SQLite and PostGIS without rewriting. API reference and feature matrix on [docs.rs](https://docs.rs/sqlitegis).
 
 ## SQLite extension
 
@@ -39,9 +35,7 @@ assert!((st_distance(&a, &b).unwrap() - 5.0).abs() < 1e-10);
 ```rust
 # #[cfg(feature = "diesel-sqlite")]
 # {
-use diesel::debug_query;
 use diesel::prelude::*;
-use diesel::sqlite::Sqlite;
 use sqlitegis::diesel::functions::st_point;
 use sqlitegis::diesel::prelude::*;
 
@@ -52,37 +46,30 @@ diesel::table! {
     }
 }
 
-let query = features::table
-    .filter(
-        features::geom
-            .st_dwithin(st_point(13.4, 52.5).nullable(), 1000.0)
-            .eq(true),
-    )
+let _query = features::table
+    .filter(features::geom.st_dwithin(st_point(13.4, 52.5).nullable(), 1000.0).eq(true))
     .select(features::geom.st_astext());
-
-let sql = debug_query::<Sqlite, _>(&query).to_string().to_lowercase();
-assert!(sql.contains("st_dwithin"));
 # }
 ```
 
-`CreateSpatialIndex` and `DropSpatialIndex` are called via raw SQL (`diesel::sql_query`). They are DDL helpers and don't have typed wrappers. Both lifecycle calls fail closed when the `sqlitegis_spatial_index_catalog` ownership table is out of sync with live R-tree objects. Prefer SQL migrations for setup and teardown. Indexed queries are roughly 50 to 60x faster than non-indexed in our benches. Run `cargo bench -p sqlitegis --features diesel-sqlite` to measure locally.
+`CreateSpatialIndex` and `DropSpatialIndex` are DDL helpers without typed wrappers, called through `diesel::sql_query`. R-tree-backed queries run 50 to 60x faster than the non-indexed equivalents (see Benchmarks).
 
-## Geographic functions
+## Notes
 
-Geodesic and spherical functions (`ST_DistanceSphere`, `ST_DistanceSpheroid`, `ST_LengthSphere`, `ST_Azimuth`, `ST_Project`, `ST_DWithinSphere`, `ST_DWithinSpheroid`) require `SRID=4326` non-empty Point inputs. Everything else is rejected with an explicit error. `ST_GeomFromGeoJSON` defaults to `SRID=4326` when none is given. Wrap in `ST_SetSRID` to override. `ST_DWithin*` predicates require a finite, non-negative distance.
+Geodesic functions (`ST_DistanceSphere`, `ST_DistanceSpheroid`, `ST_LengthSphere`, `ST_Azimuth`, `ST_Project`, `ST_DWithinSphere`, `ST_DWithinSpheroid`) require `SRID=4326` non-empty Point inputs and reject anything else. `ST_GeomFromGeoJSON` defaults to `SRID=4326`. `ST_DWithin*` predicates require a finite, non-negative distance.
 
 ## Benchmarks
 
-Criterion central estimates, measured 2026-03-05:
+Criterion central estimates on the included R-tree workloads:
 
-| Scenario | Indexed (ORM + R-tree join) | Non-indexed (ORM) | Approx speedup |
+| Scenario | Indexed | Non-indexed | Speedup |
 | --- | ---: | ---: | ---: |
-| `intersects_window` | `156.43 us` | `9.3577 ms` | `~59.8x` |
-| `knn` | `84.271 us` | `5.4050 ms` | `~64.1x` |
+| `intersects_window` | `156 us` | `9.36 ms` | `~60x` |
+| `knn` | `84 us` | `5.41 ms` | `~64x` |
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the local-checks setup (`prek`), how to add a new spatial function, and how to run the benchmark and doc commands locally.
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
