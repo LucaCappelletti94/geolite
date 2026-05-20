@@ -218,7 +218,7 @@
     </g>
 
     <!-- Title -->
-    <text x="185" y="115" class="heading text-light" font-size="56" letter-spacing="-1">GeoLite</text>
+    <text x="185" y="115" class="heading text-light" font-size="56" letter-spacing="-1">SQLiteGIS</text>
 
     <!-- Tagline -->
     <text x="185" y="152" class="body text-light" font-size="20" opacity="0.95">A Pure-Rust PostGIS-Compatible Spatial Extension for SQLite</text>
@@ -255,27 +255,27 @@
     <foreignObject x="70" y="20" width="1070" height="190">
       <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; color: #2D3436; line-height: 1.7;">
         <p style="font-size: 16px; margin: 0 0 14px 0; text-align: justify;">
-          <strong style="color: #6B9FBF;">GeoLite</strong> is a pure-Rust spatial extension for SQLite that brings
+          <strong style="color: #6B9FBF;">SQLiteGIS</strong> is a pure-Rust spatial extension for SQLite that brings
           PostGIS-compatible geospatial capabilities to embedded databases. Built with zero C dependencies and full
           WebAssembly support, it enables spatial queries in environments ranging from edge devices to web browsers.
         </p>
         <p style="font-size: 15px; margin: 0 0 14px 0; color: #636E72; text-align: justify;">
-          The library implements a comprehensive set of <strong>spatial SQL functions</strong>,including geometry I/O,
-          constructors, spatial predicates, measurements, and accessor operations,all following PostGIS naming
+          The library implements a comprehensive set of <strong>spatial SQL functions</strong>, including geometry I/O,
+          constructors, spatial predicates, measurements, and accessor operations, all following PostGIS naming
           conventions and semantics. A full <strong>Diesel ORM integration</strong> provides compile-time checked
           spatial queries for Rust applications.
         </p>
         <p style="font-size: 15px; margin: 0; color: #636E72; text-align: justify;">
-          Organized as a Rust workspace with three focused crates, GeoLite targets developers building
-          location-aware applications, GIS tooling, or spatial data pipelines who need a lightweight,
-          embeddable alternative to PostGIS.
+          Organized as a single Rust crate with three focused modules behind feature flags, SQLiteGIS targets
+          developers building location-aware applications, GIS tooling, or spatial data pipelines who need a
+          lightweight, embeddable alternative to PostGIS.
         </p>
       </div>
     </foreignObject>
   </g>
 
   <!-- ============================================= -->
-  <!-- WHY GEOLITE                                   -->
+  <!-- WHY SQLITEGIS                                 -->
   <!-- ============================================= -->
   <g id="section-motivation" transform="translate(0, 540)">
     <!-- Section heading -->
@@ -283,7 +283,7 @@
       <g color="#6B9FBF">
         <use href="#icon-pin" width="28" height="28" y="-2"/>
       </g>
-      <text x="38" y="20" class="heading" font-size="26">Why GeoLite?</text>
+      <text x="38" y="20" class="heading" font-size="26">Why SQLiteGIS?</text>
       <line x1="0" y1="38" x2="1120" y2="38" stroke="#E2E8F0" stroke-width="1.5"/>
     </g>
 
@@ -302,12 +302,12 @@
       </foreignObject>
     </g>
 
-    <!-- GeoLite -->
+    <!-- SQLiteGIS -->
     <g transform="translate(423, 60)">
       <rect x="0" y="0" width="353" height="180" rx="12" fill="#FFFFFF" stroke="#6B9FBF" stroke-width="2" filter="url(#shadow)"/>
       <rect x="0" y="0" width="353" height="6" rx="3" fill="#6B9FBF"/>
 
-      <text x="20" y="32" class="heading" font-size="17">GeoLite</text>
+      <text x="20" y="32" class="heading" font-size="17">SQLiteGIS</text>
       <text x="20" y="52" class="label" font-size="12">A pure-Rust drop-in replacement</text>
 
       <foreignObject x="20" y="62" width="313" height="110">
@@ -327,7 +327,7 @@
 
       <foreignObject x="20" y="62" width="313" height="110">
         <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; font-size: 13px; color: #636E72; line-height: 1.6;">
-          Uses PostGIS function names and semantics. Spatial queries are portable between SQLite (via GeoLite) and PostgreSQL (via PostGIS) with no changes needed.
+          Uses PostGIS function names and semantics. Spatial queries are portable between SQLite (via SQLiteGIS) and PostgreSQL (via PostGIS) with no changes needed.
         </div>
       </foreignObject>
     </g>
@@ -346,7 +346,7 @@
       <line x1="0" y1="38" x2="1120" y2="38" stroke="#E2E8F0" stroke-width="1.5"/>
     </g>
 
-    <!-- Top tier: geolite-core -->
+    <!-- Top tier: core module -->
     <g transform="translate(250, 70)">
       <rect x="0" y="0" width="700" height="150" rx="12" fill="#FFFFFF" stroke="#A8D8EA" stroke-width="2" filter="url(#shadow)"/>
       <rect x="0" y="0" width="700" height="40" rx="12" fill="url(#coreGrad)"/>
@@ -356,11 +356,11 @@
       <g color="#FFFFFF" transform="translate(16, 8)">
         <use href="#icon-code" width="22" height="22"/>
       </g>
-      <text x="46" y="27" class="heading text-light" font-size="17">geolite-core</text>
+      <text x="46" y="27" class="heading text-light" font-size="17">sqlitegis::core</text>
 
       <!-- Body -->
-      <text x="24" y="68" class="body" font-size="14" fill="#2D3436">Pure Rust geometry library,zero C dependencies, no FFI</text>
-      <text x="24" y="90" class="label" font-size="12">Key modules:</text>
+      <text x="24" y="68" class="body" font-size="14" fill="#2D3436">Pure Rust geometry library. Zero C dependencies, no FFI.</text>
+      <text x="24" y="90" class="label" font-size="12">Submodules:</text>
 
       <!-- Module badges -->
       <g transform="translate(24, 100)">
@@ -387,7 +387,7 @@
     <text x="370" y="252" class="label" font-size="10" text-anchor="middle" transform="rotate(-12, 370, 252)">depends on</text>
     <text x="830" y="252" class="label" font-size="10" text-anchor="middle" transform="rotate(12, 830, 252)">depends on</text>
 
-    <!-- Bottom-left: geolite-sqlite -->
+    <!-- Bottom-left: sqlite module -->
     <g transform="translate(40, 280)">
       <rect x="0" y="0" width="530" height="180" rx="12" fill="#FFFFFF" stroke="#FFB7B2" stroke-width="2" filter="url(#shadow)"/>
       <rect x="0" y="0" width="530" height="40" rx="12" fill="url(#sqliteGrad)"/>
@@ -396,10 +396,10 @@
       <g color="#FFFFFF" transform="translate(16, 8)">
         <use href="#icon-database" width="22" height="22"/>
       </g>
-      <text x="46" y="27" class="heading text-light" font-size="17">geolite-sqlite</text>
+      <text x="46" y="27" class="heading text-light" font-size="17">sqlitegis::sqlite</text>
 
-      <text x="24" y="66" class="body" font-size="14" fill="#2D3436">SQLite loadable extension via C FFI</text>
-      <text x="24" y="86" class="label" font-size="12">Full PostGIS-compatible spatial SQL library</text>
+      <text x="24" y="66" class="body" font-size="14" fill="#2D3436">SQLite loadable extension via C FFI.</text>
+      <text x="24" y="86" class="label" font-size="12">Full PostGIS-compatible spatial SQL library.</text>
 
       <text x="24" y="110" class="label" font-size="11">Targets:</text>
       <rect x="75" y="98" width="120" height="22" rx="6" fill="#FFB7B2" opacity="0.25"/>
@@ -408,10 +408,10 @@
       <text x="275" y="113" class="body" font-size="11" text-anchor="middle" fill="#2D3436">WASM (wasm32)</text>
 
       <text x="24" y="138" class="label" font-size="11">Key exports:</text>
-      <text x="24" y="158" class="code" font-size="11" fill="#636E72">sqlite3_geolite_init() · CreateSpatialIndex · DropSpatialIndex</text>
+      <text x="24" y="158" class="code" font-size="11" fill="#636E72">sqlite3_sqlitegis_init() . CreateSpatialIndex . DropSpatialIndex</text>
     </g>
 
-    <!-- Bottom-right: geolite-diesel -->
+    <!-- Bottom-right: diesel module -->
     <g transform="translate(600, 280)">
       <rect x="0" y="0" width="560" height="180" rx="12" fill="#FFFFFF" stroke="#B5EAD7" stroke-width="2" filter="url(#shadow)"/>
       <rect x="0" y="0" width="560" height="40" rx="12" fill="url(#dieselGrad)"/>
@@ -420,10 +420,10 @@
       <g color="#FFFFFF" transform="translate(16, 8)">
         <use href="#icon-shield" width="22" height="22"/>
       </g>
-      <text x="46" y="27" class="heading text-light" font-size="17">geolite-diesel</text>
+      <text x="46" y="27" class="heading text-light" font-size="17">sqlitegis::diesel</text>
 
-      <text x="24" y="66" class="body" font-size="14" fill="#2D3436">Diesel ORM integration layer</text>
-      <text x="24" y="86" class="label" font-size="12">Compile-time checked spatial queries</text>
+      <text x="24" y="66" class="body" font-size="14" fill="#2D3436">Diesel ORM integration layer.</text>
+      <text x="24" y="86" class="label" font-size="12">Compile-time checked spatial queries.</text>
 
       <text x="24" y="110" class="label" font-size="11">SQL Types:</text>
       <rect x="93" y="98" width="100" height="22" rx="6" fill="#B5EAD7" opacity="0.3"/>
@@ -776,11 +776,11 @@
       <text x="24" y="32" class="heading" font-size="18">Usage Examples</text>
 
       <!-- SQL Example -->
-      <text x="24" y="60" class="label" font-size="12">SQL,Spatial query with GeoLite:</text>
+      <text x="24" y="60" class="label" font-size="12">SQL. Spatial query with SQLiteGIS as a loadable extension:</text>
       <rect x="16" y="68" width="528" height="130" rx="8" fill="#2D3436"/>
       <foreignObject x="24" y="74" width="512" height="120">
         <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: 'JetBrains Mono', 'SF Mono', 'Consolas', monospace; font-size: 12px; color: #E8E8E8; line-height: 1.65; white-space: pre; overflow: hidden;">
-<span style="color: #8BB8D4;">.load</span> geolite_sqlite
+<span style="color: #8BB8D4;">.load</span> ./libsqlitegis
 
 <span style="color: #C7CEEA;">SELECT</span> name, <span style="color: #B5EAD7;">ST_Distance</span>(
     location,
@@ -791,11 +791,11 @@
       </foreignObject>
 
       <!-- Rust/Diesel Example -->
-      <text x="24" y="222" class="label" font-size="12">Rust,Diesel ORM integration:</text>
+      <text x="24" y="222" class="label" font-size="12">Rust. Diesel ORM integration:</text>
       <rect x="16" y="230" width="528" height="145" rx="8" fill="#2D3436"/>
       <foreignObject x="24" y="236" width="512" height="135">
         <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: 'JetBrains Mono', 'SF Mono', 'Consolas', monospace; font-size: 12px; color: #E8E8E8; line-height: 1.65; white-space: pre; overflow: hidden;">
-<span style="color: #C7CEEA;">use</span> geolite_diesel::prelude::*;
+<span style="color: #C7CEEA;">use</span> sqlitegis::diesel::prelude::*;
 
 <span style="color: #C7CEEA;">let</span> nearby = places::table
     .<span style="color: #8BB8D4;">filter</span>(places::location.<span style="color: #B5EAD7;">st_dwithin</span>(
@@ -821,7 +821,7 @@
     <circle cx="1100" cy="140" r="100" fill="white" opacity="0.03"/>
 
     <!-- Project name -->
-    <text x="600" y="55" class="heading text-light" font-size="32" text-anchor="middle" letter-spacing="-0.5">GeoLite</text>
+    <text x="600" y="55" class="heading text-light" font-size="32" text-anchor="middle" letter-spacing="-0.5">SQLiteGIS</text>
     <text x="600" y="80" class="body text-light" font-size="14" text-anchor="middle" opacity="0.85">A Pure-Rust PostGIS-Compatible Spatial Extension for SQLite</text>
 
     <!-- License & info -->
