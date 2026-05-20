@@ -177,6 +177,188 @@ pub fn dwithin_sphere_indexed_sql_string(
     )
 }
 
+/// Build a [`diesel::sql_query`] that runs an envelope-window search
+/// through the R-tree shadow table.
+///
+/// The query is the standard two-stage pattern: an R-tree bounding-box
+/// JOIN narrows candidates whose stored bbox overlaps the window, then
+/// `ST_Intersects` against `ST_MakeEnvelope(...)` refines to the exact
+/// intersection. For point-only datasets the refinement is a no-op (a
+/// point's bbox is the point itself), but it keeps the helper correct
+/// for arbitrary geometry types (e.g. L-shaped polygons whose bbox
+/// overlaps the window but whose geometry does not).
+///
+/// `window` is `(xmin, ymin, xmax, ymax)` in the same CRS the geometry
+/// column uses (typically WGS84 degrees, SRID 4326).
+///
+/// `table` and `geom_column` follow the same identifier-safety contract
+/// as [`dwithin_sphere_indexed_sql`]: bracketed into the SQL, must be
+/// caller-trusted strings. Numeric inputs are formatted as `f64`
+/// literals, which is injection-safe.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// # #[cfg(feature = "diesel-sqlite")]
+/// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+/// use diesel::{Connection, RunQueryDsl, sqlite::SqliteConnection};
+/// use diesel::deserialize::QueryableByName;
+/// use diesel::sql_types::{BigInt, Text};
+/// use sqlitegis::diesel::query_helpers::intersects_window_indexed_sql;
+///
+/// #[derive(QueryableByName)]
+/// struct City {
+///     #[diesel(sql_type = BigInt)]
+///     id: i64,
+///     #[diesel(sql_type = Text)]
+///     name: String,
+/// }
+///
+/// let mut conn = SqliteConnection::establish(":memory:")?;
+/// // 30 by 30 degree window around (lon, lat) = (13.4, 52.5).
+/// let rows: Vec<City> = intersects_window_indexed_sql(
+///     "places", "geom", (-1.6, 37.5, 28.4, 67.5),
+///     "t.id, t.name",
+/// ).load::<City>(&mut conn)?;
+/// # let _ = rows;
+/// # Ok(())
+/// # }
+/// ```
+pub fn intersects_window_indexed_sql(
+    table: &str,
+    geom_column: &str,
+    window: (f64, f64, f64, f64),
+    select_cols: &str,
+) -> diesel::query_builder::SqlQuery {
+    diesel::sql_query(intersects_window_indexed_sql_string(
+        table,
+        geom_column,
+        window,
+        select_cols,
+    ))
+}
+
+/// Render the SQL string that [`intersects_window_indexed_sql`] wraps.
+///
+/// Same inputs and contract, useful when the caller needs the raw SQL
+/// (for logging, for prepending `EXPLAIN QUERY PLAN`, or for piping it
+/// through `diesel::sql_query` together with extra binds).
+pub fn intersects_window_indexed_sql_string(
+    table: &str,
+    geom_column: &str,
+    window: (f64, f64, f64, f64),
+    select_cols: &str,
+) -> String {
+    let (xmin, ymin, xmax, ymax) = window;
+    format!(
+        "SELECT {select_cols} \
+         FROM [{table}] t \
+         JOIN [{table}_{geom_column}_rtree] r ON t.rowid = r.id \
+         WHERE r.xmax >= {xmin} AND r.xmin <= {xmax} \
+           AND r.ymax >= {ymin} AND r.ymin <= {ymax} \
+           AND ST_Intersects(t.[{geom_column}], \
+                             ST_MakeEnvelope({xmin}, {ymin}, {xmax}, {ymax}, 4326))",
+    )
+}
+
+/// Build a [`diesel::sql_query`] that runs a geodesic nearest-N search
+/// through the R-tree shadow table.
+///
+/// The query JOINs against the R-tree shadow with a cos(lat)-scaled
+/// bounding box (same math as [`radius_bbox`]) and then `ORDER BY`s the
+/// resulting candidates by `ST_DistanceSphere` to pick the N closest.
+/// No `ST_DWithinSphere` refinement is needed: the `ORDER BY ... LIMIT`
+/// is itself the refinement.
+///
+/// `search_radius_m` is the half-width of the bbox prefilter expressed
+/// in metres. **The helper assumes the N true nearest neighbours all
+/// sit within this radius.** If your dataset is sparse or `limit` is
+/// large, the true Nth nearest may lie outside the bbox and the result
+/// will be incomplete. For that case use the iterative-widening pattern
+/// from [`crate::diesel::query_patterns`] Pattern 7 instead, or pick a
+/// `search_radius_m` that is comfortably larger than the expected
+/// neighbour distance.
+///
+/// `table` and `geom_column` follow the same identifier-safety contract
+/// as [`dwithin_sphere_indexed_sql`].
+///
+/// # Example
+///
+/// ```rust,no_run
+/// # #[cfg(feature = "diesel-sqlite")]
+/// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+/// use diesel::{Connection, RunQueryDsl, sqlite::SqliteConnection};
+/// use diesel::deserialize::QueryableByName;
+/// use diesel::sql_types::{BigInt, Text};
+/// use sqlitegis::diesel::query_helpers::nearest_sphere_indexed_sql;
+///
+/// #[derive(QueryableByName)]
+/// struct City {
+///     #[diesel(sql_type = BigInt)]
+///     id: i64,
+///     #[diesel(sql_type = Text)]
+///     name: String,
+/// }
+///
+/// let mut conn = SqliteConnection::establish(":memory:")?;
+/// // 10 nearest cities to (13.4, 52.5) inside a 1000 km bbox.
+/// let rows: Vec<City> = nearest_sphere_indexed_sql(
+///     "places", "geom", (13.4, 52.5), 1_000_000.0, 10,
+///     "t.id, t.name",
+/// ).load::<City>(&mut conn)?;
+/// # let _ = rows;
+/// # Ok(())
+/// # }
+/// ```
+pub fn nearest_sphere_indexed_sql(
+    table: &str,
+    geom_column: &str,
+    probe: (f64, f64),
+    search_radius_m: f64,
+    limit: usize,
+    select_cols: &str,
+) -> diesel::query_builder::SqlQuery {
+    diesel::sql_query(nearest_sphere_indexed_sql_string(
+        table,
+        geom_column,
+        probe,
+        search_radius_m,
+        limit,
+        select_cols,
+    ))
+}
+
+/// Render the SQL string that [`nearest_sphere_indexed_sql`] wraps.
+///
+/// Same inputs and contract, useful when the caller needs the raw SQL
+/// (for logging, for prepending `EXPLAIN QUERY PLAN`, or for piping it
+/// through `diesel::sql_query` together with extra binds).
+pub fn nearest_sphere_indexed_sql_string(
+    table: &str,
+    geom_column: &str,
+    probe: (f64, f64),
+    search_radius_m: f64,
+    limit: usize,
+    select_cols: &str,
+) -> String {
+    let (lon, lat) = probe;
+    let bbox = radius_bbox(lat, search_radius_m);
+    format!(
+        "SELECT {select_cols} \
+         FROM [{table}] t \
+         JOIN [{table}_{geom_column}_rtree] r ON t.rowid = r.id \
+         WHERE r.xmax >= {x_min} AND r.xmin <= {x_max} \
+           AND r.ymax >= {y_min} AND r.ymin <= {y_max} \
+         ORDER BY ST_DistanceSphere(t.[{geom_column}], \
+                                    ST_Point({lon}, {lat}, 4326)) \
+         LIMIT {limit}",
+        x_min = lon - bbox.dlon,
+        x_max = lon + bbox.dlon,
+        y_min = lat - bbox.dlat,
+        y_max = lat + bbox.dlat,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -254,5 +436,60 @@ mod tests {
         assert!(sql.contains("ST_DWithinSphere(t.[geom]"), "SQL was: {sql}");
         assert!(sql.contains("ST_Point(13.4, 52.5, 4326)"), "SQL was: {sql}",);
         assert!(sql.contains("1000000"), "SQL was: {sql}");
+    }
+
+    /// Regression guard for the envelope-window helper's SQL.
+    #[test]
+    fn intersects_window_indexed_sql_shape() {
+        let sql = intersects_window_indexed_sql_string(
+            "places",
+            "geom",
+            (-1.6, 37.5, 28.4, 67.5),
+            "t.id, t.name",
+        );
+        assert!(sql.contains("SELECT t.id, t.name"), "SQL was: {sql}");
+        assert!(sql.contains("FROM [places] t"), "SQL was: {sql}");
+        assert!(
+            sql.contains("JOIN [places_geom_rtree] r ON t.rowid = r.id"),
+            "SQL was: {sql}",
+        );
+        assert!(sql.contains("r.xmax >= -1.6"), "SQL was: {sql}");
+        assert!(sql.contains("r.xmin <= 28.4"), "SQL was: {sql}");
+        assert!(sql.contains("r.ymax >= 37.5"), "SQL was: {sql}");
+        assert!(sql.contains("r.ymin <= 67.5"), "SQL was: {sql}");
+        assert!(sql.contains("ST_Intersects(t.[geom]"), "SQL was: {sql}",);
+        assert!(
+            sql.contains("ST_MakeEnvelope(-1.6, 37.5, 28.4, 67.5, 4326)"),
+            "SQL was: {sql}",
+        );
+    }
+
+    /// Regression guard for the geodesic nearest-N helper's SQL.
+    #[test]
+    fn nearest_sphere_indexed_sql_shape() {
+        let sql = nearest_sphere_indexed_sql_string(
+            "places",
+            "geom",
+            (13.4, 52.5),
+            1_000_000.0,
+            10,
+            "t.id, t.name",
+        );
+        assert!(sql.contains("SELECT t.id, t.name"), "SQL was: {sql}");
+        assert!(sql.contains("FROM [places] t"), "SQL was: {sql}");
+        assert!(
+            sql.contains("JOIN [places_geom_rtree] r ON t.rowid = r.id"),
+            "SQL was: {sql}",
+        );
+        assert!(sql.contains("r.xmax >="), "SQL was: {sql}");
+        assert!(sql.contains("r.xmin <="), "SQL was: {sql}");
+        assert!(sql.contains("r.ymax >="), "SQL was: {sql}");
+        assert!(sql.contains("r.ymin <="), "SQL was: {sql}");
+        assert!(
+            sql.contains("ORDER BY ST_DistanceSphere(t.[geom]"),
+            "SQL was: {sql}",
+        );
+        assert!(sql.contains("ST_Point(13.4, 52.5, 4326)"), "SQL was: {sql}",);
+        assert!(sql.contains("LIMIT 10"), "SQL was: {sql}");
     }
 }

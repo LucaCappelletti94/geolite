@@ -11,6 +11,8 @@ pub mod types;
 
 pub use expression_methods::GeometryExpressionMethods;
 pub use query_helpers::{
-    dwithin_sphere_indexed_sql, dwithin_sphere_indexed_sql_string, radius_bbox, RadiusBbox,
+    dwithin_sphere_indexed_sql, dwithin_sphere_indexed_sql_string, intersects_window_indexed_sql,
+    intersects_window_indexed_sql_string, nearest_sphere_indexed_sql,
+    nearest_sphere_indexed_sql_string, radius_bbox, RadiusBbox,
 };
 pub use types::{Geography, Geometry};

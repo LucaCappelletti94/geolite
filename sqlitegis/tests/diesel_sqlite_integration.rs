@@ -638,3 +638,169 @@ fn dwithin_sphere_indexed_uses_rtree_plan() {
         "expected plan to engage the R-tree, got: {plan:?}",
     );
 }
+
+// intersects_window_indexed_sql query helper
+
+/// The helper's output matches the naive `ST_Intersects` scan for several
+/// rectangular windows at varied latitudes.
+#[test]
+fn intersects_window_indexed_matches_naive() {
+    use sqlitegis::diesel::query_helpers::intersects_window_indexed_sql;
+
+    let mut c = conn();
+    seed_radius_cities(&mut c, "window_cities");
+
+    // Windows of varied sizes and latitudes. Each one is (xmin, ymin, xmax, ymax).
+    let windows: [(f64, f64, f64, f64); 5] = [
+        (-30.0, -10.0, 30.0, 10.0),    // equator-straddling
+        (-1.6, 37.5, 28.4, 67.5),      // mid-lat Europe
+        (-150.0, 20.0, -90.0, 60.0),   // US
+        (90.0, -40.0, 180.0, 0.0),     // SW Pacific
+        (-180.0, -60.0, 180.0, -50.0), // southern band
+    ];
+
+    for window in windows {
+        let (xmin, ymin, xmax, ymax) = window;
+        let naive: Vec<IdRow> = sql_query(format!(
+            "SELECT id FROM window_cities \
+             WHERE ST_Intersects(geom, \
+                                 ST_MakeEnvelope({xmin}, {ymin}, {xmax}, {ymax}, 4326))"
+        ))
+        .load(&mut c)
+        .unwrap();
+
+        let indexed: Vec<IdRow> =
+            intersects_window_indexed_sql("window_cities", "geom", window, "t.id")
+                .load::<IdRow>(&mut c)
+                .unwrap();
+
+        let mut naive_ids: Vec<i64> = naive.iter().map(|r| r.id).collect();
+        let mut indexed_ids: Vec<i64> = indexed.iter().map(|r| r.id).collect();
+        naive_ids.sort();
+        indexed_ids.sort();
+        assert_eq!(
+            naive_ids,
+            indexed_ids,
+            "window ({xmin}, {ymin}, {xmax}, {ymax}): naive {} vs indexed {}",
+            naive_ids.len(),
+            indexed_ids.len(),
+        );
+        assert!(
+            !indexed_ids.is_empty(),
+            "expected at least one match for window ({xmin}, {ymin}, {xmax}, {ymax})",
+        );
+    }
+}
+
+/// The window helper's SQL engages the R-tree shadow table.
+#[test]
+fn intersects_window_indexed_uses_rtree_plan() {
+    use sqlitegis::diesel::query_helpers::intersects_window_indexed_sql_string;
+
+    let mut c = conn();
+    seed_radius_cities(&mut c, "window_cities_plan");
+
+    let sql = intersects_window_indexed_sql_string(
+        "window_cities_plan",
+        "geom",
+        (-30.0, -10.0, 30.0, 10.0),
+        "t.id",
+    );
+    let plan: Vec<PlanRow> = sql_query(format!("EXPLAIN QUERY PLAN {sql}"))
+        .load(&mut c)
+        .unwrap();
+    assert!(
+        plan.iter()
+            .any(|row| row.detail.contains("window_cities_plan_geom_rtree")
+                || row.detail.contains("VIRTUAL TABLE INDEX")),
+        "expected plan to engage the R-tree, got: {plan:?}",
+    );
+}
+
+// nearest_sphere_indexed_sql query helper
+
+/// The helper's output matches the naive `ORDER BY ST_DistanceSphere
+/// LIMIT N` for several probes, given a `search_radius_m` wide enough
+/// to contain the true N nearest neighbours.
+#[test]
+fn nearest_sphere_indexed_matches_naive() {
+    use sqlitegis::diesel::query_helpers::nearest_sphere_indexed_sql;
+
+    let mut c = conn();
+    seed_radius_cities(&mut c, "nearest_cities");
+
+    let probes = [
+        (0.0_f64, 0.0_f64), // equator
+        (13.4, 52.5),       // Berlin
+        (-122.4, 37.8),     // San Francisco
+        (0.0, 60.0),        // high lat (cos-scaled bbox kicks in)
+        (-60.0, -30.0),     // southern hemisphere
+    ];
+    // The 325-city grid spaces points 10 deg lat / 15 deg lon apart. A
+    // 5000 km bbox half-width is comfortably wider than the 10 nearest
+    // would ever land, so the indexed and naive forms must agree.
+    let search_radius_m = 5_000_000.0;
+    let limit = 10_usize;
+
+    for (lon, lat) in probes {
+        let naive: Vec<IdRow> = sql_query(format!(
+            "SELECT id FROM nearest_cities \
+             ORDER BY ST_DistanceSphere(geom, ST_Point({lon}, {lat}, 4326)) \
+             LIMIT {limit}"
+        ))
+        .load(&mut c)
+        .unwrap();
+
+        let indexed: Vec<IdRow> = nearest_sphere_indexed_sql(
+            "nearest_cities",
+            "geom",
+            (lon, lat),
+            search_radius_m,
+            limit,
+            "t.id",
+        )
+        .load::<IdRow>(&mut c)
+        .unwrap();
+
+        // ORDER BY ties on identical distances can flip row order between
+        // the two queries (e.g. a probe exactly between two cities); sort
+        // both id lists to compare set membership.
+        let mut naive_ids: Vec<i64> = naive.iter().map(|r| r.id).collect();
+        let mut indexed_ids: Vec<i64> = indexed.iter().map(|r| r.id).collect();
+        naive_ids.sort();
+        indexed_ids.sort();
+        assert_eq!(
+            naive_ids, indexed_ids,
+            "probe ({lon}, {lat}): naive {:?} vs indexed {:?}",
+            naive_ids, indexed_ids,
+        );
+        assert_eq!(indexed_ids.len(), limit);
+    }
+}
+
+/// The nearest helper's SQL engages the R-tree shadow table.
+#[test]
+fn nearest_sphere_indexed_uses_rtree_plan() {
+    use sqlitegis::diesel::query_helpers::nearest_sphere_indexed_sql_string;
+
+    let mut c = conn();
+    seed_radius_cities(&mut c, "nearest_cities_plan");
+
+    let sql = nearest_sphere_indexed_sql_string(
+        "nearest_cities_plan",
+        "geom",
+        (0.0, 0.0),
+        5_000_000.0,
+        10,
+        "t.id",
+    );
+    let plan: Vec<PlanRow> = sql_query(format!("EXPLAIN QUERY PLAN {sql}"))
+        .load(&mut c)
+        .unwrap();
+    assert!(
+        plan.iter()
+            .any(|row| row.detail.contains("nearest_cities_plan_geom_rtree")
+                || row.detail.contains("VIRTUAL TABLE INDEX")),
+        "expected plan to engage the R-tree, got: {plan:?}",
+    );
+}

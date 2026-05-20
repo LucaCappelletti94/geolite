@@ -104,6 +104,45 @@
 //! - For point-only tables the refinement step is technically redundant (bbox
 //!   = exact geometry), but including it keeps the pattern uniform.
 //!
+//! ### Using the built-in helper
+//!
+//! SQLite's query planner cannot rewrite `WHERE ST_Intersects(geom, ...)`
+//! into an R-tree plan on its own, the same architectural limit Pattern 4
+//! describes for `ST_DWithinSphere`. SQLiteGIS ships a free function that
+//! builds the JOIN + bbox prefilter + refinement template above so callers
+//! do not have to retype it:
+//!
+//! ```rust,no_run
+//! # #[cfg(feature = "diesel-sqlite")]
+//! # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+//! use diesel::{Connection, RunQueryDsl, sqlite::SqliteConnection};
+//! use diesel::deserialize::QueryableByName;
+//! use diesel::sql_types::{BigInt, Text};
+//! use sqlitegis::diesel::query_helpers::intersects_window_indexed_sql;
+//!
+//! #[derive(QueryableByName)]
+//! struct City {
+//!     #[diesel(sql_type = BigInt)]
+//!     id: i64,
+//!     #[diesel(sql_type = Text)]
+//!     name: String,
+//! }
+//!
+//! let mut conn = SqliteConnection::establish(":memory:")?;
+//! let rows: Vec<City> = intersects_window_indexed_sql(
+//!     "places", "geom", (-1.6, 37.5, 28.4, 67.5),
+//!     "t.id, t.name",
+//! ).load::<City>(&mut conn)?;
+//! # let _ = rows;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! `table` and `geom_column` are interpolated into the SQL as identifiers,
+//! so they must be trusted strings controlled by your code (the same
+//! contract `CreateSpatialIndex` already imposes). Window coordinates are
+//! formatted as `f64` literals, which is injection-safe.
+//!
 //! ---
 //!
 //! ## Pattern 2: Inside Polygon
@@ -511,6 +550,44 @@
 //! - The degree-offset bbox is intentionally conservative. It may include
 //!   candidates outside the true geodesic circle, but the `ORDER BY`
 //!   ensures correct ranking.
+//!
+//! ### Using the built-in helper
+//!
+//! For the common case where the N true nearest are known to sit inside a
+//! search radius, SQLiteGIS ships a free function that builds the JOIN +
+//! cos(lat)-scaled bbox prefilter + `ORDER BY ST_DistanceSphere LIMIT N`
+//! template above:
+//!
+//! ```rust,no_run
+//! # #[cfg(feature = "diesel-sqlite")]
+//! # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+//! use diesel::{Connection, RunQueryDsl, sqlite::SqliteConnection};
+//! use diesel::deserialize::QueryableByName;
+//! use diesel::sql_types::{BigInt, Text};
+//! use sqlitegis::diesel::query_helpers::nearest_sphere_indexed_sql;
+//!
+//! #[derive(QueryableByName)]
+//! struct City {
+//!     #[diesel(sql_type = BigInt)]
+//!     id: i64,
+//!     #[diesel(sql_type = Text)]
+//!     name: String,
+//! }
+//!
+//! let mut conn = SqliteConnection::establish(":memory:")?;
+//! let rows: Vec<City> = nearest_sphere_indexed_sql(
+//!     "places", "geom", (13.4, 52.5), 1_000_000.0, 10,
+//!     "t.id, t.name",
+//! ).load::<City>(&mut conn)?;
+//! # let _ = rows;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! The `search_radius_m` argument is the half-width of the bbox prefilter
+//! in metres. The helper assumes the N true nearest sit inside it. For
+//! sparse datasets or large `n` where that assumption may not hold, use
+//! the iterative-widening pattern in Pattern 7 below.
 //!
 //! ---
 //!
