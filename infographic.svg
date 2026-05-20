@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
-     width="1200" height="3040" viewBox="0 0 1200 3040">
+     width="1200" height="2540" viewBox="0 0 1200 2540">
   <defs>
     <!-- Styles -->
     <style>
@@ -198,7 +198,7 @@
   <!-- ============================================= -->
   <!-- BACKGROUND                                    -->
   <!-- ============================================= -->
-  <rect width="1200" height="3040" fill="#F7F9FC"/>
+  <rect width="1200" height="2540" fill="#F7F9FC"/>
 
   <!-- ============================================= -->
   <!-- SECTION 1: HEADER BANNER (0–260)              -->
@@ -334,118 +334,10 @@
   </g>
 
   <!-- ============================================= -->
-  <!-- ARCHITECTURE                                  -->
-  <!-- ============================================= -->
-  <g id="section-architecture" transform="translate(0, 830)">
-    <!-- Section heading -->
-    <g transform="translate(40, 0)">
-      <g color="#6B9FBF">
-        <use href="#icon-layers" width="28" height="28" y="-2"/>
-      </g>
-      <text x="38" y="20" class="heading" font-size="26">Architecture</text>
-      <line x1="0" y1="38" x2="1120" y2="38" stroke="#E2E8F0" stroke-width="1.5"/>
-    </g>
-
-    <!-- Top tier: core module -->
-    <g transform="translate(250, 70)">
-      <rect x="0" y="0" width="700" height="150" rx="12" fill="#FFFFFF" stroke="#A8D8EA" stroke-width="2" filter="url(#shadow)"/>
-      <rect x="0" y="0" width="700" height="40" rx="12" fill="url(#coreGrad)"/>
-      <rect x="0" y="28" width="700" height="12" fill="url(#coreGrad)"/>
-
-      <!-- Header -->
-      <g color="#FFFFFF" transform="translate(16, 8)">
-        <use href="#icon-code" width="22" height="22"/>
-      </g>
-      <text x="46" y="27" class="heading text-light" font-size="17">sqlitegis::core</text>
-
-      <!-- Body -->
-      <text x="24" y="68" class="body" font-size="14" fill="#2D3436">Pure Rust geometry library. Zero C dependencies, no FFI.</text>
-      <text x="24" y="90" class="label" font-size="12">Submodules:</text>
-
-      <!-- Module badges -->
-      <g transform="translate(24, 100)">
-        <rect x="0" y="0" width="70" height="24" rx="6" fill="#A8D8EA" opacity="0.3"/>
-        <text x="35" y="16" class="label" font-size="11" text-anchor="middle" fill="#2D3436">I/O</text>
-        <rect x="78" y="0" width="105" height="24" rx="6" fill="#A8D8EA" opacity="0.3"/>
-        <text x="130" y="16" class="label" font-size="11" text-anchor="middle" fill="#2D3436">Constructors</text>
-        <rect x="191" y="0" width="95" height="24" rx="6" fill="#A8D8EA" opacity="0.3"/>
-        <text x="238" y="16" class="label" font-size="11" text-anchor="middle" fill="#2D3436">Accessors</text>
-        <rect x="294" y="0" width="100" height="24" rx="6" fill="#A8D8EA" opacity="0.3"/>
-        <text x="344" y="16" class="label" font-size="11" text-anchor="middle" fill="#2D3436">Predicates</text>
-        <rect x="402" y="0" width="115" height="24" rx="6" fill="#A8D8EA" opacity="0.3"/>
-        <text x="459" y="16" class="label" font-size="11" text-anchor="middle" fill="#2D3436">Measurement</text>
-        <rect x="525" y="0" width="75" height="24" rx="6" fill="#A8D8EA" opacity="0.3"/>
-        <text x="562" y="16" class="label" font-size="11" text-anchor="middle" fill="#2D3436">EWKB</text>
-      </g>
-    </g>
-
-    <!-- Connecting arrows -->
-    <line x1="450" y1="220" x2="330" y2="270" stroke="#636E72" stroke-width="2" marker-end="url(#arrowhead)" stroke-dasharray="6,4"/>
-    <line x1="750" y1="220" x2="870" y2="270" stroke="#636E72" stroke-width="2" marker-end="url(#arrowhead)" stroke-dasharray="6,4"/>
-
-    <!-- Arrow labels -->
-    <text x="370" y="252" class="label" font-size="10" text-anchor="middle" transform="rotate(-12, 370, 252)">depends on</text>
-    <text x="830" y="252" class="label" font-size="10" text-anchor="middle" transform="rotate(12, 830, 252)">depends on</text>
-
-    <!-- Bottom-left: sqlite module -->
-    <g transform="translate(40, 280)">
-      <rect x="0" y="0" width="530" height="180" rx="12" fill="#FFFFFF" stroke="#FFB7B2" stroke-width="2" filter="url(#shadow)"/>
-      <rect x="0" y="0" width="530" height="40" rx="12" fill="url(#sqliteGrad)"/>
-      <rect x="0" y="28" width="530" height="12" fill="url(#sqliteGrad)"/>
-
-      <g color="#FFFFFF" transform="translate(16, 8)">
-        <use href="#icon-database" width="22" height="22"/>
-      </g>
-      <text x="46" y="27" class="heading text-light" font-size="17">sqlitegis::sqlite</text>
-
-      <text x="24" y="66" class="body" font-size="14" fill="#2D3436">SQLite loadable extension via C FFI.</text>
-      <text x="24" y="86" class="label" font-size="12">Full PostGIS-compatible spatial SQL library.</text>
-
-      <text x="24" y="110" class="label" font-size="11">Targets:</text>
-      <rect x="75" y="98" width="120" height="22" rx="6" fill="#FFB7B2" opacity="0.25"/>
-      <text x="135" y="113" class="body" font-size="11" text-anchor="middle" fill="#2D3436">Native (cdylib)</text>
-      <rect x="203" y="98" width="145" height="22" rx="6" fill="#FFB7B2" opacity="0.25"/>
-      <text x="275" y="113" class="body" font-size="11" text-anchor="middle" fill="#2D3436">WASM (wasm32)</text>
-
-      <text x="24" y="138" class="label" font-size="11">Key exports:</text>
-      <text x="24" y="158" class="code" font-size="11" fill="#636E72">sqlite3_sqlitegis_init() . CreateSpatialIndex . DropSpatialIndex</text>
-    </g>
-
-    <!-- Bottom-right: diesel module -->
-    <g transform="translate(600, 280)">
-      <rect x="0" y="0" width="560" height="180" rx="12" fill="#FFFFFF" stroke="#B5EAD7" stroke-width="2" filter="url(#shadow)"/>
-      <rect x="0" y="0" width="560" height="40" rx="12" fill="url(#dieselGrad)"/>
-      <rect x="0" y="28" width="560" height="12" fill="url(#dieselGrad)"/>
-
-      <g color="#FFFFFF" transform="translate(16, 8)">
-        <use href="#icon-shield" width="22" height="22"/>
-      </g>
-      <text x="46" y="27" class="heading text-light" font-size="17">sqlitegis::diesel</text>
-
-      <text x="24" y="66" class="body" font-size="14" fill="#2D3436">Diesel ORM integration layer.</text>
-      <text x="24" y="86" class="label" font-size="12">Compile-time checked spatial queries.</text>
-
-      <text x="24" y="110" class="label" font-size="11">SQL Types:</text>
-      <rect x="93" y="98" width="100" height="22" rx="6" fill="#B5EAD7" opacity="0.3"/>
-      <text x="143" y="113" class="code" font-size="11" text-anchor="middle" fill="#2D3436">Geometry</text>
-      <rect x="201" y="98" width="110" height="22" rx="6" fill="#B5EAD7" opacity="0.3"/>
-      <text x="256" y="113" class="code" font-size="11" text-anchor="middle" fill="#2D3436">Geography</text>
-
-      <text x="24" y="138" class="label" font-size="11">Backends:</text>
-      <rect x="93" y="126" width="75" height="22" rx="6" fill="#B5EAD7" opacity="0.3"/>
-      <text x="130" y="141" class="body" font-size="11" text-anchor="middle" fill="#2D3436">SQLite</text>
-      <rect x="176" y="126" width="100" height="22" rx="6" fill="#B5EAD7" opacity="0.3"/>
-      <text x="226" y="141" class="body" font-size="11" text-anchor="middle" fill="#2D3436">PostgreSQL</text>
-
-      <text x="24" y="168" class="label" font-size="10" fill="#636E72">PostgreSQL backend via feature flag</text>
-    </g>
-  </g>
-
-  <!-- ============================================= -->
   <!-- SECTION 4: SPATIAL FUNCTION CATEGORIES        -->
   <!-- (1040–1680)                                   -->
   <!-- ============================================= -->
-  <g id="section-functions" transform="translate(0, 1330)">
+  <g id="section-functions" transform="translate(0, 830)">
     <!-- Section heading -->
     <g transform="translate(40, 0)">
       <g color="#6B9FBF">
@@ -608,7 +500,7 @@
   <!-- ============================================= -->
   <!-- SECTION 5: KEY FEATURES (1700–2060)           -->
   <!-- ============================================= -->
-  <g id="section-features" transform="translate(0, 1990)">
+  <g id="section-features" transform="translate(0, 1490)">
     <!-- Section heading -->
     <g transform="translate(40, 0)">
       <g color="#6B9FBF">
@@ -683,7 +575,7 @@
   <!-- ============================================= -->
   <!-- SECTION 6: WIRE FORMAT & USAGE (2080–2560)    -->
   <!-- ============================================= -->
-  <g id="section-wire-usage" transform="translate(0, 2370)">
+  <g id="section-wire-usage" transform="translate(0, 1870)">
     <!-- Section heading -->
     <g transform="translate(40, 0)">
       <g color="#6B9FBF">
@@ -813,7 +705,7 @@
   <!-- ============================================= -->
   <!-- FOOTER                                        -->
   <!-- ============================================= -->
-  <g id="section-footer" transform="translate(0, 2850)">
+  <g id="section-footer" transform="translate(0, 2350)">
     <path d="M0,30 Q0,0 30,0 H1170 Q1200,0 1200,30 V180 H0 Z" fill="url(#footerGrad)"/>
 
     <!-- Decorative circles -->
