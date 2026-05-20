@@ -1,7 +1,5 @@
-//! # geolite
-//!
-//! PostGIS-style spatial functions for SQLite in pure Rust, plus a
-//! first-class Diesel ORM integration.
+#![doc = include_str!("../../README.md")]
+//! # Crate layout
 //!
 //! Modules are gated behind features so consumers only pay for what they
 //! ask for. See the `[features]` table in Cargo.toml for the full list;
