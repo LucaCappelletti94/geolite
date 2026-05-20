@@ -4,9 +4,9 @@ use dioxus::prelude::*;
 use dioxus_code::{CodeTheme, Theme};
 use dioxus_code_editor::{CodeEditor, Language};
 use dioxus_free_icons::icons::fa_solid_icons::{
-    FaArrowsRotate, FaBullseye, FaCircleCheck, FaCircleDot, FaCode, FaCompass, FaDatabase,
-    FaFileCode, FaFlag, FaFont, FaMagnifyingGlass, FaPlay, FaTriangleExclamation,
-    FaVectorSquare,
+    FaArrowsRotate, FaArrowsToCircle, FaBullseye, FaCircleCheck, FaCircleDot, FaCode, FaCompass,
+    FaDatabase, FaFileCode, FaFlag, FaFont, FaLocationArrow, FaMagnifyingGlass, FaPlay, FaRoute,
+    FaScaleBalanced, FaTriangleExclamation, FaVectorSquare,
 };
 use dioxus_free_icons::Icon;
 
@@ -112,6 +112,86 @@ FROM places p JOIN places_geom_rtree r ON p.rowid = r.id
 WHERE r.xmax >= :lon - 15.0 AND r.xmin <= :lon + 15.0
   AND r.ymax >= :lat - 15.0 AND r.ymin <= :lat + 15.0
 ORDER BY p.population DESC LIMIT 100;";
+
+const PRESET_BEARING: &str = "\
+-- Geodesic bearing from the probe to each of the 100 nearest cities.
+-- ST_Azimuth returns radians (0 = north, clockwise); degrees() makes
+-- the result a familiar 0..360 compass reading.
+SELECT p.name, p.country,
+  ROUND(ST_DistanceSphere(p.geom, ST_Point(:lon, :lat, 4326))/1000.0,
+        1) AS km,
+  ROUND(degrees(ST_Azimuth(ST_Point(:lon, :lat, 4326), p.geom)),
+        1) AS bearing_deg,
+  ST_X(p.geom) AS lon, ST_Y(p.geom) AS lat
+FROM places p JOIN places_geom_rtree r ON p.rowid = r.id
+WHERE r.xmax >= :lon - 10 AND r.xmin <= :lon + 10
+  AND r.ymax >= :lat - 10 AND r.ymin <= :lat + 10
+ORDER BY km LIMIT 100;";
+
+const PRESET_COMPASS: &str = "\
+-- Project the probe 5000 km in 8 cardinal and intercardinal
+-- directions via ST_Project. Bearing is in radians (0 = north,
+-- clockwise). The result is a destination Point per compass arm.
+WITH RECURSIVE compass(i) AS (
+  SELECT 0 UNION ALL SELECT i+1 FROM compass WHERE i < 7
+)
+SELECT
+  CASE i
+    WHEN 0 THEN 'N'  WHEN 1 THEN 'NE' WHEN 2 THEN 'E'
+    WHEN 3 THEN 'SE' WHEN 4 THEN 'S'  WHEN 5 THEN 'SW'
+    WHEN 6 THEN 'W'  ELSE 'NW'
+  END AS direction,
+  ROUND(ST_X(ST_Project(ST_Point(:lon, :lat, 4326), 5000000.0,
+                        radians(i * 45.0))), 4) AS lon,
+  ROUND(ST_Y(ST_Project(ST_Point(:lon, :lat, 4326), 5000000.0,
+                        radians(i * 45.0))), 4) AS lat
+FROM compass;";
+
+const PRESET_POLYLINE: &str = "\
+-- Build a polyline between the two cities nearest the probe and
+-- report its geodesic (km) and planar (degrees) length.
+-- ST_MakeLine builds a 2-point LineString; ST_LengthSphere needs
+-- SRID 4326 input, ST_Length is the CRS-units planar measure.
+WITH nearest AS (
+  SELECT p.name, p.geom,
+    ST_DistanceSphere(p.geom, ST_Point(:lon, :lat, 4326)) AS d
+  FROM places p JOIN places_geom_rtree r ON p.rowid = r.id
+  WHERE r.xmax >= :lon - 10 AND r.xmin <= :lon + 10
+    AND r.ymax >= :lat - 10 AND r.ymin <= :lat + 10
+  ORDER BY d LIMIT 2
+)
+SELECT
+  name AS endpoint,
+  ROUND(d/1000.0, 1) AS km_from_probe,
+  ROUND(ST_LengthSphere(ST_MakeLine(
+    (SELECT geom FROM nearest LIMIT 1),
+    (SELECT geom FROM nearest LIMIT 1 OFFSET 1)
+  ))/1000.0, 1) AS segment_km,
+  ROUND(ST_Length(ST_MakeLine(
+    (SELECT geom FROM nearest LIMIT 1),
+    (SELECT geom FROM nearest LIMIT 1 OFFSET 1)
+  )), 3) AS segment_planar_deg,
+  ST_X(geom) AS lon, ST_Y(geom) AS lat
+FROM nearest;";
+
+const PRESET_SPHEROID: &str = "\
+-- Compare ST_DistanceSphere (Haversine) and ST_DistanceSpheroid
+-- (Karney) for the 50 nearest cities. The delta column shows the
+-- ~0.5%-scale precision gap between the spherical and ellipsoidal
+-- earth models. The gap grows with latitude.
+SELECT p.name, p.country,
+  ROUND(ST_DistanceSphere(p.geom, ST_Point(:lon, :lat, 4326)), 0)
+    AS m_sphere,
+  ROUND(ST_DistanceSpheroid(p.geom, ST_Point(:lon, :lat, 4326)), 0)
+    AS m_spheroid,
+  ROUND(ST_DistanceSpheroid(p.geom, ST_Point(:lon, :lat, 4326))
+        - ST_DistanceSphere(p.geom, ST_Point(:lon, :lat, 4326)),
+        1) AS delta_m,
+  ST_X(p.geom) AS lon, ST_Y(p.geom) AS lat
+FROM places p JOIN places_geom_rtree r ON p.rowid = r.id
+WHERE r.xmax >= :lon - 10 AND r.xmin <= :lon + 10
+  AND r.ymax >= :lat - 10 AND r.ymin <= :lat + 10
+ORDER BY m_spheroid LIMIT 50;";
 
 const PRESET_ASTEXT: &str = "\
 -- BLOB to WKT, for the 100 cities nearest the probe lon/lat.
@@ -263,6 +343,54 @@ pub fn QueryPanel(
                         let new_sql = PRESET_ENVELOPE.to_string();
                         sql.set(new_sql.clone());
                         active_preset.set("BBOX".to_string());
+                        on_outcome.call(runner::run(&new_sql, *user_lon.read(), *user_lat.read()));
+                    },
+                }
+                PresetChip {
+                    label: "Bearing",
+                    description: "Geodesic compass bearing from the probe to each of the 100 nearest cities, R-tree prefiltered. ST_Azimuth converts radians to a 0..360 reading",
+                    icon: rsx! { Icon { width: 11, height: 11, icon: FaLocationArrow, class: "btn-icon".to_string() } },
+                    active: active_preset.read().as_str() == "Bearing",
+                    on_pick: move |_| {
+                        let new_sql = PRESET_BEARING.to_string();
+                        sql.set(new_sql.clone());
+                        active_preset.set("Bearing".to_string());
+                        on_outcome.call(runner::run(&new_sql, *user_lon.read(), *user_lat.read()));
+                    },
+                }
+                PresetChip {
+                    label: "Compass",
+                    description: "Project the probe 5000 km in 8 cardinal and intercardinal directions via ST_Project. Returns the destination Point per compass arm",
+                    icon: rsx! { Icon { width: 11, height: 11, icon: FaArrowsToCircle, class: "btn-icon".to_string() } },
+                    active: active_preset.read().as_str() == "Compass",
+                    on_pick: move |_| {
+                        let new_sql = PRESET_COMPASS.to_string();
+                        sql.set(new_sql.clone());
+                        active_preset.set("Compass".to_string());
+                        on_outcome.call(runner::run(&new_sql, *user_lon.read(), *user_lat.read()));
+                    },
+                }
+                PresetChip {
+                    label: "Polyline",
+                    description: "Build a polyline between the two cities nearest the probe and report its geodesic and planar length via ST_MakeLine + ST_LengthSphere + ST_Length",
+                    icon: rsx! { Icon { width: 11, height: 11, icon: FaRoute, class: "btn-icon".to_string() } },
+                    active: active_preset.read().as_str() == "Polyline",
+                    on_pick: move |_| {
+                        let new_sql = PRESET_POLYLINE.to_string();
+                        sql.set(new_sql.clone());
+                        active_preset.set("Polyline".to_string());
+                        on_outcome.call(runner::run(&new_sql, *user_lon.read(), *user_lat.read()));
+                    },
+                }
+                PresetChip {
+                    label: "Spheroid",
+                    description: "Compare ST_DistanceSphere (Haversine) and ST_DistanceSpheroid (Karney) for the 50 nearest cities. The delta column surfaces the precision gap between spherical and ellipsoidal earth models",
+                    icon: rsx! { Icon { width: 11, height: 11, icon: FaScaleBalanced, class: "btn-icon".to_string() } },
+                    active: active_preset.read().as_str() == "Spheroid",
+                    on_pick: move |_| {
+                        let new_sql = PRESET_SPHEROID.to_string();
+                        sql.set(new_sql.clone());
+                        active_preset.set("Spheroid".to_string());
                         on_outcome.call(runner::run(&new_sql, *user_lon.read(), *user_lat.read()));
                     },
                 }
