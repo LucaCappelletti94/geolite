@@ -1,4 +1,4 @@
-//! geolite web demo. Runs Diesel queries through geolite's SQLite extension
+//! sqlitegis web demo. Runs Diesel queries through sqlitegis's SQLite extension
 //! entirely in the browser via sqlite-wasm-rs.
 
 mod components;
@@ -95,18 +95,18 @@ fn App() -> Element {
                 h1 {
                     img {
                         src: "/logo.svg",
-                        alt: "geolite logo",
+                        alt: "sqlitegis logo",
                         width: 36,
                         height: 36,
                         class: "title-icon",
                     }
-                    "geolite"
+                    "sqlitegis"
                 }
                 p { class: "tagline",
                     "Spatial SQL for SQLite, the PostGIS way."
                 }
                 p { class: "intro",
-                    "geolite is a pure-Rust SQLite extension that ships over 100 "
+                    "sqlitegis is a pure-Rust SQLite extension that ships over 100 "
                     "PostGIS-compatible spatial functions plus first-class "
                     "Diesel ORM bindings. Geometries are stored as EWKB BLOBs "
                     "(the PostGIS wire format), and queries support planar and "
@@ -126,25 +126,25 @@ fn App() -> Element {
                 }
                 nav { class: "quick-links", aria_label: "Project resources",
                     a {
-                        href: "https://github.com/LucaCappelletti94/geolite",
+                        href: "https://github.com/LucaCappelletti94/sqlitegis",
                         rel: "noopener",
                         target: "_blank",
                         "GitHub"
                     }
                     a {
-                        href: "https://docs.rs/geolite-core",
+                        href: "https://docs.rs/sqlitegis-core",
                         rel: "noopener",
                         target: "_blank",
                         "docs.rs (core)"
                     }
                     a {
-                        href: "https://docs.rs/geolite-diesel",
+                        href: "https://docs.rs/sqlitegis-diesel",
                         rel: "noopener",
                         target: "_blank",
                         "docs.rs (diesel)"
                     }
                     a {
-                        href: "https://docs.rs/geolite-sqlite",
+                        href: "https://docs.rs/sqlitegis-sqlite",
                         rel: "noopener",
                         target: "_blank",
                         "docs.rs (sqlite)"
@@ -218,7 +218,7 @@ fn StatusBanner(stage: LoadStage) -> Element {
         LoadStage::Booting => rsx! {
             p {
                 Icon { width: 14, height: 14, icon: FaHourglass, class: "status-icon".to_string() }
-                "Initializing in-memory SQLite plus geolite extension..."
+                "Initializing in-memory SQLite plus sqlitegis extension..."
             }
         },
         LoadStage::Error(msg) => rsx! {

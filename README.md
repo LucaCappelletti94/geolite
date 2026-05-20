@@ -1,9 +1,9 @@
-# geolite
+# sqlitegis
 
-[![CI](https://github.com/LucaCappelletti94/geolite/actions/workflows/ci.yml/badge.svg)](https://github.com/LucaCappelletti94/geolite/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/LucaCappelletti94/geolite/graph/badge.svg)](https://codecov.io/gh/LucaCappelletti94/geolite)
-[![MSRV](https://img.shields.io/badge/MSRV-1.86-blue)](https://github.com/LucaCappelletti94/geolite)
-[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](https://github.com/LucaCappelletti94/geolite/blob/main/LICENSE)
+[![CI](https://github.com/LucaCappelletti94/sqlitegis/actions/workflows/ci.yml/badge.svg)](https://github.com/LucaCappelletti94/sqlitegis/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/LucaCappelletti94/sqlitegis/graph/badge.svg)](https://codecov.io/gh/LucaCappelletti94/sqlitegis)
+[![MSRV](https://img.shields.io/badge/MSRV-1.86-blue)](https://github.com/LucaCappelletti94/sqlitegis)
+[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](https://github.com/LucaCappelletti94/sqlitegis/blob/main/LICENSE)
 
 PostGIS-style spatial functions for SQLite in pure Rust. Ships as a SQLite loadable extension (native + WASM) and as a Diesel ORM integration. Geometries are stored as EWKB BLOBs, matching the PostGIS wire format. Everything lives in a single crate behind feature flags.
 
@@ -20,19 +20,19 @@ PostGIS-style spatial functions for SQLite in pure Rust. Ships as a SQLite loada
 
 ```toml
 [dependencies]
-geolite = "0.2"                                       # default: diesel-sqlite
-geolite = { version = "0.2", default-features = false } # pure-Rust geometry only
-geolite = { version = "0.2", features = ["sqlite-extension"] } # for the loadable .so
+sqlitegis = "0.2"                                       # default: diesel-sqlite
+sqlitegis = { version = "0.2", default-features = false } # pure-Rust geometry only
+sqlitegis = { version = "0.2", features = ["sqlite-extension"] } # for the loadable .so
 ```
 
 ## SQLite extension
 
 ```sh
-cargo build --release -p geolite --features sqlite-extension
+cargo build --release -p sqlitegis --features sqlite-extension
 ```
 
 ```sql
-SELECT load_extension('./target/release/libgeolite');
+SELECT load_extension('./target/release/libsqlitegis');
 SELECT ST_AsText(ST_Buffer(ST_Point(0, 0), 1.0));
 SELECT ST_Distance(ST_GeomFromText('POINT(0 0)'), ST_GeomFromText('POINT(3 4)'));
 ```
@@ -40,8 +40,8 @@ SELECT ST_Distance(ST_GeomFromText('POINT(0 0)'), ST_GeomFromText('POINT(3 4)'))
 ## Pure-Rust geometry
 
 ```rust
-use geolite::core::functions::constructors::st_point;
-use geolite::core::functions::measurement::st_distance;
+use sqlitegis::core::functions::constructors::st_point;
+use sqlitegis::core::functions::measurement::st_distance;
 
 let a = st_point(0.0, 0.0, None).unwrap();
 let b = st_point(3.0, 4.0, None).unwrap();
@@ -56,13 +56,13 @@ assert!((st_distance(&a, &b).unwrap() - 5.0).abs() < 1e-10);
 use diesel::debug_query;
 use diesel::prelude::*;
 use diesel::sqlite::Sqlite;
-use geolite::diesel::functions::st_point;
-use geolite::diesel::prelude::*;
+use sqlitegis::diesel::functions::st_point;
+use sqlitegis::diesel::prelude::*;
 
 diesel::table! {
     features (id) {
         id -> Integer,
-        geom -> Nullable<geolite::diesel::Geometry>,
+        geom -> Nullable<sqlitegis::diesel::Geometry>,
     }
 }
 
@@ -79,7 +79,7 @@ assert!(sql.contains("st_dwithin"));
 # }
 ```
 
-`CreateSpatialIndex` and `DropSpatialIndex` are called via raw SQL (`diesel::sql_query`). They are DDL helpers and don't have typed wrappers. Both lifecycle calls fail closed when the `geolite_spatial_index_catalog` ownership table is out of sync with live R-tree objects. Prefer SQL migrations for setup and teardown. Indexed queries are roughly 50 to 60x faster than non-indexed in our benches. Run `cargo bench -p geolite --features diesel-sqlite` to measure locally.
+`CreateSpatialIndex` and `DropSpatialIndex` are called via raw SQL (`diesel::sql_query`). They are DDL helpers and don't have typed wrappers. Both lifecycle calls fail closed when the `sqlitegis_spatial_index_catalog` ownership table is out of sync with live R-tree objects. Prefer SQL migrations for setup and teardown. Indexed queries are roughly 50 to 60x faster than non-indexed in our benches. Run `cargo bench -p sqlitegis --features diesel-sqlite` to measure locally.
 
 ## Geographic functions
 

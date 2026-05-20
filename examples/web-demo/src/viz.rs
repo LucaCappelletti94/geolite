@@ -7,7 +7,7 @@ use dioxus::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
-const CANVAS_ID: &str = "geolite-map";
+const CANVAS_ID: &str = "sqlitegis-map";
 const CANVAS_W: u32 = 1080;
 const CANVAS_H: u32 = 540;
 const MIN_ZOOM: f64 = 1.0;

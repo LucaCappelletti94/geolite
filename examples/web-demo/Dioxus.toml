@@ -1,9 +1,9 @@
 [application]
-name = "geolite-web-demo"
+name = "sqlitegis-web-demo"
 default_platform = "web"
 
 [web.app]
-title = "geolite -- SQLite spatial queries in the browser"
+title = "sqlitegis -- SQLite spatial queries in the browser"
 
 [web.watcher]
 reload_html = true

@@ -1,8 +1,8 @@
-//! In-memory SQLite connection wired with the geolite extension.
+//! In-memory SQLite connection wired with the sqlitegis extension.
 //!
-//! Mirrors the pattern used in `geolite-diesel/tests/wasm_integration.rs`:
-//! register `geolite_init` once via `sqlite3_auto_extension`, then every
-//! `SqliteConnection::establish(":memory:")` call gets geolite's functions.
+//! Mirrors the pattern used in `sqlitegis-diesel/tests/wasm_integration.rs`:
+//! register `sqlitegis_init` once via `sqlite3_auto_extension`, then every
+//! `SqliteConnection::establish(":memory:")` call gets sqlitegis's functions.
 
 use std::cell::RefCell;
 use std::sync::Once;
@@ -13,12 +13,12 @@ use diesel::sqlite::SqliteConnection;
 
 static INIT: Once = Once::new();
 
-unsafe extern "C" fn geolite_init(
+unsafe extern "C" fn sqlitegis_init(
     db: *mut sqlite_wasm_rs::sqlite3,
     _pz_err_msg: *mut *mut std::ffi::c_char,
     _p_api: *const sqlite_wasm_rs::sqlite3_api_routines,
 ) -> std::ffi::c_int {
-    geolite::sqlite::register_functions(db)
+    sqlitegis::sqlite::register_functions(db)
 }
 
 thread_local! {
@@ -27,11 +27,11 @@ thread_local! {
 
 fn ensure_auto_extension() {
     INIT.call_once(|| unsafe {
-        sqlite_wasm_rs::sqlite3_auto_extension(Some(geolite_init));
+        sqlite_wasm_rs::sqlite3_auto_extension(Some(sqlitegis_init));
     });
 }
 
-/// Open a fresh in-memory database, registering geolite via auto-extension.
+/// Open a fresh in-memory database, registering sqlitegis via auto-extension.
 /// Replaces any previously open connection.
 pub fn reopen() -> Result<(), String> {
     ensure_auto_extension();

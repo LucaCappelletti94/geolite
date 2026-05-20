@@ -27,8 +27,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
-      - name: Build geolite cdylib (sqlite-extension feature)
-        run: cargo build -p geolite --features sqlite-extension
+      - name: Build sqlitegis cdylib (sqlite-extension feature)
+        run: cargo build -p sqlitegis --features sqlite-extension
 
       - name: Locate shared library artifact
         id: artifact
@@ -38,8 +38,8 @@ jobs:
           build_dir="${target_root}/debug"
           artifact=""
           candidates=(
-            "${build_dir}/libgeolite.so"
-            "${build_dir}/deps/libgeolite.so"
+            "${build_dir}/libsqlitegis.so"
+            "${build_dir}/deps/libsqlitegis.so"
           )
           for candidate in "${candidates[@]}"; do
             if [[ -f "${candidate}" ]]; then
@@ -48,14 +48,14 @@ jobs:
             fi
           done
           if [[ -z "${artifact}" ]]; then
-            found="$(find "${build_dir}" -maxdepth 3 -type f -name "libgeolite.so" | head -n 1 || true)"
+            found="$(find "${build_dir}" -maxdepth 3 -type f -name "libsqlitegis.so" | head -n 1 || true)"
             if [[ -n "${found}" ]]; then
               artifact="${found}"
             fi
           fi
           if [[ -z "${artifact}" ]]; then
-            echo "::error::Could not locate libgeolite.so under ${build_dir}"
-            find "${build_dir}" -maxdepth 3 -type f -name "*geolite*" -print || true
+            echo "::error::Could not locate libsqlitegis.so under ${build_dir}"
+            find "${build_dir}" -maxdepth 3 -type f -name "*sqlitegis*" -print || true
             exit 1
           fi
           echo "artifact=${artifact}" >> "${GITHUB_OUTPUT}"
@@ -70,24 +70,24 @@ jobs:
           fi
           artifact="${{ steps.artifact.outputs.artifact }}"
           symbols="$(nm -D "${artifact}")"
-          if ! grep -q "sqlite3_geolite_init" <<< "${symbols}"; then
-            echo "::error::missing sqlite3_geolite_init export in ${artifact}"
+          if ! grep -q "sqlite3_sqlitegis_init" <<< "${symbols}"; then
+            echo "::error::missing sqlite3_sqlitegis_init export in ${artifact}"
             exit 1
           fi
-          echo "sqlite3_geolite_init is present in ${artifact}"
+          echo "sqlite3_sqlitegis_init is present in ${artifact}"
 
       - name: Confirm symbol is NOT exported without sqlite-extension feature
         run: |
           set -euo pipefail
-          cargo clean -p geolite --release || true
-          cargo build -p geolite --release --no-default-features --features sqlite
-          artifact="target/release/libgeolite.so"
+          cargo clean -p sqlitegis --release || true
+          cargo build -p sqlitegis --release --no-default-features --features sqlite
+          artifact="target/release/libsqlitegis.so"
           if [[ ! -f "${artifact}" ]]; then
             echo "::error::expected ${artifact} but not found"
             exit 1
           fi
-          if nm -D "${artifact}" | grep -q "sqlite3_geolite_init"; then
-            echo "::error::sqlite3_geolite_init leaked into ${artifact} without sqlite-extension feature"
+          if nm -D "${artifact}" | grep -q "sqlite3_sqlitegis_init"; then
+            echo "::error::sqlite3_sqlitegis_init leaked into ${artifact} without sqlite-extension feature"
             exit 1
           fi
           echo "Confirmed: no FFI entry point exported under --features sqlite (without sqlite-extension)"
