@@ -3,7 +3,7 @@
        horizontal ellipse is the equator and the vertical ellipse is the
        prime meridian, both flattened by the viewing angle so the globe
        reads as a sphere rather than a circle. -->
-  <g stroke="#4fbf6f" fill="none" stroke-linecap="round">
+  <g stroke="#057DBE" fill="none" stroke-linecap="round">
     <circle cx="24" cy="38" r="20" stroke-width="2.2"/>
     <ellipse cx="24" cy="38" rx="20" ry="6" stroke-width="1.4" opacity="0.75"/>
     <ellipse cx="24" cy="38" rx="7" ry="20" stroke-width="1.4" opacity="0.75"/>
@@ -15,12 +15,12 @@
        barbs hint at the feather's plumage without copying SQLite's exact
        brand mark. -->
   <path d="M 58 6 C 54 18, 48 30, 42 38 C 40 32, 44 22, 50 14 Z"
-        fill="#4fbf6f" opacity="0.95"/>
+        fill="#057DBE" opacity="0.95"/>
   <path d="M 58 6 C 56 16, 52 26, 46 34 C 48 28, 52 18, 56 10 Z"
-        fill="#4fbf6f" opacity="0.55"/>
-  <path d="M 58 6 L 38 42" stroke="#1d3a25" stroke-width="1.6"
+        fill="#057DBE" opacity="0.55"/>
+  <path d="M 58 6 L 38 42" stroke="#0B486B" stroke-width="1.6"
         stroke-linecap="round" fill="none"/>
-  <g stroke="#4fbf6f" stroke-width="0.8" stroke-linecap="round" opacity="0.55">
+  <g stroke="#057DBE" stroke-width="0.8" stroke-linecap="round" opacity="0.55">
     <path d="M 50 14 L 53 12"/>
     <path d="M 48 19 L 52 17"/>
     <path d="M 46 24 L 50 22"/>

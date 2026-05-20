@@ -33,6 +33,50 @@ enum LoadStage {
     Error(String),
 }
 
+/// Stream the cities5000 dataset into the freshly-reset `places` table and
+/// pick a random row as the starting probe. Called on first mount and again
+/// after the Reset DB button reapplies the schema.
+async fn populate_places(
+    mut stage: Signal<LoadStage>,
+    mut all_coords: Signal<Vec<(f64, f64)>>,
+    mut user_lon: Signal<f64>,
+    mut user_lat: Signal<f64>,
+) {
+    stage.set(LoadStage::LoadingData {
+        inserted: 0,
+        total: 0,
+    });
+    let loader_result = loader::load_places(|n, total, coords| {
+        stage.set(LoadStage::LoadingData { inserted: n, total });
+        // Append the newly inserted batch to the live coord set so the
+        // canvas paints them on the next frame.
+        all_coords.write().extend(coords.iter().copied());
+    })
+    .await;
+    match loader_result {
+        Ok(report) => {
+            log::info!(
+                "loaded {} cities in {:.0} ms",
+                report.rows_inserted,
+                report.elapsed_ms
+            );
+            // Pick a random loaded city as the starting probe point.
+            let coords = all_coords.peek().clone();
+            if !coords.is_empty() {
+                let idx = (js_sys::Math::random() * coords.len() as f64) as usize;
+                let (lon, lat) = coords[idx.min(coords.len() - 1)];
+                user_lon.set(lon);
+                user_lat.set(lat);
+            }
+            stage.set(LoadStage::Ready {
+                rows: report.rows_inserted,
+                elapsed_ms: report.elapsed_ms,
+            });
+        }
+        Err(e) => stage.set(LoadStage::Error(format!("loading data: {e}"))),
+    }
+}
+
 #[component]
 fn App() -> Element {
     let mut stage = use_signal(|| LoadStage::Booting);
@@ -54,39 +98,7 @@ fn App() -> Element {
                 stage.set(LoadStage::Error(format!("applying schema: {e}")));
                 return;
             }
-            stage.set(LoadStage::LoadingData {
-                inserted: 0,
-                total: 0,
-            });
-            let loader_result = loader::load_places(|n, total, coords| {
-                stage.set(LoadStage::LoadingData { inserted: n, total });
-                // Append the newly inserted batch to the live coord set so
-                // the canvas paints them on the next frame.
-                all_coords.write().extend(coords.iter().copied());
-            })
-            .await;
-            match loader_result {
-                Ok(report) => {
-                    log::info!(
-                        "loaded {} cities in {:.0} ms",
-                        report.rows_inserted,
-                        report.elapsed_ms
-                    );
-                    // Pick a random loaded city as the starting probe point.
-                    let coords = all_coords.peek().clone();
-                    if !coords.is_empty() {
-                        let idx = (js_sys::Math::random() * coords.len() as f64) as usize;
-                        let (lon, lat) = coords[idx.min(coords.len() - 1)];
-                        user_lon.set(lon);
-                        user_lat.set(lat);
-                    }
-                    stage.set(LoadStage::Ready {
-                        rows: report.rows_inserted,
-                        elapsed_ms: report.elapsed_ms,
-                    });
-                }
-                Err(e) => stage.set(LoadStage::Error(format!("loading data: {e}"))),
-            }
+            populate_places(stage, all_coords, user_lon, user_lat).await;
         });
     });
 
@@ -231,6 +243,17 @@ fn App() -> Element {
                                     outcome.set(None);
                                     highlighted.set(Vec::new());
                                     all_coords.set(Vec::new());
+                                    user_lon.set(f64::NAN);
+                                    user_lat.set(f64::NAN);
+                                    spawn(async move {
+                                        populate_places(
+                                            stage,
+                                            all_coords,
+                                            user_lon,
+                                            user_lat,
+                                        )
+                                        .await;
+                                    });
                                 }
                                 Err(e) => outcome.set(Some(QueryOutcome::Error(e))),
                             }

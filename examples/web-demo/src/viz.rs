@@ -178,7 +178,7 @@ fn draw(
     let lat_min = center_lat - lat_span / 2.0;
     let lat_max = center_lat + lat_span / 2.0;
 
-    ctx.set_fill_style_str(&String::from("#07090b"));
+    ctx.set_fill_style_str(&String::from("#F0F4F8"));
     ctx.fill_rect(0.0, 0.0, w, h);
 
     // Subtle frame at the world rectangle (-180..180, -90..90) so users see
@@ -187,7 +187,7 @@ fn draw(
     let world_right = project_x(180.0, w, zoom, center_lon);
     let world_top = project_y(90.0, h, zoom, center_lat);
     let world_bottom = project_y(-90.0, h, zoom, center_lat);
-    ctx.set_stroke_style_str(&String::from("#2a323b"));
+    ctx.set_stroke_style_str(&String::from("#C9D2DC"));
     ctx.set_line_width(1.0);
     ctx.stroke_rect(
         world_left,
@@ -197,7 +197,7 @@ fn draw(
     );
 
     // Grid lines at multiples of 30 degrees, only within the world rectangle.
-    ctx.set_stroke_style_str(&String::from("#1a2128"));
+    ctx.set_stroke_style_str(&String::from("#E5EBF1"));
     ctx.begin_path();
     for lat_g in (-60..=60).step_by(30) {
         let y = project_y(lat_g as f64, h, zoom, center_lat);
@@ -218,7 +218,7 @@ fn draw(
     let dot = if zoom >= 4.0 { 2.5 } else { 1.5 };
 
     // Cities: one draw per city, clipped to the visible canvas.
-    ctx.set_fill_style_str(&String::from("#3a4554"));
+    ctx.set_fill_style_str(&String::from("#22A56C"));
     for &(lon, lat) in all {
         if lon < lon_min - 1.0 || lon > lon_max + 1.0 {
             continue;
@@ -233,7 +233,7 @@ fn draw(
 
     // Query hits.
     let hit = if zoom >= 4.0 { 6.0 } else { 5.0 };
-    ctx.set_fill_style_str(&String::from("#ffae57"));
+    ctx.set_fill_style_str(&String::from("#057DBE"));
     for &(lon, lat) in highlighted {
         if lon < lon_min - 1.0 || lon > lon_max + 1.0 {
             continue;
@@ -251,7 +251,7 @@ fn draw(
     if (lon_min - 1.0..=lon_max + 1.0).contains(&ulon)
         && (lat_min - 1.0..=lat_max + 1.0).contains(&ulat)
     {
-        ctx.set_fill_style_str(&String::from("#4fbf6f"));
+        ctx.set_fill_style_str(&String::from("#0B486B"));
         let x = project_x(ulon, w, zoom, center_lon);
         let y = project_y(ulat, h, zoom, center_lat);
         ctx.begin_path();

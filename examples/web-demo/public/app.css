@@ -1,13 +1,13 @@
 :root {
-    --bg: #0f1418;
-    --bg-panel: #161c22;
-    --bg-input: #0b0f13;
-    --fg: #e6edf3;
-    --fg-muted: #7d8590;
-    --accent: #4fbf6f;
-    --accent-soft: #1d3a25;
-    --error: #f85149;
-    --border: #2a323b;
+    --bg: #FBFCFD;
+    --bg-panel: #FFFFFF;
+    --bg-input: #F0F4F8;
+    --fg: #1F2937;
+    --fg-muted: #5B6573;
+    --accent: #057DBE;
+    --accent-soft: #DCEEF6;
+    --error: #B85C50;
+    --border: #DEE5EC;
     --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 }
 
@@ -102,7 +102,7 @@ main {
 
 .preset-chip.active {
     background: var(--accent);
-    color: #0a1410;
+    color: #FFFFFF;
     border-color: var(--accent);
 }
 
@@ -319,12 +319,12 @@ textarea:not(.dxc-editor-input):focus {
     caret-color: var(--fg) !important;
 }
 
-/* Make the code editor blend into its panel: drop the Tokyo Night navy
-   background in favour of the panel colour, and kill the focus-within
-   glow that the library applies by default. The double-class selector
-   beats the library's own `.dxc-tokyo-night` definition, which is loaded
-   after app.css and otherwise wins the cascade at equal specificity. */
-.dxc-editor.dxc-tokyo-night {
+/* Make the code editor blend into its panel: override the theme's
+   background to the panel colour, and kill the focus-within glow that
+   the library applies by default. The double-class selector beats the
+   library's own `.dxc-github-light` definition, which is loaded after
+   app.css and otherwise wins the cascade at equal specificity. */
+.dxc-editor.dxc-github-light {
     --dxc-light-background: var(--bg-panel);
     --dxc-editor-focus-ring: none;
 }
@@ -339,7 +339,7 @@ textarea:not(.dxc-editor-input):focus {
 
 button {
     background: var(--accent);
-    color: #0a1410;
+    color: #FFFFFF;
     border: none;
     border-radius: 4px;
     padding: 8px 14px;
@@ -394,7 +394,7 @@ table.results th {
 canvas#sqlitegis-map {
     width: 100%;
     height: auto;
-    background: #07090b;
+    background: var(--bg-input);
     border-radius: 4px;
     border: 1px solid var(--border);
     display: block;

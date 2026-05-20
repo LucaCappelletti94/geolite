@@ -15,7 +15,7 @@ use crate::runner::{self, QueryOutcome};
 use crate::state::DEFAULT_SCHEMA_SQL;
 
 fn sql_theme() -> CodeTheme {
-    CodeTheme::fixed(Theme::TOKYO_NIGHT)
+    CodeTheme::fixed(Theme::GITHUB_LIGHT)
 }
 
 #[component]
