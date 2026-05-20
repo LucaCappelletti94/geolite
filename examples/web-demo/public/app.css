@@ -316,7 +316,7 @@ table.results th {
     font-weight: 600;
 }
 
-canvas#geolite-map {
+canvas#sqlitegis-map {
     width: 100%;
     height: auto;
     background: #07090b;
@@ -399,10 +399,10 @@ section.status p {
 }
 
 .status-icon.spin {
-    animation: geolite-spin 0.9s linear infinite;
+    animation: sqlitegis-spin 0.9s linear infinite;
 }
 
-@keyframes geolite-spin {
+@keyframes sqlitegis-spin {
     from { transform: rotate(0deg); }
     to { transform: rotate(360deg); }
 }

@@ -1435,41 +1435,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "geolite"
-version = "0.2.0"
-dependencies = [
- "diesel",
- "geo",
- "geozero",
- "getrandom 0.2.17",
- "libsqlite3-sys",
- "serde_json",
- "sqlite-wasm-rs",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "geolite-web-demo"
-version = "0.1.0"
-dependencies = [
- "console_error_panic_hook",
- "console_log",
- "diesel",
- "dioxus",
- "dioxus-code",
- "dioxus-code-editor",
- "dioxus-free-icons",
- "geolite",
- "gloo-net",
- "gloo-timers",
- "js-sys",
- "log",
- "sqlite-wasm-rs",
- "wasm-bindgen",
- "web-sys",
-]
-
-[[package]]
 name = "geozero"
 version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3026,6 +2991,41 @@ dependencies = [
  "js-sys",
  "rsqlite-vfs",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "sqlitegis"
+version = "0.2.0"
+dependencies = [
+ "diesel",
+ "geo",
+ "geozero",
+ "getrandom 0.2.17",
+ "libsqlite3-sys",
+ "serde_json",
+ "sqlite-wasm-rs",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "sqlitegis-web-demo"
+version = "0.1.0"
+dependencies = [
+ "console_error_panic_hook",
+ "console_log",
+ "diesel",
+ "dioxus",
+ "dioxus-code",
+ "dioxus-code-editor",
+ "dioxus-free-icons",
+ "gloo-net",
+ "gloo-timers",
+ "js-sys",
+ "log",
+ "sqlite-wasm-rs",
+ "sqlitegis",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]

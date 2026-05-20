@@ -30,10 +30,9 @@ pub enum QueryOutcome {
 }
 
 /// Run one or more SQL statements. `:lon` and `:lat` in the SQL are replaced
-/// with the user's current position before execution, so a single template
-/// follows the user across map clicks and geolocation updates. If the *last*
-/// statement is a SELECT we return its rows. Otherwise we report the
-/// affected-row count.
+/// with the current probe position before execution, so a single template
+/// follows the user across map clicks. If the *last* statement is a SELECT we
+/// return its rows. Otherwise we report the affected-row count.
 pub fn run(sql: &str, user_lon: f64, user_lat: f64) -> QueryOutcome {
     let sql_owned = sql
         .replace(":lon", &format!("{user_lon}"))

@@ -1,6 +1,6 @@
 //! In-memory SQLite connection wired with the sqlitegis extension.
 //!
-//! Mirrors the pattern used in `sqlitegis-diesel/tests/wasm_integration.rs`:
+//! Mirrors the pattern used in `sqlitegis/tests/diesel_wasm_integration.rs`:
 //! register `sqlitegis_init` once via `sqlite3_auto_extension`, then every
 //! `SqliteConnection::establish(":memory:")` call gets sqlitegis's functions.
 

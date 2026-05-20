@@ -132,22 +132,16 @@ fn App() -> Element {
                         "GitHub"
                     }
                     a {
-                        href: "https://docs.rs/sqlitegis-core",
+                        href: "https://docs.rs/sqlitegis",
                         rel: "noopener",
                         target: "_blank",
-                        "docs.rs (core)"
+                        "docs.rs"
                     }
                     a {
-                        href: "https://docs.rs/sqlitegis-diesel",
+                        href: "https://crates.io/crates/sqlitegis",
                         rel: "noopener",
                         target: "_blank",
-                        "docs.rs (diesel)"
-                    }
-                    a {
-                        href: "https://docs.rs/sqlitegis-sqlite",
-                        rel: "noopener",
-                        target: "_blank",
-                        "docs.rs (sqlite)"
+                        "crates.io"
                     }
                 }
             }
