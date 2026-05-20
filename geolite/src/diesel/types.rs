@@ -61,16 +61,6 @@ fn parse_blob_with_srid_constraint(
     Ok(geom)
 }
 
-#[cfg(any(feature = "diesel-sqlite", feature = "diesel-postgres"))]
-fn parse_geometry_blob(blob: &[u8]) -> std::result::Result<geo::Geometry<f64>, DynError> {
-    parse_blob_with_srid_constraint(blob, None)
-}
-
-#[cfg(any(feature = "diesel-sqlite", feature = "diesel-postgres"))]
-fn parse_geography_blob(blob: &[u8]) -> std::result::Result<geo::Geometry<f64>, DynError> {
-    parse_blob_with_srid_constraint(blob, Some(4326))
-}
-
 // -- SQLite FromSql / ToSql ----------------------------------------------------
 
 #[cfg(feature = "diesel-sqlite")]
@@ -116,43 +106,35 @@ mod sqlite_impls {
     }
 
     // --- geo::Geometry<f64> ---
+    //
+    // The only semantic difference between Geometry and Geography here is the
+    // SRID arg: Geometry writes no SRID and accepts any; Geography forces
+    // 4326 on write and requires 4326 on read.
 
-    impl FromSql<Geometry, Sqlite> for geo::Geometry<f64> {
-        fn from_sql(
-            bytes: <Sqlite as diesel::backend::Backend>::RawValue<'_>,
-        ) -> deserialize::Result<Self> {
-            let blob = <Vec<u8> as FromSql<Binary, Sqlite>>::from_sql(bytes)?;
-            super::parse_geometry_blob(&blob)
-        }
+    macro_rules! impl_geo_geometry_sqlite {
+        ($sql_type:ty, $srid:expr) => {
+            impl FromSql<$sql_type, Sqlite> for geo::Geometry<f64> {
+                fn from_sql(
+                    bytes: <Sqlite as diesel::backend::Backend>::RawValue<'_>,
+                ) -> deserialize::Result<Self> {
+                    let blob = <Vec<u8> as FromSql<Binary, Sqlite>>::from_sql(bytes)?;
+                    super::parse_blob_with_srid_constraint(&blob, $srid).map_err(Into::into)
+                }
+            }
+
+            impl ToSql<$sql_type, Sqlite> for geo::Geometry<f64> {
+                fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Sqlite>) -> serialize::Result {
+                    let blob = crate::core::ewkb::write_ewkb(self, $srid)
+                        .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+                    out.set_value(blob);
+                    Ok(IsNull::No)
+                }
+            }
+        };
     }
 
-    impl ToSql<Geometry, Sqlite> for geo::Geometry<f64> {
-        fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Sqlite>) -> serialize::Result {
-            let blob = crate::core::ewkb::write_ewkb(self, None)
-                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
-            // Vec<u8> implements Into<SqliteBindValue> via the Binary variant.
-            out.set_value(blob);
-            Ok(IsNull::No)
-        }
-    }
-
-    impl FromSql<Geography, Sqlite> for geo::Geometry<f64> {
-        fn from_sql(
-            bytes: <Sqlite as diesel::backend::Backend>::RawValue<'_>,
-        ) -> deserialize::Result<Self> {
-            let blob = <Vec<u8> as FromSql<Binary, Sqlite>>::from_sql(bytes)?;
-            super::parse_geography_blob(&blob)
-        }
-    }
-
-    impl ToSql<Geography, Sqlite> for geo::Geometry<f64> {
-        fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Sqlite>) -> serialize::Result {
-            let blob = crate::core::ewkb::write_ewkb(self, Some(4326))
-                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
-            out.set_value(blob);
-            Ok(IsNull::No)
-        }
-    }
+    impl_geo_geometry_sqlite!(Geometry, None);
+    impl_geo_geometry_sqlite!(Geography, Some(4326));
 }
 
 // -- PostgreSQL FromSql / ToSql ------------------------------------------------
@@ -200,39 +182,32 @@ mod postgres_impls {
     }
 
     // --- geo::Geometry<f64> ---
+    //
+    // Mirror of the sqlite_impls macro: the only intra-type variation is
+    // the SRID arg passed to parse_blob_with_srid_constraint / write_ewkb.
 
-    impl FromSql<Geometry, Pg> for geo::Geometry<f64> {
-        fn from_sql(
-            bytes: <Pg as diesel::backend::Backend>::RawValue<'_>,
-        ) -> deserialize::Result<Self> {
-            let blob = bytes.as_bytes();
-            super::parse_geometry_blob(blob)
-        }
+    macro_rules! impl_geo_geometry_pg {
+        ($sql_type:ty, $srid:expr) => {
+            impl FromSql<$sql_type, Pg> for geo::Geometry<f64> {
+                fn from_sql(
+                    bytes: <Pg as diesel::backend::Backend>::RawValue<'_>,
+                ) -> deserialize::Result<Self> {
+                    super::parse_blob_with_srid_constraint(bytes.as_bytes(), $srid)
+                        .map_err(Into::into)
+                }
+            }
+
+            impl ToSql<$sql_type, Pg> for geo::Geometry<f64> {
+                fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Pg>) -> serialize::Result {
+                    let blob = crate::core::ewkb::write_ewkb(self, $srid)
+                        .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+                    IoWrite::write_all(out, &blob)?;
+                    Ok(IsNull::No)
+                }
+            }
+        };
     }
 
-    impl ToSql<Geometry, Pg> for geo::Geometry<f64> {
-        fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Pg>) -> serialize::Result {
-            let blob = crate::core::ewkb::write_ewkb(self, None)
-                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
-            IoWrite::write_all(out, &blob)?;
-            Ok(IsNull::No)
-        }
-    }
-
-    impl FromSql<Geography, Pg> for geo::Geometry<f64> {
-        fn from_sql(
-            bytes: <Pg as diesel::backend::Backend>::RawValue<'_>,
-        ) -> deserialize::Result<Self> {
-            super::parse_geography_blob(bytes.as_bytes())
-        }
-    }
-
-    impl ToSql<Geography, Pg> for geo::Geometry<f64> {
-        fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Pg>) -> serialize::Result {
-            let blob = crate::core::ewkb::write_ewkb(self, Some(4326))
-                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
-            IoWrite::write_all(out, &blob)?;
-            Ok(IsNull::No)
-        }
-    }
+    impl_geo_geometry_pg!(Geometry, None);
+    impl_geo_geometry_pg!(Geography, Some(4326));
 }
