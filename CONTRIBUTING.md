@@ -37,7 +37,7 @@ cargo doc -p sqlitegis --all-features --no-deps --open
 cargo bench -p sqlitegis --features diesel-sqlite --benches
 ```
 
-Criterion writes HTML reports under `target/criterion/`. Numbers vary by host and load; see the README for a recent baseline.
+Criterion writes HTML reports under `target/criterion/`. Numbers vary by host and load. See the README for a recent baseline.
 
 ## Adding a new spatial function
 
@@ -49,7 +49,7 @@ The catalog in [`sqlitegis/src/core/function_catalog.rs`](sqlitegis/src/core/fun
 4. Add the matching `define_sql_function!` block in `sqlitegis/src/diesel/functions.rs`.
 5. If the first argument is `Nullable<Geometry>`, add the method wrapper in `sqlitegis/src/diesel/expression_methods.rs`.
 
-Three parity nets keep these in sync; failing any of them is a sign that one of the steps above was missed:
+Three parity nets keep these in sync. Failing any of them is a sign that one of the steps above was missed:
 
 - Compile-time `assert_catalog_callback_parity` in `sqlitegis/src/sqlite/ffi.rs` checks the SQLite callback arrays against the catalog 1-for-1.
 - Three runtime parity tests in `sqlitegis/tests/diesel_expression_methods.rs`:
