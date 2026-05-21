@@ -10,30 +10,35 @@
 //! See [`crate::diesel::query_patterns`] Pattern 4 for the prose
 //! explanation of the two-stage prefilter+refinement technique.
 //!
-//! ```rust,no_run
-//! # #[cfg(feature = "diesel-sqlite")]
-//! # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+//! ```
 //! use diesel::{Connection, RunQueryDsl, sqlite::SqliteConnection};
 //! use diesel::deserialize::QueryableByName;
-//! use diesel::sql_types::{BigInt, Text};
+//! use diesel::sql_types::BigInt;
 //! use sqlitegis::diesel::query_helpers::dwithin_sphere_indexed_sql;
 //!
 //! #[derive(QueryableByName)]
-//! struct City {
+//! struct Hit {
 //!     #[diesel(sql_type = BigInt)]
 //!     id: i64,
-//!     #[diesel(sql_type = Text)]
-//!     name: String,
 //! }
 //!
-//! let mut conn = SqliteConnection::establish(":memory:")?;
-//! let rows: Vec<City> = dwithin_sphere_indexed_sql(
-//!     "places", "geom", (13.4, 52.5), 1_000_000.0,
-//!     "t.id, t.name",
-//! ).load::<City>(&mut conn)?;
-//! # let _ = rows;
-//! # Ok(())
-//! # }
+//! sqlitegis::sqlite::register_on_every_new_connection();
+//! let mut c = SqliteConnection::establish(":memory:").unwrap();
+//!
+//! // Tiny indexed table with one row in Berlin.
+//! diesel::sql_query("CREATE TABLE pts (id INTEGER PRIMARY KEY, geom BLOB)")
+//!     .execute(&mut c).unwrap();
+//! diesel::sql_query("SELECT CreateSpatialIndex('pts', 'geom')")
+//!     .execute(&mut c).unwrap();
+//! diesel::sql_query(
+//!     "INSERT INTO pts(id, geom) VALUES (1, ST_Point(13.4, 52.5, 4326))",
+//! ).execute(&mut c).unwrap();
+//!
+//! let hits: Vec<Hit> = dwithin_sphere_indexed_sql(
+//!     "pts", "geom", (13.4, 52.5), 100_000.0, "t.id",
+//! ).load::<Hit>(&mut c).unwrap();
+//! assert_eq!(hits.len(), 1);
+//! assert_eq!(hits[0].id, 1);
 //! ```
 
 /// Conservative degree offsets that enclose a geodesic circle.
@@ -120,30 +125,31 @@ pub fn radius_bbox(lat_deg: f64, radius_m: f64) -> RadiusBbox {
 ///
 /// # Example
 ///
-/// ```rust,no_run
-/// # #[cfg(feature = "diesel-sqlite")]
-/// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+/// ```
 /// use diesel::{Connection, RunQueryDsl, sqlite::SqliteConnection};
 /// use diesel::deserialize::QueryableByName;
-/// use diesel::sql_types::{BigInt, Text};
+/// use diesel::sql_types::BigInt;
 /// use sqlitegis::diesel::query_helpers::dwithin_sphere_indexed_sql;
 ///
 /// #[derive(QueryableByName)]
-/// struct City {
-///     #[diesel(sql_type = BigInt)]
-///     id: i64,
-///     #[diesel(sql_type = Text)]
-///     name: String,
-/// }
+/// struct Hit { #[diesel(sql_type = BigInt)] id: i64 }
 ///
-/// let mut conn = SqliteConnection::establish(":memory:")?;
-/// let rows: Vec<City> = dwithin_sphere_indexed_sql(
-///     "places", "geom", (13.4, 52.5), 1_000_000.0,
-///     "t.id, t.name",
-/// ).load::<City>(&mut conn)?;
-/// # let _ = rows;
-/// # Ok(())
-/// # }
+/// sqlitegis::sqlite::register_on_every_new_connection();
+/// let mut c = SqliteConnection::establish(":memory:").unwrap();
+///
+/// diesel::sql_query("CREATE TABLE pts (id INTEGER PRIMARY KEY, geom BLOB)")
+///     .execute(&mut c).unwrap();
+/// diesel::sql_query("SELECT CreateSpatialIndex('pts', 'geom')")
+///     .execute(&mut c).unwrap();
+/// diesel::sql_query(
+///     "INSERT INTO pts(id, geom) VALUES (1, ST_Point(13.4, 52.5, 4326))",
+/// ).execute(&mut c).unwrap();
+///
+/// // Probe within 100 km of Berlin.
+/// let hits: Vec<Hit> = dwithin_sphere_indexed_sql(
+///     "pts", "geom", (13.4, 52.5), 100_000.0, "t.id",
+/// ).load::<Hit>(&mut c).unwrap();
+/// assert_eq!(hits.len(), 1);
 /// ```
 pub fn dwithin_sphere_indexed_sql(
     table: &str,
@@ -221,31 +227,31 @@ pub fn dwithin_sphere_indexed_sql_string(
 ///
 /// # Example
 ///
-/// ```rust,no_run
-/// # #[cfg(feature = "diesel-sqlite")]
-/// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+/// ```
 /// use diesel::{Connection, RunQueryDsl, sqlite::SqliteConnection};
 /// use diesel::deserialize::QueryableByName;
-/// use diesel::sql_types::{BigInt, Text};
+/// use diesel::sql_types::BigInt;
 /// use sqlitegis::diesel::query_helpers::intersects_window_indexed_sql;
 ///
 /// #[derive(QueryableByName)]
-/// struct City {
-///     #[diesel(sql_type = BigInt)]
-///     id: i64,
-///     #[diesel(sql_type = Text)]
-///     name: String,
-/// }
+/// struct Hit { #[diesel(sql_type = BigInt)] id: i64 }
 ///
-/// let mut conn = SqliteConnection::establish(":memory:")?;
-/// // 30 by 30 degree window around (lon, lat) = (13.4, 52.5).
-/// let rows: Vec<City> = intersects_window_indexed_sql(
-///     "places", "geom", (-1.6, 37.5, 28.4, 67.5),
-///     "t.id, t.name",
-/// ).load::<City>(&mut conn)?;
-/// # let _ = rows;
-/// # Ok(())
-/// # }
+/// sqlitegis::sqlite::register_on_every_new_connection();
+/// let mut c = SqliteConnection::establish(":memory:").unwrap();
+///
+/// diesel::sql_query("CREATE TABLE pts (id INTEGER PRIMARY KEY, geom BLOB)")
+///     .execute(&mut c).unwrap();
+/// diesel::sql_query("SELECT CreateSpatialIndex('pts', 'geom')")
+///     .execute(&mut c).unwrap();
+/// diesel::sql_query(
+///     "INSERT INTO pts(id, geom) VALUES (1, ST_Point(13.4, 52.5, 4326))",
+/// ).execute(&mut c).unwrap();
+///
+/// // 30 by 30 degree window around (13.4, 52.5).
+/// let hits: Vec<Hit> = intersects_window_indexed_sql(
+///     "pts", "geom", (-1.6, 37.5, 28.4, 67.5), "t.id",
+/// ).load::<Hit>(&mut c).unwrap();
+/// assert_eq!(hits.len(), 1);
 /// ```
 pub fn intersects_window_indexed_sql(
     table: &str,
@@ -317,31 +323,34 @@ pub fn intersects_window_indexed_sql_string(
 ///
 /// # Example
 ///
-/// ```rust,no_run
-/// # #[cfg(feature = "diesel-sqlite")]
-/// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+/// ```
 /// use diesel::{Connection, RunQueryDsl, sqlite::SqliteConnection};
 /// use diesel::deserialize::QueryableByName;
-/// use diesel::sql_types::{BigInt, Text};
+/// use diesel::sql_types::BigInt;
 /// use sqlitegis::diesel::query_helpers::nearest_sphere_indexed_sql;
 ///
 /// #[derive(QueryableByName)]
-/// struct City {
-///     #[diesel(sql_type = BigInt)]
-///     id: i64,
-///     #[diesel(sql_type = Text)]
-///     name: String,
-/// }
+/// struct Hit { #[diesel(sql_type = BigInt)] id: i64 }
 ///
-/// let mut conn = SqliteConnection::establish(":memory:")?;
-/// // 10 nearest cities to (13.4, 52.5) inside a 1000 km bbox.
-/// let rows: Vec<City> = nearest_sphere_indexed_sql(
-///     "places", "geom", (13.4, 52.5), 1_000_000.0, 10,
-///     "t.id, t.name",
-/// ).load::<City>(&mut conn)?;
-/// # let _ = rows;
-/// # Ok(())
-/// # }
+/// sqlitegis::sqlite::register_on_every_new_connection();
+/// let mut c = SqliteConnection::establish(":memory:").unwrap();
+///
+/// diesel::sql_query("CREATE TABLE pts (id INTEGER PRIMARY KEY, geom BLOB)")
+///     .execute(&mut c).unwrap();
+/// diesel::sql_query("SELECT CreateSpatialIndex('pts', 'geom')")
+///     .execute(&mut c).unwrap();
+/// // Berlin then Paris.
+/// diesel::sql_query(
+///     "INSERT INTO pts(id, geom) VALUES \
+///      (1, ST_Point(13.4, 52.5, 4326)), \
+///      (2, ST_Point(2.35, 48.85, 4326))",
+/// ).execute(&mut c).unwrap();
+///
+/// // Probe from Berlin: closest is itself (id=1), then Paris (id=2).
+/// let hits: Vec<Hit> = nearest_sphere_indexed_sql(
+///     "pts", "geom", (13.4, 52.5), 2_000_000.0, 2, "t.id",
+/// ).load::<Hit>(&mut c).unwrap();
+/// assert_eq!(hits.iter().map(|h| h.id).collect::<Vec<_>>(), vec![1, 2]);
 /// ```
 pub fn nearest_sphere_indexed_sql(
     table: &str,

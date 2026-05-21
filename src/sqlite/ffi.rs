@@ -1806,9 +1806,7 @@ unsafe fn reg(db: *mut sqlite3, name: &str, n_arg: c_int, flags: c_int, xfunc: X
 /// Open an in-memory connection via the raw `libsqlite3-sys` FFI, register
 /// the SQLiteGIS spatial functions, then call one from SQL:
 ///
-/// ```rust,no_run
-/// # #[cfg(all(feature = "sqlite", not(target_arch = "wasm32")))]
-/// # fn main() {
+/// ```
 /// use std::ffi::{CStr, CString};
 /// use std::ptr;
 /// use libsqlite3_sys::{
@@ -1839,9 +1837,6 @@ unsafe fn reg(db: *mut sqlite3, name: &str, n_arg: c_int, flags: c_int, xfunc: X
 ///     sqlite3_finalize(stmt);
 ///     sqlite3_close(db);
 /// }
-/// # }
-/// # #[cfg(not(all(feature = "sqlite", not(target_arch = "wasm32"))))]
-/// # fn main() {}
 /// ```
 pub unsafe fn register_functions(db: *mut sqlite3) -> c_int {
     for callback in SQLITE_DETERMINISTIC_CALLBACKS {
@@ -1871,6 +1866,61 @@ pub unsafe fn register_functions(db: *mut sqlite3) -> c_int {
     }
 
     SQLITE_OK
+}
+
+/// Register SQLiteGIS as a SQLite auto-extension: from the next call onward,
+/// every new SQLite connection opened in this process has the SQLiteGIS
+/// spatial functions registered on it automatically.
+///
+/// This is the recommended way to wire SQLiteGIS into [Diesel]'s
+/// `SqliteConnection::establish(...)` flow, which does not give the caller a
+/// raw `*mut sqlite3` to pass to [`register_functions`] directly.
+///
+/// Calling the function more than once is a no-op: a `std::sync::Once`
+/// guarantees the underlying `sqlite3_auto_extension` registration happens
+/// at most once per process.
+///
+/// Native targets only. On wasm32 the connection lifecycle is owned by
+/// `sqlite-wasm-rs` and you should call [`register_functions`] from your
+/// own `auto_extension` shim once per connection instead.
+///
+/// Returns `SQLITE_OK` on the first call, and `SQLITE_OK` on every
+/// subsequent call too. A non-zero return from this function should be
+/// treated as a SQLite-internal failure.
+///
+/// [Diesel]: https://diesel.rs/
+///
+/// ```
+/// use diesel::{Connection, RunQueryDsl, sqlite::SqliteConnection};
+/// use diesel::deserialize::QueryableByName;
+/// use diesel::sql_types::Text;
+///
+/// sqlitegis::sqlite::register_on_every_new_connection();
+/// let mut c = SqliteConnection::establish(":memory:").unwrap();
+///
+/// #[derive(QueryableByName)]
+/// struct R { #[diesel(sql_type = Text)] wkt: String }
+///
+/// let row: R = diesel::sql_query(
+///     "SELECT ST_AsText(ST_Point(1.0, 2.0, 4326)) AS wkt",
+/// ).get_result(&mut c).unwrap();
+/// assert_eq!(row.wkt, "POINT(1 2)");
+/// ```
+pub fn register_on_every_new_connection() -> c_int {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| unsafe {
+        sqlite3_auto_extension(Some(sqlitegis_auto_extension_init));
+    });
+    SQLITE_OK
+}
+
+unsafe extern "C" fn sqlitegis_auto_extension_init(
+    db: *mut sqlite3,
+    _pz_err_msg: *mut *mut std::os::raw::c_char,
+    _p_api: *const sqlite3_api_routines,
+) -> c_int {
+    register_functions(db)
 }
 
 // C entry point for loadable extension (native only)

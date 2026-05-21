@@ -6,4 +6,4 @@
 mod ffi;
 mod sqlite_compat;
 
-pub use ffi::register_functions;
+pub use ffi::{register_functions, register_on_every_new_connection};
