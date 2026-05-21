@@ -1,11 +1,9 @@
 #![cfg(all(feature = "diesel-sqlite", not(target_arch = "wasm32")))]
 //! Native SQLite integration tests for the Diesel integration.
 //!
-//! Uses `sqlite3_auto_extension` to register SQLiteGIS functions on every
-//! `SqliteConnection::establish()` call, then exercises spatial functions
+//! Calls `sqlitegis::sqlite::register_on_every_new_connection()` once at
+//! the start of every test setup, then exercises spatial functions
 //! through the Diesel query builder against a real SQLite database.
-
-use std::sync::Once;
 
 use diesel::prelude::*;
 use diesel::sql_query;
@@ -33,23 +31,8 @@ diesel::table! { perf_grid (id) { id -> Integer, geom -> Nullable<sqlitegis::die
 diesel::table! { perf_grid_geom_rtree (id) { id -> Integer, xmin -> Double, xmax -> Double, ymin -> Double, ymax -> Double, } }
 diesel::allow_tables_to_appear_in_same_query!(perf_grid, perf_grid_geom_rtree);
 
-// Auto-extension registration
-
-static INIT: Once = Once::new();
-
-/// Entry point called by SQLite for each new connection.
-unsafe extern "C" fn sqlitegis_init(
-    db: *mut libsqlite3_sys::sqlite3,
-    _pz_err_msg: *mut *mut std::ffi::c_char,
-    _p_api: *const libsqlite3_sys::sqlite3_api_routines,
-) -> std::ffi::c_int {
-    sqlitegis::sqlite::register_functions(db)
-}
-
 fn conn() -> SqliteConnection {
-    INIT.call_once(|| unsafe {
-        libsqlite3_sys::sqlite3_auto_extension(Some(sqlitegis_init));
-    });
+    sqlitegis::sqlite::register_on_every_new_connection();
     SqliteConnection::establish(":memory:").unwrap()
 }
 
