@@ -1,0 +1,79 @@
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Pages deploys are serialised to avoid two builds racing to claim the
+# environment. Do not cancel an in-flight deploy when a new commit lands;
+# wait for it to finish so the site never sits in a half-replaced state.
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build-and-deploy:
+    name: Build web demo and deploy to GitHub Pages
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            examples/web-demo
+
+      - name: Install dioxus-cli
+        uses: taiki-e/install-action@v2
+        with:
+          tool: dioxus-cli
+
+      - name: Install wasm-bindgen-cli
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen-cli
+
+      - name: Build web demo
+        working-directory: examples/web-demo
+        run: dx build --release --platform web
+
+      - name: Stage public artifact
+        run: |
+          OUT="examples/web-demo/target/dx/sqlitegis-web-demo/release/web/public"
+          if [ ! -d "$OUT" ]; then
+            echo "dx web output not found at $OUT" >&2
+            echo "fallback scan:" >&2
+            find examples/web-demo/target -type d -name public -path '*release*' >&2 || true
+            exit 1
+          fi
+          mkdir -p _site
+          cp -r "$OUT"/. _site/
+          # CNAME lets GitHub Pages associate the deployment with the
+          # custom domain and refuse takeover by other Pages sites. The
+          # value must match the Custom Domain set under repo Settings >
+          # Pages.
+          echo "sqlitegis.luca.phd" > _site/CNAME
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
