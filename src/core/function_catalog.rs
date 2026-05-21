@@ -3,36 +3,52 @@
 /// Coarse SQLite output class used by registration smoke tests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SqliteReturnClass {
+    /// Function returns a SQLite numeric (integer or floating point).
     Numeric,
+    /// Function returns a SQLite text value.
     Text,
+    /// Function returns a SQLite blob.
     Blob,
+    /// Function returns a SQLite integer 0 or 1 representing a boolean.
     Bool,
 }
 
 /// Expected semantic outcome for a SQL case.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SemanticExpectation {
+    /// The case should evaluate to SQL NULL.
     Null,
+    /// The case should evaluate to a finite numeric value.
     NumericFinite,
+    /// The case should evaluate to a non-empty text value.
     TextNonEmpty,
+    /// The case should evaluate to a non-empty blob value.
     BlobNonEmpty,
+    /// The case should evaluate to integer 0 or 1.
     Bool01,
+    /// The case should raise an error whose message contains the substring.
     ErrorContains(&'static str),
 }
 
 /// Canonical semantic SQL case.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SemanticCase {
+    /// Stable identifier of the case, used to diff regressions in test output.
     pub id: &'static str,
+    /// The SQL expression that drives this case.
     pub sql: &'static str,
+    /// What the SQL above is expected to evaluate to.
     pub expected: SemanticExpectation,
 }
 
 /// Canonical SQLite function declaration metadata.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SqliteFunctionSpec {
+    /// SQL name the function is registered under (e.g. `ST_AsText`).
     pub name: &'static str,
+    /// Arity declared to SQLite. `-1` indicates a variadic function.
     pub n_arg: i32,
+    /// Coarse return class used by registration smoke tests.
     pub return_class: SqliteReturnClass,
     /// Semantic smoke SQL used to validate that callback wiring matches
     /// signature + return class (not just NULL short-circuit behavior).
@@ -175,6 +191,9 @@ macro_rules! direct_spec {
     };
 }
 
+/// Catalog of every deterministic SQL function the crate exposes. Each entry
+/// is registered with SQLite's `SQLITE_DETERMINISTIC` flag so the planner can
+/// hoist calls out of inner loops and reuse cached results.
 pub const SQLITE_DETERMINISTIC_FUNCTIONS: &[SqliteFunctionSpec] = &[
     // I/O
     spec!(
@@ -664,6 +683,10 @@ pub const SQLITE_DETERMINISTIC_FUNCTIONS: &[SqliteFunctionSpec] = &[
     ),
 ];
 
+/// Catalog of SQL functions registered with `SQLITE_DIRECT_ONLY`, meaning they
+/// cannot be invoked from triggers, views, generated columns, or CHECK
+/// constraints. Used for mutating helpers like `CreateSpatialIndex` that have
+/// non-deterministic side effects on the schema.
 pub const SQLITE_DIRECT_ONLY_FUNCTIONS: &[SqliteFunctionSpec] = &[
     direct_spec!(
         "CreateSpatialIndex",

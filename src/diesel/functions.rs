@@ -2,7 +2,7 @@
 //!
 //! Hand-maintained. The set of declarations here is kept in sync with the
 //! canonical function catalog in [`crate::core::function_catalog`] by three
-//! parity tests in `sqlitegis/tests/diesel_expression_methods.rs`:
+//! parity tests in `tests/diesel_expression_methods.rs`:
 //! - `diesel_functions_and_methods_surface_parity`
 //! - `diesel_sql_functions_are_backed_by_sqlite_catalog`
 //! - `catalog_functions_are_covered_by_diesel_declarations`

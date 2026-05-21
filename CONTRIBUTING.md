@@ -41,18 +41,18 @@ Criterion writes HTML reports under `target/criterion/`. Numbers vary by host an
 
 ## Adding a new spatial function
 
-The catalog in [`sqlitegis/src/core/function_catalog.rs`](sqlitegis/src/core/function_catalog.rs) is the single source of truth. To add a new function:
+The catalog in [`src/core/function_catalog.rs`](src/core/function_catalog.rs) is the single source of truth. To add a new function:
 
 1. Add an entry to `SQLITE_DETERMINISTIC_FUNCTIONS` (or `SQLITE_DIRECT_ONLY_FUNCTIONS` for DDL-like helpers).
-2. Implement the core function in `sqlitegis/src/core/functions/`.
-3. Add the SQLite callback wrapper to `sqlitegis/src/sqlite/ffi.rs` and the corresponding entry in `sqlitegis/src/sqlite/deterministic_callbacks.rs` (or `direct_only_callbacks.rs`).
-4. Add the matching `define_sql_function!` block in `sqlitegis/src/diesel/functions.rs`.
-5. If the first argument is `Nullable<Geometry>`, add the method wrapper in `sqlitegis/src/diesel/expression_methods.rs`.
+2. Implement the core function in `src/core/functions/`.
+3. Add the SQLite callback wrapper to `src/sqlite/ffi.rs` and the corresponding entry in `src/sqlite/deterministic_callbacks.rs` (or `direct_only_callbacks.rs`).
+4. Add the matching `define_sql_function!` block in `src/diesel/functions.rs`.
+5. If the first argument is `Nullable<Geometry>`, add the method wrapper in `src/diesel/expression_methods.rs`.
 
 Three parity nets keep these in sync. Failing any of them is a sign that one of the steps above was missed:
 
-- Compile-time `assert_catalog_callback_parity` in `sqlitegis/src/sqlite/ffi.rs` checks the SQLite callback arrays against the catalog 1-for-1.
-- Three runtime parity tests in `sqlitegis/tests/diesel_expression_methods.rs`:
+- Compile-time `assert_catalog_callback_parity` in `src/sqlite/ffi.rs` checks the SQLite callback arrays against the catalog 1-for-1.
+- Three runtime parity tests in `tests/diesel_expression_methods.rs`:
   - `diesel_functions_and_methods_surface_parity`
   - `diesel_sql_functions_are_backed_by_sqlite_catalog`
   - `catalog_functions_are_covered_by_diesel_declarations`

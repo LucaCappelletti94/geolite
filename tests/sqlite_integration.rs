@@ -8,7 +8,7 @@
 
 use libsqlite3_sys::*;
 use std::ffi::{CStr, CString};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::ptr;
 
 include!("sqlite_test_db_macro.rs");
@@ -147,9 +147,11 @@ fn discover_extension_artifact() -> PathBuf {
 
 fn candidate_target_roots() -> Vec<PathBuf> {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let workspace_root = manifest_dir
-        .parent()
-        .expect("workspace root parent should exist");
+    // Probe both the package directory and its parent. After the crate was
+    // flattened to the repo root the package dir IS the workspace root, so
+    // `target/` lives next to Cargo.toml. Pre-flatten layouts (or any future
+    // workspace nesting) need the parent fallback.
+    let parent_dir = manifest_dir.parent().map(Path::to_path_buf);
     let mut roots = Vec::new();
 
     if let Ok(raw_target_dir) = std::env::var("CARGO_TARGET_DIR") {
@@ -160,12 +162,17 @@ fn candidate_target_roots() -> Vec<PathBuf> {
             if let Ok(cwd) = std::env::current_dir() {
                 roots.push(cwd.join(&target_dir));
             }
-            roots.push(workspace_root.join(&target_dir));
             roots.push(manifest_dir.join(&target_dir));
+            if let Some(parent) = &parent_dir {
+                roots.push(parent.join(&target_dir));
+            }
         }
     }
 
-    roots.push(workspace_root.join("target"));
+    roots.push(manifest_dir.join("target"));
+    if let Some(parent) = &parent_dir {
+        roots.push(parent.join("target"));
+    }
     dedup_paths(roots)
 }
 

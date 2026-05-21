@@ -16,18 +16,26 @@ use geozero::{CoordDimensions, ToGeo, ToWkb};
 
 use crate::core::error::{Result, SqliteGisError};
 
-// EWKB flag constants
+/// EWKB type flag: SRID is present immediately after the type word.
 pub const EWKB_SRID_FLAG: u32 = 0x20000000;
+/// EWKB type flag: coordinates include a Z dimension.
 pub const EWKB_Z_FLAG: u32 = 0x80000000;
+/// EWKB type flag: coordinates include an M (measure) dimension.
 pub const EWKB_M_FLAG: u32 = 0x40000000;
 
-// Geometry type codes (ISO WKB)
+/// ISO WKB geometry type code: Point.
 pub const WKB_POINT: u32 = 1;
+/// ISO WKB geometry type code: LineString.
 pub const WKB_LINESTRING: u32 = 2;
+/// ISO WKB geometry type code: Polygon.
 pub const WKB_POLYGON: u32 = 3;
+/// ISO WKB geometry type code: MultiPoint.
 pub const WKB_MULTIPOINT: u32 = 4;
+/// ISO WKB geometry type code: MultiLineString.
 pub const WKB_MULTILINESTRING: u32 = 5;
+/// ISO WKB geometry type code: MultiPolygon.
 pub const WKB_MULTIPOLYGON: u32 = 6;
+/// ISO WKB geometry type code: GeometryCollection.
 pub const WKB_GEOMETRYCOLLECTION: u32 = 7;
 
 fn read_f64(bytes: [u8; 8], little_endian: bool) -> f64 {

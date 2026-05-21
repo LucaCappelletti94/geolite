@@ -11,7 +11,7 @@ path = "src/lib.rs"
 crate-type = ["cdylib"]
 
 [dependencies]
-sqlitegis = { path = "../../../sqlitegis", features = ["diesel-sqlite"] }
+sqlitegis = { path = "../../..", features = ["diesel-sqlite"] }
 diesel = { version = "2", default-features = false, features = ["sqlite"] }
 sqlite-wasm-rs = "0.5"
 

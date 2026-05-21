@@ -24,9 +24,9 @@ fn main() {
     println!("cargo:rerun-if-changed=worker/src");
     println!("cargo:rerun-if-changed=protocol/Cargo.toml");
     println!("cargo:rerun-if-changed=protocol/src");
-    // The worker pulls sqlitegis from ../../sqlitegis via path, so re-run
-    // whenever the parent library source changes too.
-    println!("cargo:rerun-if-changed=../../sqlitegis/src");
+    // The worker pulls sqlitegis from ../.. via path, so re-run whenever
+    // the parent library source changes too.
+    println!("cargo:rerun-if-changed=../../src");
 
     if let Err(error) = run() {
         eprintln!("{error}");

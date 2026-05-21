@@ -1,4 +1,5 @@
-#![doc = include_str!("../../README.md")]
+#![doc = include_str!("../README.md")]
+#![deny(missing_docs)]
 //! # Crate layout
 //!
 //! Modules are gated behind features so consumers only pay for what they
