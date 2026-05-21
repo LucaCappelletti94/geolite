@@ -218,6 +218,9 @@ header .tagline {
    when lines wrap around inline links. */
 header .intro {
     margin: 0 0 16px;
+    /* 50% cap on wide viewports; full width below the breakpoint so
+       the paragraph does not get crammed into a thin column when the
+       container itself is narrow. */
     max-width: 50%;
     color: var(--fg-muted);
     line-height: 1.55;
@@ -225,6 +228,12 @@ header .intro {
     text-justify: inter-word;
     hyphens: auto;
     overflow-wrap: break-word;
+}
+
+@media (max-width: 1200px) {
+    header .intro {
+        max-width: 100%;
+    }
 }
 
 /* Inline links inside the intro pick up the accent colour with an

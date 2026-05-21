@@ -1,30 +1,22 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" role="img" aria-label="SQLiteGIS logo">
-  <!-- Wireframe globe on the left. The outer circle is the sphere; the
-       horizontal ellipse is the equator and the vertical ellipse is the
-       prime meridian, both flattened by the viewing angle so the globe
-       reads as a sphere rather than a circle. -->
-  <g stroke="#057DBE" fill="none" stroke-linecap="round">
-    <circle cx="24" cy="38" r="20" stroke-width="2.2"/>
-    <ellipse cx="24" cy="38" rx="20" ry="6" stroke-width="1.4" opacity="0.75"/>
-    <ellipse cx="24" cy="38" rx="7" ry="20" stroke-width="1.4" opacity="0.75"/>
-    <ellipse cx="24" cy="38" rx="15" ry="20" stroke-width="1.2" opacity="0.45"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="3 3 58 58" fill="none" role="img" aria-label="SQLiteGIS logo">
+  <!-- Globe centered slightly left in PostGIS blue (#336791). Clean
+       wireframe sphere: outer circle plus a foreshortened equator and
+       meridian. Three lines stays legible at 36px. -->
+  <g stroke="#336791" fill="none" stroke-linecap="round">
+    <circle cx="28" cy="34" r="22" stroke-width="2.6"/>
+    <ellipse cx="28" cy="34" rx="22" ry="6.5" stroke-width="1.6" opacity="0.7"/>
+    <ellipse cx="28" cy="34" rx="6.5" ry="22" stroke-width="1.6" opacity="0.7"/>
   </g>
 
-  <!-- Quill feather sweeping from the upper right down toward the globe.
-       The vane is a filled leaf shape; a darker spine bisects it; light
-       barbs hint at the feather's plumage without copying SQLite's exact
-       brand mark. -->
-  <path d="M 58 6 C 54 18, 48 30, 42 38 C 40 32, 44 22, 50 14 Z"
-        fill="#057DBE" opacity="0.95"/>
-  <path d="M 58 6 C 56 16, 52 26, 46 34 C 48 28, 52 18, 56 10 Z"
-        fill="#057DBE" opacity="0.55"/>
-  <path d="M 58 6 L 38 42" stroke="#0B486B" stroke-width="1.6"
-        stroke-linecap="round" fill="none"/>
-  <g stroke="#057DBE" stroke-width="0.8" stroke-linecap="round" opacity="0.55">
-    <path d="M 50 14 L 53 12"/>
-    <path d="M 48 19 L 52 17"/>
-    <path d="M 46 24 L 50 22"/>
-    <path d="M 44 29 L 48 27"/>
-    <path d="M 42 34 L 46 32"/>
+  <!-- SQLite quill feather, lifted verbatim from simple-icons.org's
+       SQLite brand mark (CC0). The wrapping <g> scales the 24x24
+       source path 2.5x and places it so the feather body sweeps over
+       the upper-right two-thirds of the globe, with the tip extending
+       down through the equator. The database-rectangle subpath of the
+       original brand mark is omitted, leaving only the quill. SQLite
+       blue (#057DBE) so the two halves of the mark read as two
+       distinct ecosystems brought together. -->
+  <g transform="translate(2 4) scale(2.5)" fill="#057DBE">
+    <path d="M21.678.521c-1.032-.92-2.28-.55-3.513.544a8.71 8.71 0 0 0-.547.535c-2.109 2.237-4.066 6.38-4.674 9.544.237.48.422 1.093.544 1.561a13.044 13.044 0 0 1 .164.703s-.019-.071-.096-.296l-.05-.146a1.689 1.689 0 0 0-.033-.08c-.138-.32-.518-.995-.686-1.289-.143.423-.27.818-.376 1.176.484.884.778 2.4.778 2.4s-.025-.099-.147-.442c-.107-.303-.644-1.244-.772-1.464-.217.804-.304 1.346-.226 1.478.152.256.296.698.422 1.186.286 1.1.485 2.44.485 2.44l.017.224a22.41 22.41 0 0 0 .056 2.748c.095 1.146.273 2.13.5 2.657l.155-.084c-.334-1.038-.47-2.399-.41-3.967.09-2.398.642-5.29 1.661-8.304 1.723-4.55 4.113-8.201 6.3-9.945-1.993 1.8-4.692 7.63-5.5 9.788-.904 2.416-1.545 4.684-1.931 6.857.666-2.037 2.821-2.912 2.821-2.912s1.057-1.304 2.292-3.166c-.74.169-1.955.458-2.362.629-.6.251-.762.337-.762.337s1.945-1.184 3.613-1.72C21.695 7.9 24.195 2.767 21.678.521"/>
   </g>
 </svg>

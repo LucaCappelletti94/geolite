@@ -102,6 +102,10 @@ fn App() -> Element {
     });
 
     rsx! {
+        // Reuse the header logo as the browser tab favicon. SVG favicons
+        // are honoured by every evergreen browser and scale crisply at
+        // any tab/bookmark size.
+        document::Link { rel: "icon", href: "/logo.svg", r#type: "image/svg+xml" }
         main {
             header {
                 h1 {
