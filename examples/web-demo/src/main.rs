@@ -194,7 +194,7 @@ fn App() -> Element {
                         class: "brand-postgis",
                         "PostGIS"
                     }
-                    "'s wire format, so queries port unmodified. Built for two deployment shapes that desktop databases struggle with. Edge devices: mobile (iOS, Android), embedded ARM (Raspberry Pi, ARMv7 boards), aarch64 musl gateways, Windows ARM64. And the browser, via "
+                    "'s wire format, so queries port unmodified to PostGIS. Tested on iOS, Android, ARM Linux, "
                     a {
                         href: "https://webassembly.org/",
                         rel: "noopener",
@@ -202,7 +202,7 @@ fn App() -> Element {
                         class: "brand-wasm",
                         "WebAssembly"
                     }
-                    ". Same crate, same Diesel bindings, on every host SQLite already runs on. Try the browser build below on the "
+                    ", and the usual desktop platforms. Try it below on the "
                     a {
                         href: "https://download.geonames.org/export/dump/",
                         rel: "noopener",

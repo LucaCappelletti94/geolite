@@ -218,7 +218,7 @@ header .tagline {
    when lines wrap around inline links. */
 header .intro {
     margin: 0 0 16px;
-    max-width: 640px;
+    max-width: 50%;
     color: var(--fg-muted);
     line-height: 1.55;
     text-align: justify;
