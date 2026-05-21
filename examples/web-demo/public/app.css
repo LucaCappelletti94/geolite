@@ -34,7 +34,9 @@ main {
 /* Ready-state layout: top row Query | Schema, bottom row Results | Map.
    Each cell sizes to its own content; `align-items: start` keeps cells in
    the same row from stretching to match the taller one. The body itself
-   handles overflow if the page is taller than the viewport. */
+   handles overflow if the page is taller than the viewport. Below 900px
+   the two columns collapse to a single column so Query, Schema, Results,
+   and Map each get the full container width and stack vertically. */
 .panel-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -43,6 +45,12 @@ main {
     /* Enable `cqi` units inside descendants. Used by the results panel
        to cap its height at the map canvas's rendered height. */
     container-type: inline-size;
+}
+
+@media (max-width: 900px) {
+    .panel-grid {
+        grid-template-columns: 1fr;
+    }
 }
 
 .panel-grid > section {
@@ -148,6 +156,16 @@ main {
     display: flex;
     flex-direction: column;
     overflow: hidden;
+}
+
+/* Stacked layout: the map now fills the full container width and its
+   rendered height is roughly 50cqi (the canvas keeps its 2:1 aspect),
+   so bump the results cap to match instead of stranding it at the
+   old half-column height. */
+@media (max-width: 900px) {
+    .panel-grid > section.results-panel {
+        max-height: 50cqi;
+    }
 }
 
 .panel-grid > section.results-panel > .meta,
