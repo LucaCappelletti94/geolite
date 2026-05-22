@@ -23,6 +23,7 @@
 //! [`crate::diesel::prelude`]).
 
 pub mod core;
+#[doc(inline)]
 pub use core::error::{Result, SqliteGisError};
 
 #[cfg(feature = "sqlite")]
