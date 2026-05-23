@@ -28,16 +28,12 @@ fi
 
 if [ -n "${CARGO_TARGET}" ]; then
     rustup target add "${CARGO_TARGET}"
-    BUILD_ARGS=(--target "${CARGO_TARGET}")
     TARGET_DIR="target/${CARGO_TARGET}/release"
+    cargo build --release --features sqlite-extension,bundled-sqlite --target "${CARGO_TARGET}"
 else
-    BUILD_ARGS=()
     TARGET_DIR="target/release"
+    cargo build --release --features sqlite-extension,bundled-sqlite
 fi
-
-cargo build --release \
-    --features sqlite-extension,bundled-sqlite \
-    "${BUILD_ARGS[@]}"
 
 # Locate the produced cdylib. cargo emits libsqlitegis.so on Linux,
 # libsqlitegis.dylib on macOS, sqlitegis.dll on Windows.
