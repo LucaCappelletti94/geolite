@@ -206,5 +206,151 @@ fn bench_bulk_intersects_unindexed(c: &mut Criterion) {
     }
 }
 
-criterion_group!(benches, bench_bulk_intersects_unindexed);
+/// R-tree-indexed window query: same 50k points, same constant window
+/// polygon, but routed through `CreateSpatialIndex` so the planner uses
+/// the rtree virtual table for the bbox prefilter and `ST_Intersects`
+/// runs only on the candidates. The two libraries name their rtree
+/// objects differently (`places_geom_rtree` vs `idx_places_geom`) and
+/// pick the join column differently (`id` vs `pkid`), so the SQL is
+/// per-library, but the data and the window are identical.
+fn bench_indexed_intersects(c: &mut Criterion) {
+    let db_g = unsafe {
+        let db = open_sqlitegis_db();
+        exec(db, "SELECT CreateSpatialIndex('places', 'geom')");
+        db
+    };
+    let db_s = unsafe {
+        let db = open_spatialite_db();
+        exec(db, "SELECT CreateSpatialIndex('places', 'geom')");
+        db
+    };
+    let window = "POLYGON((10 20, 11 20, 11 21, 10 21, 10 20))";
+    let sql_g = format!(
+        "SELECT COUNT(*) FROM places p \
+         JOIN places_geom_rtree r ON p.rowid = r.id \
+         WHERE r.xmin <= 11 AND r.xmax >= 10 AND r.ymin <= 21 AND r.ymax >= 20 \
+         AND ST_Intersects(p.geom, ST_GeomFromText('{window}', 4326))"
+    );
+    let sql_s = format!(
+        "SELECT COUNT(*) FROM places p \
+         JOIN idx_places_geom r ON p.rowid = r.pkid \
+         WHERE r.xmin <= 11 AND r.xmax >= 10 AND r.ymin <= 21 AND r.ymax >= 20 \
+         AND ST_Intersects(p.geom, ST_GeomFromText('{window}', 4326))"
+    );
+
+    let mut group = c.benchmark_group("Indexed ST_Intersects window");
+    group.throughput(Throughput::Elements(N_POINTS as u64));
+    group.bench_function(BenchmarkId::new("sqlitegis", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_g, &sql_g)) })
+    });
+    group.bench_function(BenchmarkId::new("spatialite", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_s, &sql_s)) })
+    });
+    group.finish();
+
+    unsafe {
+        sqlite3_close(db_g);
+        sqlite3_close(db_s);
+    }
+}
+
+/// Geodesic (sphere-Haversine) distance throughput: count how many of
+/// the 50k points lie within 1000 km of (0, 0). Pure float math, no
+/// spatial filtering tricks, runs once per row. The two libraries spell
+/// the same Haversine algorithm differently: sqlitegis follows PostGIS
+/// with a dedicated `ST_DistanceSphere`; SpatiaLite 5.1 uses the 3-arg
+/// `ST_Distance(g1, g2, use_ellipsoid)` form with `use_ellipsoid=0` for
+/// the sphere variant.
+fn bench_distance_sphere(c: &mut Criterion) {
+    let db_g = unsafe { open_sqlitegis_db() };
+    let db_s = unsafe { open_spatialite_db() };
+    let sql_g = "SELECT COUNT(*) FROM places \
+                 WHERE ST_DistanceSphere(geom, ST_GeomFromText('POINT(0 0)', 4326)) < 1000000.0";
+    let sql_s = "SELECT COUNT(*) FROM places \
+                 WHERE ST_Distance(geom, ST_GeomFromText('POINT(0 0)', 4326), 0) < 1000000.0";
+
+    let mut group = c.benchmark_group("Geodesic distance bulk");
+    group.throughput(Throughput::Elements(N_POINTS as u64));
+    group.bench_function(BenchmarkId::new("sqlitegis", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_g, sql_g)) })
+    });
+    group.bench_function(BenchmarkId::new("spatialite", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_s, sql_s)) })
+    });
+    group.finish();
+
+    unsafe {
+        sqlite3_close(db_g);
+        sqlite3_close(db_s);
+    }
+}
+
+/// `ST_AsText` scalar throughput: walk all 50k rows projecting
+/// `ST_AsText(geom)`. `COUNT()` over the projection forces the
+/// serializer to fire on every row but only carries one scalar back to
+/// the bench harness. Pure EWKB-to-WKT throughput, no predicates.
+fn bench_astext_throughput(c: &mut Criterion) {
+    let db_g = unsafe { open_sqlitegis_db() };
+    let db_s = unsafe { open_spatialite_db() };
+    let sql = "SELECT COUNT(ST_AsText(geom)) FROM places";
+
+    let mut group = c.benchmark_group("ST_AsText scalar throughput");
+    group.throughput(Throughput::Elements(N_POINTS as u64));
+    group.bench_function(BenchmarkId::new("sqlitegis", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_g, sql)) })
+    });
+    group.bench_function(BenchmarkId::new("spatialite", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_s, sql)) })
+    });
+    group.finish();
+
+    unsafe {
+        sqlite3_close(db_g);
+        sqlite3_close(db_s);
+    }
+}
+
+/// GEOS-heavy workload: buffer a small polygon by 0.1 degrees, then
+/// test point-in-buffered-polygon containment for every row. The buffer
+/// step is the GEOS-heavy work (we use `geo::Buffer`, SpatiaLite uses
+/// `GEOSBufferWithParams`); SQLite folds it to a constant subexpression
+/// so the buffer runs once per query, then `ST_Contains(buffer, geom)`
+/// runs per row. We had to use `ST_Contains(polygon, point)` rather
+/// than `ST_Intersection(point, polygon)` because sqlitegis's
+/// `ST_Intersection` is currently polygon-typed in both arguments.
+/// The data shape is points, so a true polygon-vs-polygon intersection
+/// would require a different seed.
+fn bench_buffer_intersection(c: &mut Criterion) {
+    let db_g = unsafe { open_sqlitegis_db() };
+    let db_s = unsafe { open_spatialite_db() };
+    let sql = "SELECT COUNT(*) FROM places \
+               WHERE ST_Contains( \
+                   ST_Buffer(ST_GeomFromText('POLYGON((10 20, 11 20, 11 21, 10 21, 10 20))', 4326), 0.1), \
+                   geom \
+               )";
+
+    let mut group = c.benchmark_group("ST_Buffer + ST_Contains bulk");
+    group.throughput(Throughput::Elements(N_POINTS as u64));
+    group.bench_function(BenchmarkId::new("sqlitegis", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_g, sql)) })
+    });
+    group.bench_function(BenchmarkId::new("spatialite", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_s, sql)) })
+    });
+    group.finish();
+
+    unsafe {
+        sqlite3_close(db_g);
+        sqlite3_close(db_s);
+    }
+}
+
+criterion_group!(
+    benches,
+    bench_bulk_intersects_unindexed,
+    bench_indexed_intersects,
+    bench_distance_sphere,
+    bench_astext_throughput,
+    bench_buffer_intersection,
+);
 criterion_main!(benches);
