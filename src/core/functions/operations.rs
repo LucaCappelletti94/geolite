@@ -2,13 +2,20 @@
 //!
 //! ST_Union, ST_Intersection, ST_Difference, ST_SymDifference, ST_Buffer
 
+use std::cmp::Ordering;
+
 use geo::algorithm::bool_ops::BooleanOps;
+use geo::algorithm::line_intersection::{line_intersection, LineIntersection};
 use geo::algorithm::Buffer;
-use geo::{Geometry, MultiPolygon};
+use geo::algorithm::Intersects;
+use geo::{
+    Geometry, GeometryCollection, LineString, MultiLineString, MultiPoint, MultiPolygon, Point,
+    Polygon,
+};
 
 use crate::core::error::{Result, SqliteGisError};
 use crate::core::ewkb::{parse_ewkb, parse_ewkb_pair, write_ewkb};
-use crate::core::functions::emptiness::is_empty_geometry;
+use crate::core::functions::emptiness::{is_empty_geometry, is_empty_point};
 
 /// Extract a Polygon or MultiPolygon from a geometry, converting single
 /// Polygons into MultiPolygon for uniform BooleanOps handling.
@@ -34,6 +41,251 @@ where
     write_ewkb(&Geometry::MultiPolygon(result), srid)
 }
 
+/// Bag of homogeneous-typed pieces extracted from a possibly-nested input.
+///
+/// `ST_Intersection` accepts any geometry on either side. We normalise the
+/// inputs by decomposing them into points, line strings, and polygons, then
+/// intersect the bags pair-wise, then pack the smallest matching variant on
+/// the way out.
+#[derive(Default)]
+struct GeometryBag {
+    points: Vec<Point<f64>>,
+    lines: Vec<LineString<f64>>,
+    polygons: Vec<Polygon<f64>>,
+}
+
+impl GeometryBag {
+    fn new() -> Self {
+        Self::default()
+    }
+}
+
+fn decompose_into(geom: Geometry<f64>, bag: &mut GeometryBag) -> Result<()> {
+    match geom {
+        Geometry::Point(p) => {
+            if !is_empty_point(&p) {
+                bag.points.push(p);
+            }
+        }
+        Geometry::MultiPoint(mp) => {
+            for p in mp.0 {
+                if !is_empty_point(&p) {
+                    bag.points.push(p);
+                }
+            }
+        }
+        Geometry::LineString(ls) => {
+            if !ls.0.is_empty() {
+                bag.lines.push(ls);
+            }
+        }
+        Geometry::MultiLineString(mls) => {
+            for ls in mls.0 {
+                if !ls.0.is_empty() {
+                    bag.lines.push(ls);
+                }
+            }
+        }
+        Geometry::Polygon(p) => {
+            if !p.exterior().0.is_empty() {
+                bag.polygons.push(p);
+            }
+        }
+        Geometry::MultiPolygon(mp) => {
+            for p in mp.0 {
+                if !p.exterior().0.is_empty() {
+                    bag.polygons.push(p);
+                }
+            }
+        }
+        Geometry::GeometryCollection(gc) => {
+            for g in gc.0 {
+                decompose_into(g, bag)?;
+            }
+        }
+        other => {
+            return Err(SqliteGisError::wrong_type(
+                "Point, LineString, Polygon, or a Multi/Collection of these",
+                &other,
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn intersect_bags(a: &GeometryBag, b: &GeometryBag) -> GeometryBag {
+    let mut out = GeometryBag::new();
+
+    if !a.polygons.is_empty() && !b.polygons.is_empty() {
+        let ma = MultiPolygon::new(a.polygons.clone());
+        let mb = MultiPolygon::new(b.polygons.clone());
+        let result = ma.intersection(&mb);
+        out.polygons.extend(result.0);
+    }
+
+    if !a.lines.is_empty() && !b.polygons.is_empty() {
+        let mls = MultiLineString::new(a.lines.clone());
+        let mb = MultiPolygon::new(b.polygons.clone());
+        let clipped = mb.clip(&mls, false);
+        out.lines.extend(clipped.0);
+    }
+
+    if !a.polygons.is_empty() && !b.lines.is_empty() {
+        let ma = MultiPolygon::new(a.polygons.clone());
+        let mls = MultiLineString::new(b.lines.clone());
+        let clipped = ma.clip(&mls, false);
+        out.lines.extend(clipped.0);
+    }
+
+    if !a.points.is_empty() && !b.polygons.is_empty() {
+        let mb = MultiPolygon::new(b.polygons.clone());
+        for p in &a.points {
+            if mb.intersects(p) {
+                out.points.push(*p);
+            }
+        }
+    }
+
+    if !a.polygons.is_empty() && !b.points.is_empty() {
+        let ma = MultiPolygon::new(a.polygons.clone());
+        for p in &b.points {
+            if ma.intersects(p) {
+                out.points.push(*p);
+            }
+        }
+    }
+
+    if !a.points.is_empty() && !b.lines.is_empty() {
+        let mls = MultiLineString::new(b.lines.clone());
+        for p in &a.points {
+            if mls.intersects(p) {
+                out.points.push(*p);
+            }
+        }
+    }
+
+    if !a.lines.is_empty() && !b.points.is_empty() {
+        let mls = MultiLineString::new(a.lines.clone());
+        for p in &b.points {
+            if mls.intersects(p) {
+                out.points.push(*p);
+            }
+        }
+    }
+
+    if !a.points.is_empty() && !b.points.is_empty() {
+        for pa in &a.points {
+            for pb in &b.points {
+                if pa.x() == pb.x() && pa.y() == pb.y() {
+                    out.points.push(*pa);
+                    break;
+                }
+            }
+        }
+    }
+
+    if !a.lines.is_empty() && !b.lines.is_empty() {
+        intersect_lines_into(&a.lines, &b.lines, &mut out);
+    }
+
+    out
+}
+
+/// Naive O(n*m) pairwise segment-intersection sweep. Sufficient for typical
+/// LineString sizes; a Bentley-Ottmann sweep would only pay off for very
+/// long, very sparse-intersection inputs.
+fn intersect_lines_into(a: &[LineString<f64>], b: &[LineString<f64>], out: &mut GeometryBag) {
+    let mut collinear: Vec<LineString<f64>> = Vec::new();
+    for la in a {
+        for seg_a in la.lines() {
+            for lb in b {
+                for seg_b in lb.lines() {
+                    match line_intersection(seg_a, seg_b) {
+                        Some(LineIntersection::SinglePoint { intersection, .. }) => {
+                            out.points.push(Point::new(intersection.x, intersection.y));
+                        }
+                        Some(LineIntersection::Collinear { intersection }) => {
+                            collinear.push(LineString::from(vec![
+                                (intersection.start.x, intersection.start.y),
+                                (intersection.end.x, intersection.end.y),
+                            ]));
+                        }
+                        None => {}
+                    }
+                }
+            }
+        }
+    }
+    out.lines.extend(collinear);
+}
+
+fn coord_cmp(a: &Point<f64>, b: &Point<f64>) -> Ordering {
+    a.x()
+        .partial_cmp(&b.x())
+        .unwrap_or(Ordering::Equal)
+        .then(a.y().partial_cmp(&b.y()).unwrap_or(Ordering::Equal))
+}
+
+fn pack(bag: GeometryBag) -> Geometry<f64> {
+    let GeometryBag {
+        mut points,
+        lines,
+        polygons,
+    } = bag;
+
+    points.sort_by(coord_cmp);
+    points.dedup_by(|a, b| a.x() == b.x() && a.y() == b.y());
+
+    let has_points = !points.is_empty();
+    let has_lines = !lines.is_empty();
+    let has_polygons = !polygons.is_empty();
+    let kinds = (has_points as u8) + (has_lines as u8) + (has_polygons as u8);
+
+    if kinds == 0 {
+        return Geometry::GeometryCollection(GeometryCollection::new_from(vec![]));
+    }
+
+    if kinds > 1 {
+        let mut parts: Vec<Geometry<f64>> = Vec::new();
+        if points.len() == 1 {
+            parts.push(Geometry::Point(points.into_iter().next().unwrap()));
+        } else if !points.is_empty() {
+            parts.push(Geometry::MultiPoint(MultiPoint::new(points)));
+        }
+        if lines.len() == 1 {
+            parts.push(Geometry::LineString(lines.into_iter().next().unwrap()));
+        } else if !lines.is_empty() {
+            parts.push(Geometry::MultiLineString(MultiLineString::new(lines)));
+        }
+        if polygons.len() == 1 {
+            parts.push(Geometry::Polygon(polygons.into_iter().next().unwrap()));
+        } else if !polygons.is_empty() {
+            parts.push(Geometry::MultiPolygon(MultiPolygon::new(polygons)));
+        }
+        return Geometry::GeometryCollection(GeometryCollection::new_from(parts));
+    }
+
+    if has_points {
+        return if points.len() == 1 {
+            Geometry::Point(points.into_iter().next().unwrap())
+        } else {
+            Geometry::MultiPoint(MultiPoint::new(points))
+        };
+    }
+    if has_lines {
+        return if lines.len() == 1 {
+            Geometry::LineString(lines.into_iter().next().unwrap())
+        } else {
+            Geometry::MultiLineString(MultiLineString::new(lines))
+        };
+    }
+    if polygons.len() == 1 {
+        Geometry::Polygon(polygons.into_iter().next().unwrap())
+    } else {
+        Geometry::MultiPolygon(MultiPolygon::new(polygons))
+    }
+}
+
 /// ST_Union: compute the geometric union of two polygon geometries.
 ///
 /// # Example
@@ -52,7 +304,13 @@ pub fn st_union(a: &[u8], b: &[u8]) -> Result<Vec<u8>> {
     binary_polygon_op(a, b, |ma, mb| ma.union(mb))
 }
 
-/// ST_Intersection: compute the geometric intersection of two polygon geometries.
+/// ST_Intersection: compute the geometric intersection of two geometries.
+///
+/// Accepts any combination of Point, LineString, Polygon, their Multi*
+/// variants, and GeometryCollection on either side. The result is packed
+/// into the smallest matching variant (single primitive, single Multi*,
+/// or GeometryCollection for mixed-dimension results). Disjoint inputs
+/// return an empty GeometryCollection.
 ///
 /// # Example
 ///
@@ -66,8 +324,38 @@ pub fn st_union(a: &[u8], b: &[u8]) -> Result<Vec<u8>> {
 /// let i = st_intersection(&a, &b).unwrap();
 /// assert!((st_area(&i).unwrap() - 2.0).abs() < 1e-10);
 /// ```
+///
+/// Point inside polygon returns the point:
+///
+/// ```
+/// use sqlitegis::core::functions::operations::st_intersection;
+/// use sqlitegis::core::functions::io::{as_text, geom_from_text};
+///
+/// let pt = geom_from_text("POINT(1 1)", None).unwrap();
+/// let poly = geom_from_text("POLYGON((0 0,2 0,2 2,0 2,0 0))", None).unwrap();
+/// let r = st_intersection(&pt, &poly).unwrap();
+/// assert_eq!(as_text(&r).unwrap(), "POINT(1 1)");
+/// ```
+///
+/// Two crossing line strings yield the crossing point:
+///
+/// ```
+/// use sqlitegis::core::functions::operations::st_intersection;
+/// use sqlitegis::core::functions::io::{as_text, geom_from_text};
+///
+/// let a = geom_from_text("LINESTRING(0 0,2 2)", None).unwrap();
+/// let b = geom_from_text("LINESTRING(0 2,2 0)", None).unwrap();
+/// let r = st_intersection(&a, &b).unwrap();
+/// assert_eq!(as_text(&r).unwrap(), "POINT(1 1)");
+/// ```
 pub fn st_intersection(a: &[u8], b: &[u8]) -> Result<Vec<u8>> {
-    binary_polygon_op(a, b, |ma, mb| ma.intersection(mb))
+    let (ga, gb, srid) = parse_ewkb_pair(a, b)?;
+    let mut bag_a = GeometryBag::new();
+    let mut bag_b = GeometryBag::new();
+    decompose_into(ga, &mut bag_a)?;
+    decompose_into(gb, &mut bag_b)?;
+    let result = intersect_bags(&bag_a, &bag_b);
+    write_ewkb(&pack(result), srid)
 }
 
 /// ST_Difference: compute the geometric difference (A minus B) of two polygon geometries.
@@ -237,5 +525,152 @@ mod tests {
         let buffered = st_buffer(&empty, 1.0).unwrap();
         assert_eq!(st_geometry_type(&buffered).unwrap(), "ST_Polygon");
         assert!(st_is_empty(&buffered).unwrap());
+    }
+
+    use crate::core::functions::io::as_text;
+
+    #[test]
+    fn intersection_point_point_match() {
+        let a = geom_from_text("POINT(1 2)", None).unwrap();
+        let b = geom_from_text("POINT(1 2)", None).unwrap();
+        let r = st_intersection(&a, &b).unwrap();
+        assert_eq!(as_text(&r).unwrap(), "POINT(1 2)");
+    }
+
+    #[test]
+    fn intersection_point_point_disjoint_is_empty() {
+        let a = geom_from_text("POINT(1 2)", None).unwrap();
+        let b = geom_from_text("POINT(3 4)", None).unwrap();
+        let r = st_intersection(&a, &b).unwrap();
+        assert!(st_is_empty(&r).unwrap());
+        assert_eq!(st_geometry_type(&r).unwrap(), "ST_GeometryCollection");
+    }
+
+    #[test]
+    fn intersection_point_in_polygon() {
+        let pt = geom_from_text("POINT(1 1)", None).unwrap();
+        let poly = geom_from_text("POLYGON((0 0,2 0,2 2,0 2,0 0))", None).unwrap();
+        let r = st_intersection(&pt, &poly).unwrap();
+        assert_eq!(as_text(&r).unwrap(), "POINT(1 1)");
+    }
+
+    #[test]
+    fn intersection_point_outside_polygon_is_empty() {
+        let pt = geom_from_text("POINT(5 5)", None).unwrap();
+        let poly = geom_from_text("POLYGON((0 0,2 0,2 2,0 2,0 0))", None).unwrap();
+        let r = st_intersection(&pt, &poly).unwrap();
+        assert!(st_is_empty(&r).unwrap());
+    }
+
+    #[test]
+    fn intersection_polygon_point_swapped() {
+        let pt = geom_from_text("POINT(1 1)", None).unwrap();
+        let poly = geom_from_text("POLYGON((0 0,2 0,2 2,0 2,0 0))", None).unwrap();
+        let r = st_intersection(&poly, &pt).unwrap();
+        assert_eq!(as_text(&r).unwrap(), "POINT(1 1)");
+    }
+
+    #[test]
+    fn intersection_point_on_linestring() {
+        let pt = geom_from_text("POINT(1 1)", None).unwrap();
+        let ls = geom_from_text("LINESTRING(0 0,2 2)", None).unwrap();
+        let r = st_intersection(&pt, &ls).unwrap();
+        assert_eq!(as_text(&r).unwrap(), "POINT(1 1)");
+    }
+
+    #[test]
+    fn intersection_point_off_linestring_is_empty() {
+        let pt = geom_from_text("POINT(1 0)", None).unwrap();
+        let ls = geom_from_text("LINESTRING(0 0,2 2)", None).unwrap();
+        let r = st_intersection(&pt, &ls).unwrap();
+        assert!(st_is_empty(&r).unwrap());
+    }
+
+    #[test]
+    fn intersection_linestring_polygon_clips() {
+        let ls = geom_from_text("LINESTRING(-1 1,3 1)", None).unwrap();
+        let poly = geom_from_text("POLYGON((0 0,2 0,2 2,0 2,0 0))", None).unwrap();
+        let r = st_intersection(&ls, &poly).unwrap();
+        assert_eq!(st_geometry_type(&r).unwrap(), "ST_LineString");
+        assert_eq!(as_text(&r).unwrap(), "LINESTRING(0 1,2 1)");
+    }
+
+    #[test]
+    fn intersection_polygon_linestring_swapped_clips() {
+        let ls = geom_from_text("LINESTRING(-1 1,3 1)", None).unwrap();
+        let poly = geom_from_text("POLYGON((0 0,2 0,2 2,0 2,0 0))", None).unwrap();
+        let r = st_intersection(&poly, &ls).unwrap();
+        assert_eq!(st_geometry_type(&r).unwrap(), "ST_LineString");
+        assert_eq!(as_text(&r).unwrap(), "LINESTRING(0 1,2 1)");
+    }
+
+    #[test]
+    fn intersection_linestring_disjoint_polygon_is_empty() {
+        let ls = geom_from_text("LINESTRING(10 10,20 20)", None).unwrap();
+        let poly = geom_from_text("POLYGON((0 0,2 0,2 2,0 2,0 0))", None).unwrap();
+        let r = st_intersection(&ls, &poly).unwrap();
+        assert!(st_is_empty(&r).unwrap());
+    }
+
+    #[test]
+    fn intersection_two_crossing_linestrings_point() {
+        let a = geom_from_text("LINESTRING(0 0,2 2)", None).unwrap();
+        let b = geom_from_text("LINESTRING(0 2,2 0)", None).unwrap();
+        let r = st_intersection(&a, &b).unwrap();
+        assert_eq!(as_text(&r).unwrap(), "POINT(1 1)");
+    }
+
+    #[test]
+    fn intersection_collinear_linestrings_yield_overlap_linestring() {
+        let a = geom_from_text("LINESTRING(0 0,4 0)", None).unwrap();
+        let b = geom_from_text("LINESTRING(2 0,6 0)", None).unwrap();
+        let r = st_intersection(&a, &b).unwrap();
+        assert_eq!(st_geometry_type(&r).unwrap(), "ST_LineString");
+        assert_eq!(as_text(&r).unwrap(), "LINESTRING(2 0,4 0)");
+    }
+
+    #[test]
+    fn intersection_parallel_linestrings_disjoint_is_empty() {
+        let a = geom_from_text("LINESTRING(0 0,2 0)", None).unwrap();
+        let b = geom_from_text("LINESTRING(0 1,2 1)", None).unwrap();
+        let r = st_intersection(&a, &b).unwrap();
+        assert!(st_is_empty(&r).unwrap());
+    }
+
+    #[test]
+    fn intersection_multipoint_polygon_keeps_inside_points() {
+        let mp = geom_from_text("MULTIPOINT((1 1),(5 5),(0 0))", None).unwrap();
+        let poly = geom_from_text("POLYGON((0 0,2 0,2 2,0 2,0 0))", None).unwrap();
+        let r = st_intersection(&mp, &poly).unwrap();
+        assert_eq!(st_geometry_type(&r).unwrap(), "ST_MultiPoint");
+        let text = as_text(&r).unwrap();
+        assert!(text.contains("0 0"), "actual: {text}");
+        assert!(text.contains("1 1"), "actual: {text}");
+        assert!(!text.contains("5 5"), "actual: {text}");
+    }
+
+    #[test]
+    fn intersection_geometrycollection_input_dispatches_per_part() {
+        let gc =
+            geom_from_text("GEOMETRYCOLLECTION(POINT(1 1),LINESTRING(-1 1,3 1))", None).unwrap();
+        let poly = geom_from_text("POLYGON((0 0,2 0,2 2,0 2,0 0))", None).unwrap();
+        let r = st_intersection(&gc, &poly).unwrap();
+        assert_eq!(st_geometry_type(&r).unwrap(), "ST_GeometryCollection");
+        let text = as_text(&r).unwrap();
+        assert!(text.contains("POINT(1 1)"));
+        assert!(text.contains("LINESTRING(0 1,2 1)"));
+    }
+
+    #[test]
+    fn intersection_rejects_unsupported_type() {
+        let pt = geom_from_text("POINT(0 0)", None).unwrap();
+        let poly = geom_from_text("POLYGON((0 0,2 0,2 2,0 2,0 0))", None).unwrap();
+        let mut bag = GeometryBag::new();
+        let rect = Geometry::Rect(geo::Rect::new(
+            geo::Coord { x: 0.0, y: 0.0 },
+            geo::Coord { x: 1.0, y: 1.0 },
+        ));
+        assert!(decompose_into(rect, &mut bag).is_err());
+        let _ = (pt, poly);
     }
 }
