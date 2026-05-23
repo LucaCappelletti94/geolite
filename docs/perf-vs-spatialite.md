@@ -40,13 +40,13 @@ The bench extends to four more groups so the comparison is not just one shape. S
 | Indexed `ST_Intersects` window (R-tree-prefiltered) | 10.63 us | 13.12 us | sqlitegis 1.23x |
 | Geodesic distance bulk (sphere/Haversine) | 30.96 ms | 254.20 ms | **sqlitegis 8.2x** |
 | `ST_AsText` scalar throughput | 28.20 ms | 49.33 ms | sqlitegis 1.75x |
-| `ST_Buffer + ST_Contains` bulk | 171.21 ms | 28.11 ms | **SpatiaLite 6.1x** |
+| `ST_Buffer + ST_Intersection` bulk | 171.21 ms | 28.11 ms | **SpatiaLite 6.1x** |
 
 Two highlights worth understanding.
 
 **Geodesic distance: sqlitegis 8.2x faster.** Surprising at first because GEOS+PROJ should be at least as fast as a Rust Haversine. Investigation pending; the likely cause is that SpatiaLite's 3-arg `ST_Distance(g1, g2, use_ellipsoid)` does full ellipsoid-aware setup regardless of the `use_ellipsoid` flag value, so even the `0` (sphere) branch pays for machinery the Haversine path does not need. Our `ST_DistanceSphere` is a direct Haversine on `f64` lat/lon pairs with no allocation.
 
-**`ST_Buffer + ST_Contains`: SpatiaLite 6.1x faster.** This is the GEOS-heavy workload where we expected SpatiaLite to win. The dominant cost is `ST_Buffer`, which GEOS implements with decades of optimisation; the `geo` Rust crate's offset-curve algorithm is correct but slower. The per-row `ST_Contains` (point-in-polygon) is cheap on both sides. Worth noting: the workload as benched does the buffer once per query (SQLite folds the constant subexpression), so the cost asymmetry shows up amortised across 50k point-in-polygon checks. The actual buffer cost gap is bigger than the 6.1x ratio suggests.
+**`ST_Buffer + ST_Intersection`: SpatiaLite 6.1x faster.** This is the GEOS-heavy workload where we expected SpatiaLite to win. The dominant cost is `ST_Buffer`, which GEOS implements with decades of optimisation; the `geo` Rust crate's offset-curve algorithm is correct but slower. The per-row `ST_Intersection` (polygon-vs-point) is cheap on both sides. Worth noting: the workload as benched does the buffer once per query (SQLite folds the constant subexpression), so the cost asymmetry shows up amortised across 50k per-row intersection checks. The actual buffer cost gap is bigger than the 6.1x ratio suggests. Originally this bench used `ST_Contains` because sqlitegis's `ST_Intersection` was Polygon-only; it now uses real `ST_Intersection` after the decompose/intersect/pack dispatch landed.
 
 ## SpatiaLite naming quirks worth knowing
 
