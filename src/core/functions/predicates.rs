@@ -216,6 +216,15 @@ pub fn st_dwithin_spheroid(a: &[u8], b: &[u8], distance: f64) -> Result<bool> {
 /// assert!(!st_covers(&poly, &outside).unwrap());
 /// ```
 pub fn st_covers(a: &[u8], b: &[u8]) -> Result<bool> {
+    // MBR-only fastpath. If A's bbox does not fully contain B's bbox,
+    // A cannot cover B. Same shortcut as `st_contains`; covers is a
+    // slightly more permissive variant of contains so the necessary
+    // condition is identical. `st_covered_by` inherits via delegation.
+    if let (Ok(Some(ra)), Ok(Some(rb))) = (extract_mbr(a), extract_mbr(b)) {
+        if !ra.contains(&rb) {
+            return Ok(false);
+        }
+    }
     let (ga, gb, _) = parse_ewkb_pair(a, b)?;
     Ok(ga.relate(&gb).is_covers())
 }
@@ -526,6 +535,14 @@ mod tests {
         assert!(!st_contains(&a, &b).unwrap());
         // Symmetric: ST_Within delegates to st_contains so inherits the fastpath.
         assert!(!st_within(&b, &a).unwrap());
+    }
+
+    #[test]
+    fn covers_mbr_not_containing_returns_false() {
+        let a = geom_from_text("POLYGON((0 0,2 0,2 2,0 2,0 0))", None).unwrap();
+        let b = geom_from_text("POLYGON((4 4,6 4,6 6,4 6,4 4))", None).unwrap();
+        assert!(!st_covers(&a, &b).unwrap());
+        assert!(!st_covered_by(&b, &a).unwrap());
     }
 
     #[test]
