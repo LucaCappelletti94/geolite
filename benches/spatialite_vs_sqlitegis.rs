@@ -534,6 +534,195 @@ fn bench_difference_disjoint(c: &mut Criterion) {
     }
 }
 
+/// `ST_Covers` follows the same MBR-containment short-circuit as
+/// `ST_Contains` (covers is a slightly more permissive variant). Same
+/// constant LHS polygon vs every point.
+fn bench_bulk_covers_unindexed(c: &mut Criterion) {
+    let db_g = unsafe { open_sqlitegis_db() };
+    let db_s = unsafe { open_spatialite_db() };
+    let sql = "SELECT COUNT(*) FROM places \
+               WHERE ST_Covers(ST_GeomFromText('POLYGON((0 0, 36 0, 36 18, 0 18, 0 0))', 4326), geom)";
+
+    let mut group = c.benchmark_group("Unindexed ST_Covers bulk");
+    group.throughput(Throughput::Elements(N_POINTS as u64));
+    group.bench_function(BenchmarkId::new("sqlitegis", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_g, sql)) })
+    });
+    group.bench_function(BenchmarkId::new("spatialite", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_s, sql)) })
+    });
+    group.finish();
+
+    unsafe {
+        sqlite3_close(db_g);
+        sqlite3_close(db_s);
+    }
+}
+
+/// `ST_Touches` against a constant polygon. Random regions almost never
+/// touch the LHS exactly, so the predicate fires false on essentially
+/// every row. Tests the MBR-disjoint short-circuit opportunity.
+fn bench_bulk_touches_unindexed(c: &mut Criterion) {
+    let db_g = unsafe { open_sqlitegis_db() };
+    let db_s = unsafe { open_spatialite_db() };
+    let sql = "SELECT COUNT(*) FROM regions \
+               WHERE ST_Touches(geom, ST_GeomFromText('POLYGON((10 20, 11 20, 11 21, 10 21, 10 20))', 4326))";
+
+    let mut group = c.benchmark_group("Unindexed ST_Touches bulk");
+    group.throughput(Throughput::Elements(N_POINTS as u64));
+    group.bench_function(BenchmarkId::new("sqlitegis", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_g, sql)) })
+    });
+    group.bench_function(BenchmarkId::new("spatialite", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_s, sql)) })
+    });
+    group.finish();
+
+    unsafe {
+        sqlite3_close(db_g);
+        sqlite3_close(db_s);
+    }
+}
+
+/// `ST_Overlaps`: same-dimension geometries with partial overlap. Random
+/// regions vs a constant polygon; nearly all rows are MBR-disjoint so the
+/// predicate fires false. Tests the MBR-disjoint short-circuit.
+fn bench_bulk_overlaps_unindexed(c: &mut Criterion) {
+    let db_g = unsafe { open_sqlitegis_db() };
+    let db_s = unsafe { open_spatialite_db() };
+    let sql = "SELECT COUNT(*) FROM regions \
+               WHERE ST_Overlaps(geom, ST_GeomFromText('POLYGON((10 20, 11 20, 11 21, 10 21, 10 20))', 4326))";
+
+    let mut group = c.benchmark_group("Unindexed ST_Overlaps bulk");
+    group.throughput(Throughput::Elements(N_POINTS as u64));
+    group.bench_function(BenchmarkId::new("sqlitegis", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_g, sql)) })
+    });
+    group.bench_function(BenchmarkId::new("spatialite", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_s, sql)) })
+    });
+    group.finish();
+
+    unsafe {
+        sqlite3_close(db_g);
+        sqlite3_close(db_s);
+    }
+}
+
+/// `ST_Equals` vs a constant polygon. All rows return false because the
+/// random regions never coincide exactly. Tests the MBR-disjoint short
+/// circuit (and incidentally the MBR-not-equal optimisation if we add
+/// the tighter "MBRs differ implies not equal" check later).
+fn bench_bulk_equals_unindexed(c: &mut Criterion) {
+    let db_g = unsafe { open_sqlitegis_db() };
+    let db_s = unsafe { open_spatialite_db() };
+    let sql = "SELECT COUNT(*) FROM regions \
+               WHERE ST_Equals(geom, ST_GeomFromText('POLYGON((10 20, 11 20, 11 21, 10 21, 10 20))', 4326))";
+
+    let mut group = c.benchmark_group("Unindexed ST_Equals bulk");
+    group.throughput(Throughput::Elements(N_POINTS as u64));
+    group.bench_function(BenchmarkId::new("sqlitegis", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_g, sql)) })
+    });
+    group.bench_function(BenchmarkId::new("spatialite", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_s, sql)) })
+    });
+    group.finish();
+
+    unsafe {
+        sqlite3_close(db_g);
+        sqlite3_close(db_s);
+    }
+}
+
+/// `ST_DWithin` (planar Euclidean): count points within 5 degrees of a
+/// fixed point. ~1% of the globe falls inside; most rows reject. Tests
+/// the MBR-distance lower-bound short-circuit opportunity (compute
+/// MBR-to-MBR distance; if greater than threshold, fail without full
+/// distance call). SpatiaLite 5.x has no native `ST_DWithin`, so the
+/// SpatiaLite query is rewritten as `ST_Distance(...) <= threshold`,
+/// which is the canonical equivalent in SpatiaLite SQL.
+fn bench_bulk_dwithin_unindexed(c: &mut Criterion) {
+    let db_g = unsafe { open_sqlitegis_db() };
+    let db_s = unsafe { open_spatialite_db() };
+    let sql_g = "SELECT COUNT(*) FROM places \
+                 WHERE ST_DWithin(geom, ST_GeomFromText('POINT(0 0)', 4326), 5.0)";
+    let sql_s = "SELECT COUNT(*) FROM places \
+                 WHERE ST_Distance(geom, ST_GeomFromText('POINT(0 0)', 4326)) <= 5.0";
+
+    let mut group = c.benchmark_group("Unindexed ST_DWithin bulk");
+    group.throughput(Throughput::Elements(N_POINTS as u64));
+    group.bench_function(BenchmarkId::new("sqlitegis", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_g, sql_g)) })
+    });
+    group.bench_function(BenchmarkId::new("spatialite", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_s, sql_s)) })
+    });
+    group.finish();
+
+    unsafe {
+        sqlite3_close(db_g);
+        sqlite3_close(db_s);
+    }
+}
+
+/// `ST_Union` against a constant far-away polygon. Every row is MBR
+/// disjoint so the correct result is "both inputs as a collection".
+/// Tests the disjoint-MBR fastpath opportunity for binary set ops.
+fn bench_union_disjoint(c: &mut Criterion) {
+    let db_g = unsafe { open_sqlitegis_db() };
+    let db_s = unsafe { open_spatialite_db() };
+    let sql = "SELECT COUNT(*) FROM regions \
+               WHERE NOT ST_IsEmpty(ST_Union( \
+                   geom, \
+                   ST_GeomFromText('POLYGON((-179.9 -89.9, -179 -89.9, -179 -89, -179.9 -89, -179.9 -89.9))', 4326) \
+               ))";
+
+    let mut group = c.benchmark_group("ST_Union disjoint bulk");
+    group.throughput(Throughput::Elements(N_POINTS as u64));
+    group.bench_function(BenchmarkId::new("sqlitegis", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_g, sql)) })
+    });
+    group.bench_function(BenchmarkId::new("spatialite", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_s, sql)) })
+    });
+    group.finish();
+
+    unsafe {
+        sqlite3_close(db_g);
+        sqlite3_close(db_s);
+    }
+}
+
+/// `ST_SymDifference` against a constant far-away polygon. MBR disjoint
+/// so the correct result is both inputs as a collection (symmetric
+/// difference of disjoint sets is their union). Same fastpath shape as
+/// Union and Difference.
+fn bench_sym_difference_disjoint(c: &mut Criterion) {
+    let db_g = unsafe { open_sqlitegis_db() };
+    let db_s = unsafe { open_spatialite_db() };
+    let sql = "SELECT COUNT(*) FROM regions \
+               WHERE NOT ST_IsEmpty(ST_SymDifference( \
+                   geom, \
+                   ST_GeomFromText('POLYGON((-179.9 -89.9, -179 -89.9, -179 -89, -179.9 -89, -179.9 -89.9))', 4326) \
+               ))";
+
+    let mut group = c.benchmark_group("ST_SymDifference disjoint bulk");
+    group.throughput(Throughput::Elements(N_POINTS as u64));
+    group.bench_function(BenchmarkId::new("sqlitegis", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_g, sql)) })
+    });
+    group.bench_function(BenchmarkId::new("spatialite", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_s, sql)) })
+    });
+    group.finish();
+
+    unsafe {
+        sqlite3_close(db_g);
+        sqlite3_close(db_s);
+    }
+}
+
 criterion_group!(
     benches,
     bench_bulk_intersects_unindexed,
@@ -546,5 +735,12 @@ criterion_group!(
     bench_buffer_throughput,
     bench_centroid_throughput,
     bench_difference_disjoint,
+    bench_bulk_covers_unindexed,
+    bench_bulk_touches_unindexed,
+    bench_bulk_overlaps_unindexed,
+    bench_bulk_equals_unindexed,
+    bench_bulk_dwithin_unindexed,
+    bench_union_disjoint,
+    bench_sym_difference_disjoint,
 );
 criterion_main!(benches);
