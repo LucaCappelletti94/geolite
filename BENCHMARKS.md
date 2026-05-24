@@ -27,31 +27,51 @@ SpatiaLite would have been the obvious choice except for two practical issues. I
 
 | Workload | sqlitegis | SpatiaLite | Ratio |
 | --- | ---: | ---: | --- |
-| `ST_Intersects` bulk, unindexed | `5.65 ms` | `9.73 ms` | `sqlitegis 1.72x` |
-| `ST_Intersects` window, R-tree-prefiltered | `10.31 us` | `12.89 us` | `sqlitegis 1.25x` |
-| `ST_Contains` bulk, unindexed | `5.68 ms` | `9.44 ms` | `sqlitegis 1.66x` |
-| `ST_Contains` window, R-tree-prefiltered | `10.34 us` | `12.70 us` | `sqlitegis 1.23x` |
-| `ST_Covers` bulk, unindexed | `5.79 ms` | `8.91 ms` | `sqlitegis 1.54x` |
-| `ST_Touches` bulk, unindexed | `10.12 ms` | `12.83 ms` | `sqlitegis 1.27x` |
-| `ST_Overlaps` bulk, unindexed | `10.82 ms` | `13.06 ms` | `sqlitegis 1.21x` |
-| `ST_Equals` bulk, unindexed | `10.59 ms` | `12.79 ms` | `sqlitegis 1.21x` |
-| `ST_DWithin` bulk, unindexed | `28.73 ms` | `39.63 ms` | `sqlitegis 1.38x` |
-| `ST_DistanceSphere` bulk | `30.14 ms` | `254.72 ms` | `sqlitegis 8.45x` |
-| `ST_AsText` scalar throughput | `28.28 ms` | `49.99 ms` | `sqlitegis 1.77x` |
-| `ST_Buffer` scalar throughput | `329.56 ms` | `694.51 ms` | `sqlitegis 2.11x` |
-| `ST_Centroid` scalar throughput | `56.10 ms` | `38.16 ms` | `SpatiaLite 1.47x` |
-| `ST_Buffer` + `ST_Intersection` bulk | `36.85 ms` | `28.54 ms` | `SpatiaLite 1.29x` |
-| `ST_Difference` disjoint bulk | `254.51 ms` | `224.24 ms` | `SpatiaLite 1.10x` |
-| `ST_Union` disjoint bulk | `88.81 ms` | `87.38 ms` | `SpatiaLite 1.02x` |
-| `ST_SymDifference` disjoint bulk | `91.55 ms` | `86.87 ms` | `SpatiaLite 1.05x` |
+| `ST_Intersects` bulk, unindexed | `5.78 ms` | `9.63 ms` | `sqlitegis 1.66x` |
+| `ST_Intersects` window, R-tree-prefiltered | `10.62 us` | `12.96 us` | `sqlitegis 1.22x` |
+| `ST_Contains` bulk, unindexed | `5.87 ms` | `9.83 ms` | `sqlitegis 1.67x` |
+| `ST_Contains` window, R-tree-prefiltered | `10.40 us` | `12.99 us` | `sqlitegis 1.25x` |
+| `ST_Covers` bulk, unindexed | `5.82 ms` | `9.45 ms` | `sqlitegis 1.62x` |
+| `ST_Touches` bulk, unindexed | `9.22 ms` | `12.68 ms` | `sqlitegis 1.37x` |
+| `ST_Overlaps` bulk, unindexed | `8.96 ms` | `12.75 ms` | `sqlitegis 1.42x` |
+| `ST_Equals` bulk, unindexed | `9.31 ms` | `12.88 ms` | `sqlitegis 1.38x` |
+| `ST_DWithin` bulk, unindexed | `28.03 ms` | `34.41 ms` | `sqlitegis 1.23x` |
+| `ST_DistanceSphere` bulk | `30.02 ms` | `257.99 ms` | `sqlitegis 8.59x` |
+| `ST_DistanceSpheroid` bulk | `86.63 ms` | `318.77 ms` | `sqlitegis 3.68x` |
+| `ST_DWithinSphere` bulk, unindexed | `30.94 ms` | `255.73 ms` | `sqlitegis 8.27x` |
+| `ST_DWithinSpheroid` bulk, unindexed | `85.35 ms` | `315.55 ms` | `sqlitegis 3.70x` |
+| `ST_Distance` planar bulk | `28.61 ms` | `34.43 ms` | `sqlitegis 1.20x` |
+| `ST_AsText` scalar throughput | `27.96 ms` | `48.97 ms` | `sqlitegis 1.75x` |
+| `ST_AsGeoJSON` serialize throughput | `31.44 ms` | `65.64 ms` | `sqlitegis 2.09x` |
+| `ST_AsBinary` serialize throughput | `26.84 ms` | `7.25 ms` | `SpatiaLite 3.70x` |
+| `ST_GeomFromText` parse throughput | `1.44 ms` | `2.99 ms` | `sqlitegis 2.08x` |
+| `ST_GeomFromWKB` parse throughput | `1.50 ms` | `2.97 ms` | `sqlitegis 1.98x` |
+| `ST_Buffer` scalar throughput | `311.08 ms` | `714.05 ms` | `sqlitegis 2.30x` |
+| `ST_Buffer` + `ST_Intersection` bulk | `36.27 ms` | `28.46 ms` | `SpatiaLite 1.27x` |
+| `ST_Centroid` scalar throughput | `55.27 ms` | `38.06 ms` | `SpatiaLite 1.45x` |
+| `ST_Envelope` scalar throughput | `113.79 ms` | `32.59 ms` | `SpatiaLite 3.49x` |
+| `ST_Area` sum | `40.18 ms` | `18.82 ms` | `SpatiaLite 2.13x` |
+| `ST_Perimeter` sum | `40.65 ms` | `18.98 ms` | `SpatiaLite 2.14x` |
+| `ST_X` sum | `14.63 ms` | `4.91 ms` | `SpatiaLite 2.98x` |
+| `ST_Y` sum | `14.59 ms` | `5.02 ms` | `SpatiaLite 2.90x` |
+| `ST_Difference` disjoint bulk | `250.00 ms` | `218.54 ms` | `SpatiaLite 1.14x` |
+| `ST_Difference` overlapping bulk | `162.62 ms` | `327.18 ms` | `sqlitegis 2.01x` |
+| `ST_Union` disjoint bulk | `88.08 ms` | `84.08 ms` | `SpatiaLite 1.05x` |
+| `ST_SymDifference` disjoint bulk | `87.26 ms` | `83.69 ms` | `SpatiaLite 1.04x` |
 
-sqlitegis is ahead on 12 of the 17 workloads and within noise on two more. The wins on the binary predicates (`ST_Intersects`, `ST_Contains`, `ST_Covers`, `ST_Touches`, `ST_Overlaps`, `ST_Equals`) come from an MBR-only fastpath that walks the EWKB bytes for the bounding rectangle and short-circuits the full geometric test when bboxes cannot satisfy the predicate. On filter-heavy "find features in a window" workloads (the vast majority of real PostGIS queries) the negative-row path stops paying for a full decode and runs in ~60 ns instead of a few microseconds per row.
+sqlitegis is ahead on 20 of the 31 workloads, within run-to-run noise on two more (`ST_Union` and `ST_SymDifference` disjoint), and behind on nine. The headline patterns:
 
-The geodesic margin comes from SpatiaLite's 3-arg `ST_Distance(g1, g2, use_ellipsoid)` paying ellipsoid setup cost even on the sphere branch, while `ST_DistanceSphere` is a direct Haversine on `f64` lat/lon pairs.
+**Predicate wins.** The binary predicates (`ST_Intersects`, `ST_Contains`, `ST_Covers`, `ST_Touches`, `ST_Overlaps`, `ST_Equals`) win 1.2x to 1.7x via an MBR-only fastpath that walks the EWKB bytes for the bounding rectangle and short-circuits the full geometric test when bboxes cannot satisfy the predicate. On filter-heavy "find features in a window" workloads the negative-row path stops paying for a full decode and runs in ~60 ns instead of a few microseconds per row.
 
-`ST_Union` and `ST_SymDifference` use a wire-level fastpath on disjoint inputs: a dedicated helper splices the two input EWKB blobs into a `MultiPolygon` result without decoding either side. This avoids both the `geo::BooleanOps` sweep AND the per-row decode/serialize round-trip, closing the gap against SpatiaLite from ~2.5x to within run-to-run noise.
+**Geodesic family wins.** All five geodesic workloads (`ST_DistanceSphere`, `ST_DistanceSpheroid`, `ST_DWithinSphere`, `ST_DWithinSpheroid`, planar `ST_Distance`) put sqlitegis ahead, ranging from 1.2x to 8.6x. SpatiaLite's 3-arg `ST_Distance(g1, g2, use_ellipsoid)` pays PROJ-based ellipsoid setup cost even on the sphere branch; sqlitegis uses direct Haversine on `f64` lat/lon pairs for the sphere variant and `geographiclib-rs` for the ellipsoid variant.
 
-The remaining gaps are GEOS-favored. `ST_Centroid` and `ST_Buffer + ST_Intersection` lose by under 1.5x on workloads where decades of GEOS optimisation show up. `ST_Difference` on disjoint inputs loses by 1.10x for the same reason as the other binary set ops did before the bytes-only emit landed: extending the same splice trick to `ST_Difference` would require returning A unchanged (not a concatenation) but is otherwise mechanical.
+**Set-op wire-level fastpath.** `ST_Union` and `ST_SymDifference` on disjoint inputs splice the two input EWKB blobs into a `MultiPolygon` result without decoding either side. That closes the SpatiaLite gap from ~2.5x to within run-to-run noise. `ST_Difference` overlapping unexpectedly wins 2x even on the BooleanOps slow path. `ST_Difference` disjoint still loses by 1.14x; extending the splice trick to "return A unchanged" would close it.
+
+**I/O wins, with one exception.** `ST_GeomFromText` and `ST_GeomFromWKB` parse 2x faster, `ST_AsText` serialises 1.75x faster, `ST_AsGeoJSON` 2x faster. The exception is `ST_AsBinary` at 3.70x slower: today it round-trips through `geo::Geometry` plus geozero serializer even though the conversion from EWKB to ISO WKB is byte-level trivial for XY inputs (strip SRID flag from type word, strip the SRID bytes, copy the rest). Identified optimisation candidate.
+
+**Remaining GEOS-favored gaps.** `ST_Centroid` and `ST_Buffer + ST_Intersection` lose by under 1.5x where decades of GEOS optimisation show up. `ST_Envelope` loses 3.49x for the same reason `ST_AsBinary` does: today goes through full decode + bounding rect + serialize, when `extract_mbr` already walks the EWKB and an MBR-fastpath would build the 5-vertex result polygon by hand. Identified optimisation candidate.
+
+**Surprise scalar losses.** `ST_X`, `ST_Y`, `ST_Area`, `ST_Perimeter` lose ~2-3x on what should be near-trivial header walks. SpatiaLite likely binds these as thin C wrappers that read a few EWKB bytes directly; sqlitegis goes through geozero's full decode path. A header-walk-only fastpath for these (in the spirit of `extract_mbr`) is plausible follow-up work.
 
 ## SpatiaLite naming quirks worth knowing
 
@@ -60,7 +80,8 @@ While porting bench queries between the two libraries, the following function-na
 - `ST_DistanceSphere(g1, g2)` (PostGIS / sqlitegis) is `ST_Distance(g1, g2, 0)` in SpatiaLite 5.1.0.
 - `ST_DistanceSpheroid(g1, g2)` is `ST_Distance(g1, g2, 1)` in SpatiaLite 5.1.0.
 - `ST_MakeEnvelope(xmin, ymin, xmax, ymax, srid)` is not present in SpatiaLite 5.1.0; bench code constructs the envelope as a `POLYGON` WKT literal instead.
-- `ST_DWithin(g1, g2, dist)` is not present in SpatiaLite 5.1.0; bench code rewrites it as `ST_Distance(g1, g2) <= dist`.
+- `ST_DWithin(g1, g2, dist)` is not present in SpatiaLite 5.1.0; bench code rewrites it as `ST_Distance(g1, g2) <= dist`. The same rewrite applies to `ST_DWithinSphere` (`ST_Distance(g1, g2, 0) <= dist`) and `ST_DWithinSpheroid` (`ST_Distance(g1, g2, 1) <= dist`).
+- `ST_AsGeoJSON(g)` (PostGIS / sqlitegis) is `AsGeoJSON(g)` (no `ST_` prefix) in SpatiaLite 5.1.0.
 - `GreatCircleDistance` was present in SpatiaLite 4.x but removed in 5.x.
 
 ## Reproducing
