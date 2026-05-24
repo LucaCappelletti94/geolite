@@ -723,6 +723,355 @@ fn bench_sym_difference_disjoint(c: &mut Criterion) {
     }
 }
 
+// ---- Geodesic family (extends bench_distance_sphere) -----------------
+
+/// `ST_DistanceSpheroid`: ellipsoid (WGS84) distance per row. Mirrors
+/// the existing `bench_distance_sphere` shape with SpatiaLite's 3-arg
+/// `ST_Distance(g1, g2, 1)` form for the ellipsoid branch.
+fn bench_distance_spheroid(c: &mut Criterion) {
+    let db_g = unsafe { open_sqlitegis_db() };
+    let db_s = unsafe { open_spatialite_db() };
+    let sql_g =
+        "SELECT SUM(ST_DistanceSpheroid(geom, ST_GeomFromText('POINT(0 0)', 4326))) FROM places";
+    let sql_s = "SELECT SUM(ST_Distance(geom, ST_GeomFromText('POINT(0 0)', 4326), 1)) FROM places";
+
+    let mut group = c.benchmark_group("Geodesic distance spheroid bulk");
+    group.throughput(Throughput::Elements(N_POINTS as u64));
+    group.bench_function(BenchmarkId::new("sqlitegis", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_g, sql_g)) })
+    });
+    group.bench_function(BenchmarkId::new("spatialite", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_s, sql_s)) })
+    });
+    group.finish();
+
+    unsafe {
+        sqlite3_close(db_g);
+        sqlite3_close(db_s);
+    }
+}
+
+/// `ST_DWithinSphere`: Haversine within-distance predicate. SpatiaLite
+/// 5.x has no native `ST_DWithinSphere`; the equivalent is
+/// `ST_Distance(g1, g2, 0) <= threshold`.
+fn bench_bulk_dwithin_sphere_unindexed(c: &mut Criterion) {
+    let db_g = unsafe { open_sqlitegis_db() };
+    let db_s = unsafe { open_spatialite_db() };
+    let sql_g = "SELECT COUNT(*) FROM places \
+                 WHERE ST_DWithinSphere(geom, ST_GeomFromText('POINT(0 0)', 4326), 500000.0)";
+    let sql_s = "SELECT COUNT(*) FROM places \
+                 WHERE ST_Distance(geom, ST_GeomFromText('POINT(0 0)', 4326), 0) <= 500000.0";
+
+    let mut group = c.benchmark_group("Unindexed ST_DWithinSphere bulk");
+    group.throughput(Throughput::Elements(N_POINTS as u64));
+    group.bench_function(BenchmarkId::new("sqlitegis", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_g, sql_g)) })
+    });
+    group.bench_function(BenchmarkId::new("spatialite", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_s, sql_s)) })
+    });
+    group.finish();
+
+    unsafe {
+        sqlite3_close(db_g);
+        sqlite3_close(db_s);
+    }
+}
+
+/// `ST_DWithinSpheroid`: ellipsoid within-distance predicate. SpatiaLite
+/// 5.x rewrite is `ST_Distance(g1, g2, 1) <= threshold`.
+fn bench_bulk_dwithin_spheroid_unindexed(c: &mut Criterion) {
+    let db_g = unsafe { open_sqlitegis_db() };
+    let db_s = unsafe { open_spatialite_db() };
+    let sql_g = "SELECT COUNT(*) FROM places \
+                 WHERE ST_DWithinSpheroid(geom, ST_GeomFromText('POINT(0 0)', 4326), 500000.0)";
+    let sql_s = "SELECT COUNT(*) FROM places \
+                 WHERE ST_Distance(geom, ST_GeomFromText('POINT(0 0)', 4326), 1) <= 500000.0";
+
+    let mut group = c.benchmark_group("Unindexed ST_DWithinSpheroid bulk");
+    group.throughput(Throughput::Elements(N_POINTS as u64));
+    group.bench_function(BenchmarkId::new("sqlitegis", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_g, sql_g)) })
+    });
+    group.bench_function(BenchmarkId::new("spatialite", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_s, sql_s)) })
+    });
+    group.finish();
+
+    unsafe {
+        sqlite3_close(db_g);
+        sqlite3_close(db_s);
+    }
+}
+
+// ---- Bbox + set ops --------------------------------------------------
+
+/// `ST_Envelope` scalar throughput: extract the bounding-box polygon of
+/// every region. Wrapping in `SUM(ST_Area(...))` forces the consumer
+/// to inspect the produced envelope so SQLite cannot elide the call.
+fn bench_envelope_throughput(c: &mut Criterion) {
+    let db_g = unsafe { open_sqlitegis_db() };
+    let db_s = unsafe { open_spatialite_db() };
+    let sql = "SELECT SUM(ST_Area(ST_Envelope(geom))) FROM regions";
+
+    let mut group = c.benchmark_group("ST_Envelope scalar throughput");
+    group.throughput(Throughput::Elements(N_POINTS as u64));
+    group.bench_function(BenchmarkId::new("sqlitegis", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_g, sql)) })
+    });
+    group.bench_function(BenchmarkId::new("spatialite", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_s, sql)) })
+    });
+    group.finish();
+
+    unsafe {
+        sqlite3_close(db_g);
+        sqlite3_close(db_s);
+    }
+}
+
+/// `ST_Difference` against a constant globe-sized polygon. Every region
+/// MBR overlaps the LHS so the disjoint-MBR fastpath never fires and
+/// the bench measures the BooleanOps slow path. Complements the
+/// existing `ST_Difference disjoint bulk` group which exercises the
+/// fastpath instead.
+fn bench_difference_overlapping(c: &mut Criterion) {
+    let db_g = unsafe { open_sqlitegis_db() };
+    let db_s = unsafe { open_spatialite_db() };
+    let sql = "SELECT COUNT(*) FROM regions \
+               WHERE NOT ST_IsEmpty(ST_Difference( \
+                   geom, \
+                   ST_GeomFromText('POLYGON((-180 -90,180 -90,180 90,-180 90,-180 -90))', 4326) \
+               ))";
+
+    let mut group = c.benchmark_group("ST_Difference overlapping bulk");
+    group.throughput(Throughput::Elements(N_POINTS as u64));
+    group.bench_function(BenchmarkId::new("sqlitegis", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_g, sql)) })
+    });
+    group.bench_function(BenchmarkId::new("spatialite", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_s, sql)) })
+    });
+    group.finish();
+
+    unsafe {
+        sqlite3_close(db_g);
+        sqlite3_close(db_s);
+    }
+}
+
+// ---- I/O round-trip --------------------------------------------------
+
+/// `ST_GeomFromText` parse throughput. Constant WKT, 50k repeats.
+/// Measures the WKT-to-EWKB parse cost in isolation.
+fn bench_geomfromtext_throughput(c: &mut Criterion) {
+    let db_g = unsafe { open_sqlitegis_db() };
+    let db_s = unsafe { open_spatialite_db() };
+    let sql = "SELECT COUNT(ST_GeomFromText('POINT(1 2)', 4326)) FROM places";
+
+    let mut group = c.benchmark_group("ST_GeomFromText parse throughput");
+    group.throughput(Throughput::Elements(N_POINTS as u64));
+    group.bench_function(BenchmarkId::new("sqlitegis", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_g, sql)) })
+    });
+    group.bench_function(BenchmarkId::new("spatialite", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_s, sql)) })
+    });
+    group.finish();
+
+    unsafe {
+        sqlite3_close(db_g);
+        sqlite3_close(db_s);
+    }
+}
+
+/// `ST_GeomFromWKB` parse throughput. SQLite folds the inner
+/// `ST_AsBinary(ST_Point(...))` constant subexpression so only
+/// `ST_GeomFromWKB` fires per row, on a precomputed WKB blob.
+fn bench_geomfromwkb_throughput(c: &mut Criterion) {
+    let db_g = unsafe { open_sqlitegis_db() };
+    let db_s = unsafe { open_spatialite_db() };
+    let sql = "SELECT COUNT(ST_GeomFromWKB(ST_AsBinary(ST_Point(1, 2)), 4326)) FROM places";
+
+    let mut group = c.benchmark_group("ST_GeomFromWKB parse throughput");
+    group.throughput(Throughput::Elements(N_POINTS as u64));
+    group.bench_function(BenchmarkId::new("sqlitegis", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_g, sql)) })
+    });
+    group.bench_function(BenchmarkId::new("spatialite", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_s, sql)) })
+    });
+    group.finish();
+
+    unsafe {
+        sqlite3_close(db_g);
+        sqlite3_close(db_s);
+    }
+}
+
+/// `ST_AsBinary` serialize throughput: EWKB-to-ISO-WKB conversion on
+/// every place row. `SUM(LENGTH(...))` ensures the produced blob is
+/// consumed.
+fn bench_asbinary_throughput(c: &mut Criterion) {
+    let db_g = unsafe { open_sqlitegis_db() };
+    let db_s = unsafe { open_spatialite_db() };
+    let sql = "SELECT SUM(LENGTH(ST_AsBinary(geom))) FROM places";
+
+    let mut group = c.benchmark_group("ST_AsBinary serialize throughput");
+    group.throughput(Throughput::Elements(N_POINTS as u64));
+    group.bench_function(BenchmarkId::new("sqlitegis", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_g, sql)) })
+    });
+    group.bench_function(BenchmarkId::new("spatialite", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_s, sql)) })
+    });
+    group.finish();
+
+    unsafe {
+        sqlite3_close(db_g);
+        sqlite3_close(db_s);
+    }
+}
+
+/// `ST_AsGeoJSON` serialize throughput: EWKB-to-GeoJSON conversion per
+/// row. SpatiaLite 5.x exposes the function as `AsGeoJSON` (no `ST_`
+/// prefix) so the queries are split. `SUM(LENGTH(...))` consumes the
+/// result string.
+fn bench_asgeojson_throughput(c: &mut Criterion) {
+    let db_g = unsafe { open_sqlitegis_db() };
+    let db_s = unsafe { open_spatialite_db() };
+    let sql_g = "SELECT SUM(LENGTH(ST_AsGeoJSON(geom))) FROM places";
+    let sql_s = "SELECT SUM(LENGTH(AsGeoJSON(geom))) FROM places";
+
+    let mut group = c.benchmark_group("ST_AsGeoJSON serialize throughput");
+    group.throughput(Throughput::Elements(N_POINTS as u64));
+    group.bench_function(BenchmarkId::new("sqlitegis", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_g, sql_g)) })
+    });
+    group.bench_function(BenchmarkId::new("spatialite", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_s, sql_s)) })
+    });
+    group.finish();
+
+    unsafe {
+        sqlite3_close(db_g);
+        sqlite3_close(db_s);
+    }
+}
+
+// ---- Scalar measurement + coord accessors ----------------------------
+
+/// `ST_Area` on regions: sum the planar area of every polygon.
+fn bench_area_throughput(c: &mut Criterion) {
+    let db_g = unsafe { open_sqlitegis_db() };
+    let db_s = unsafe { open_spatialite_db() };
+    let sql = "SELECT SUM(ST_Area(geom)) FROM regions";
+
+    let mut group = c.benchmark_group("ST_Area sum");
+    group.throughput(Throughput::Elements(N_POINTS as u64));
+    group.bench_function(BenchmarkId::new("sqlitegis", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_g, sql)) })
+    });
+    group.bench_function(BenchmarkId::new("spatialite", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_s, sql)) })
+    });
+    group.finish();
+
+    unsafe {
+        sqlite3_close(db_g);
+        sqlite3_close(db_s);
+    }
+}
+
+/// `ST_Distance` (planar Euclidean) against a constant origin point,
+/// one call per place row.
+fn bench_distance_planar(c: &mut Criterion) {
+    let db_g = unsafe { open_sqlitegis_db() };
+    let db_s = unsafe { open_spatialite_db() };
+    let sql = "SELECT SUM(ST_Distance(geom, ST_GeomFromText('POINT(0 0)', 4326))) FROM places";
+
+    let mut group = c.benchmark_group("ST_Distance planar bulk");
+    group.throughput(Throughput::Elements(N_POINTS as u64));
+    group.bench_function(BenchmarkId::new("sqlitegis", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_g, sql)) })
+    });
+    group.bench_function(BenchmarkId::new("spatialite", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_s, sql)) })
+    });
+    group.finish();
+
+    unsafe {
+        sqlite3_close(db_g);
+        sqlite3_close(db_s);
+    }
+}
+
+/// `ST_Perimeter` on regions: polygon-perimeter sum.
+fn bench_perimeter_throughput(c: &mut Criterion) {
+    let db_g = unsafe { open_sqlitegis_db() };
+    let db_s = unsafe { open_spatialite_db() };
+    let sql = "SELECT SUM(ST_Perimeter(geom)) FROM regions";
+
+    let mut group = c.benchmark_group("ST_Perimeter sum");
+    group.throughput(Throughput::Elements(N_POINTS as u64));
+    group.bench_function(BenchmarkId::new("sqlitegis", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_g, sql)) })
+    });
+    group.bench_function(BenchmarkId::new("spatialite", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_s, sql)) })
+    });
+    group.finish();
+
+    unsafe {
+        sqlite3_close(db_g);
+        sqlite3_close(db_s);
+    }
+}
+
+/// `ST_X` coord accessor on places. Header-walk-only.
+fn bench_x_throughput(c: &mut Criterion) {
+    let db_g = unsafe { open_sqlitegis_db() };
+    let db_s = unsafe { open_spatialite_db() };
+    let sql = "SELECT SUM(ST_X(geom)) FROM places";
+
+    let mut group = c.benchmark_group("ST_X sum");
+    group.throughput(Throughput::Elements(N_POINTS as u64));
+    group.bench_function(BenchmarkId::new("sqlitegis", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_g, sql)) })
+    });
+    group.bench_function(BenchmarkId::new("spatialite", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_s, sql)) })
+    });
+    group.finish();
+
+    unsafe {
+        sqlite3_close(db_g);
+        sqlite3_close(db_s);
+    }
+}
+
+/// `ST_Y` coord accessor on places. Header-walk-only.
+fn bench_y_throughput(c: &mut Criterion) {
+    let db_g = unsafe { open_sqlitegis_db() };
+    let db_s = unsafe { open_spatialite_db() };
+    let sql = "SELECT SUM(ST_Y(geom)) FROM places";
+
+    let mut group = c.benchmark_group("ST_Y sum");
+    group.throughput(Throughput::Elements(N_POINTS as u64));
+    group.bench_function(BenchmarkId::new("sqlitegis", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_g, sql)) })
+    });
+    group.bench_function(BenchmarkId::new("spatialite", N_POINTS), |b| {
+        b.iter(|| unsafe { black_box(query_count(db_s, sql)) })
+    });
+    group.finish();
+
+    unsafe {
+        sqlite3_close(db_g);
+        sqlite3_close(db_s);
+    }
+}
+
 criterion_group!(
     benches,
     bench_bulk_intersects_unindexed,
@@ -742,5 +1091,19 @@ criterion_group!(
     bench_bulk_dwithin_unindexed,
     bench_union_disjoint,
     bench_sym_difference_disjoint,
+    bench_distance_spheroid,
+    bench_bulk_dwithin_sphere_unindexed,
+    bench_bulk_dwithin_spheroid_unindexed,
+    bench_envelope_throughput,
+    bench_difference_overlapping,
+    bench_geomfromtext_throughput,
+    bench_geomfromwkb_throughput,
+    bench_asbinary_throughput,
+    bench_asgeojson_throughput,
+    bench_area_throughput,
+    bench_distance_planar,
+    bench_perimeter_throughput,
+    bench_x_throughput,
+    bench_y_throughput,
 );
 criterion_main!(benches);
