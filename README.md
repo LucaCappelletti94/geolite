@@ -67,7 +67,7 @@ Geodesic functions (`ST_DistanceSphere`, `ST_DistanceSpheroid`, `ST_LengthSphere
 
 ## Benchmarks
 
-See [BENCHMARKS.md](https://github.com/LucaCappelletti94/sqlitegis/blob/main/BENCHMARKS.md) for the full R-tree and SpatiaLite comparison reports. Headline: on a 50k-row dataset, sqlitegis wins 12 of 17 head-to-head workloads against SpatiaLite, with the geodesic distance bench 8.45x faster and the binary predicates 1.2x to 1.7x faster thanks to an MBR-only fastpath. SpatiaLite still wins on `ST_Union` and `ST_SymDifference` (2.5x).
+See [BENCHMARKS.md](https://github.com/LucaCappelletti94/sqlitegis/blob/main/BENCHMARKS.md) for the full R-tree and SpatiaLite comparison reports. Headline: on a 50k-row dataset across 31 head-to-head workloads, sqlitegis wins 20 (geodesic family 3.7x to 8.6x faster, binary predicates 1.2x to 1.7x via an MBR-only fastpath, I/O parse paths 2x faster) and loses 9 (`ST_Envelope`, `ST_AsBinary`, and the per-row scalar accessors `ST_X`/`ST_Y`/`ST_Area`/`ST_Perimeter` go through full EWKB decode where SpatiaLite has thin-C-wrapper shortcuts).
 
 ## Contributing
 
