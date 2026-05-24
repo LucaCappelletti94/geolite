@@ -337,6 +337,13 @@ pub fn st_crosses(a: &[u8], b: &[u8]) -> Result<bool> {
 /// assert!(!st_overlaps(&a, &far).unwrap());
 /// ```
 pub fn st_overlaps(a: &[u8], b: &[u8]) -> Result<bool> {
+    // MBR-only fastpath. MBR-disjoint geometries cannot overlap
+    // (overlapping requires shared interior points).
+    if let (Ok(Some(ra)), Ok(Some(rb))) = (extract_mbr(a), extract_mbr(b)) {
+        if !ra.intersects(&rb) {
+            return Ok(false);
+        }
+    }
     let (ga, gb, _) = parse_ewkb_pair(a, b)?;
     Ok(ga.relate(&gb).is_overlaps())
 }
@@ -543,6 +550,13 @@ mod tests {
         assert!(!st_contains(&a, &b).unwrap());
         // Symmetric: ST_Within delegates to st_contains so inherits the fastpath.
         assert!(!st_within(&b, &a).unwrap());
+    }
+
+    #[test]
+    fn overlaps_mbr_disjoint_returns_false() {
+        let a = geom_from_text("POLYGON((0 0,2 0,2 2,0 2,0 0))", None).unwrap();
+        let far = geom_from_text("POLYGON((10 10,12 10,12 12,10 12,10 10))", None).unwrap();
+        assert!(!st_overlaps(&a, &far).unwrap());
     }
 
     #[test]
