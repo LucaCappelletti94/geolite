@@ -286,6 +286,14 @@ pub fn st_equals(a: &[u8], b: &[u8]) -> Result<bool> {
 /// assert!(!st_touches(&a, &far).unwrap());
 /// ```
 pub fn st_touches(a: &[u8], b: &[u8]) -> Result<bool> {
+    // MBR-only fastpath. MBR-disjoint geometries cannot touch (touching
+    // requires at least one shared boundary point). Same shortcut shape
+    // as `st_intersects`.
+    if let (Ok(Some(ra)), Ok(Some(rb))) = (extract_mbr(a), extract_mbr(b)) {
+        if !ra.intersects(&rb) {
+            return Ok(false);
+        }
+    }
     let (ga, gb, _) = parse_ewkb_pair(a, b)?;
     // geo 0.32: is_touches() takes 0 arguments
     Ok(ga.relate(&gb).is_touches())
@@ -535,6 +543,13 @@ mod tests {
         assert!(!st_contains(&a, &b).unwrap());
         // Symmetric: ST_Within delegates to st_contains so inherits the fastpath.
         assert!(!st_within(&b, &a).unwrap());
+    }
+
+    #[test]
+    fn touches_mbr_disjoint_returns_false() {
+        let a = geom_from_text("POLYGON((0 0,1 0,1 1,0 1,0 0))", None).unwrap();
+        let far = geom_from_text("POLYGON((10 10,11 10,11 11,10 11,10 10))", None).unwrap();
+        assert!(!st_touches(&a, &far).unwrap());
     }
 
     #[test]
