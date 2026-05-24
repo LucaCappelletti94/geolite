@@ -642,6 +642,103 @@ pub fn set_srid(blob: &[u8], new_srid: i32) -> Result<Vec<u8>> {
 /// let (geom, _srid) = parse_ewkb(&blob).unwrap();
 /// assert_eq!(geometry_type_name(&geom), "Polygon");
 /// ```
+/// Build a `MultiPolygon` EWKB by concatenating the polygon bodies of two
+/// inputs without ever decoding them. Both inputs must be `Polygon` or
+/// `MultiPolygon` and must share an SRID.
+///
+/// This is the wire-level fast path for `ST_Union` and `ST_SymDifference`
+/// when the inputs have disjoint MBRs: the geometric result IS just the
+/// concatenation of the two polygon lists, so we can avoid the round trip
+/// through `geo::Geometry` and `geozero`.
+///
+/// The output is always little-endian. Sub-polygon endianness is preserved
+/// for `MultiPolygon` inputs (each sub-polygon WKB has its own endian byte)
+/// and matches the input outer endian when wrapping a top-level `Polygon`.
+///
+/// # Example
+///
+/// ```
+/// use sqlitegis::core::ewkb::{concat_multipolygon_bodies, parse_ewkb_header, WKB_MULTIPOLYGON};
+/// use sqlitegis::core::functions::io::geom_from_text;
+///
+/// let a = geom_from_text("POLYGON((0 0,1 0,1 1,0 1,0 0))", Some(4326)).unwrap();
+/// let b = geom_from_text("POLYGON((10 10,11 10,11 11,10 11,10 10))", Some(4326)).unwrap();
+/// let combined = concat_multipolygon_bodies(&a, &b).unwrap();
+/// let hdr = parse_ewkb_header(&combined).unwrap();
+/// assert_eq!(hdr.geom_type, WKB_MULTIPOLYGON);
+/// assert_eq!(hdr.srid, Some(4326));
+/// ```
+pub fn concat_multipolygon_bodies(a: &[u8], b: &[u8]) -> Result<Vec<u8>> {
+    let ha = parse_ewkb_header(a)?;
+    let hb = parse_ewkb_header(b)?;
+    ensure_xy_only(ha.has_z, ha.has_m)?;
+    ensure_xy_only(hb.has_z, hb.has_m)?;
+    let srid = ensure_matching_srid(ha.srid, hb.srid)?;
+
+    let mut out = Vec::with_capacity(a.len() + b.len() + 16);
+    out.push(0x01u8);
+    let type_word: u32 = WKB_MULTIPOLYGON | if srid.is_some() { EWKB_SRID_FLAG } else { 0 };
+    out.extend_from_slice(&type_word.to_le_bytes());
+    if let Some(s) = srid {
+        out.extend_from_slice(&s.to_le_bytes());
+    }
+    let count_pos = out.len();
+    out.extend_from_slice(&0u32.to_le_bytes());
+
+    let count_a = append_subpolygons(&mut out, a, &ha)?;
+    let count_b = append_subpolygons(&mut out, b, &hb)?;
+    let total = count_a.checked_add(count_b).ok_or_else(|| {
+        SqliteGisError::InvalidInput("concat_multipolygon_bodies: polygon count overflow".into())
+    })?;
+    out[count_pos..count_pos + 4].copy_from_slice(&total.to_le_bytes());
+
+    Ok(out)
+}
+
+/// Helper for `concat_multipolygon_bodies`. Appends the sub-polygon WKB
+/// bodies of `blob` (which `header` describes) to `out` and returns how
+/// many sub-polygons were appended.
+fn append_subpolygons(out: &mut Vec<u8>, blob: &[u8], header: &EwkbHeader) -> Result<u32> {
+    match header.geom_type {
+        WKB_POLYGON => {
+            // Wrap the top-level Polygon as a sub-polygon: endian byte +
+            // type code (no SRID flag on inner geometries) + body bytes.
+            let endian_byte = if header.little_endian { 0x01u8 } else { 0x00u8 };
+            out.push(endian_byte);
+            let type_bytes = if header.little_endian {
+                WKB_POLYGON.to_le_bytes()
+            } else {
+                WKB_POLYGON.to_be_bytes()
+            };
+            out.extend_from_slice(&type_bytes);
+            out.extend_from_slice(&blob[header.data_offset..]);
+            Ok(1)
+        }
+        WKB_MULTIPOLYGON => {
+            if blob.len() < header.data_offset + 4 {
+                return Err(SqliteGisError::InvalidEwkb(
+                    "MultiPolygon body too short to hold polygon count".into(),
+                ));
+            }
+            let count_bytes: [u8; 4] = blob[header.data_offset..header.data_offset + 4]
+                .try_into()
+                .expect("slice length checked above");
+            let count = if header.little_endian {
+                u32::from_le_bytes(count_bytes)
+            } else {
+                u32::from_be_bytes(count_bytes)
+            };
+            out.extend_from_slice(&blob[header.data_offset + 4..]);
+            Ok(count)
+        }
+        other => Err(SqliteGisError::InvalidInput(format!(
+            "concat_multipolygon_bodies: expected Polygon or MultiPolygon, got {}",
+            geom_type_name(other),
+        ))),
+    }
+}
+
+/// Return the human-readable name of a `geo::Geometry` enum variant.
 pub fn geometry_type_name(geom: &Geometry<f64>) -> &'static str {
     match geom {
         Geometry::Point(_) => "Point",
@@ -1175,5 +1272,98 @@ mod tests {
         blob.extend_from_slice(&1u32.to_le_bytes()); // nrings
         blob.extend_from_slice(&4u32.to_le_bytes()); // npoints
         assert!(extract_mbr(&blob).is_err());
+    }
+
+    // -- concat_multipolygon_bodies ---------------------------------
+
+    fn area_round_trip(blob: &[u8]) -> f64 {
+        use crate::core::functions::measurement::st_area;
+        st_area(blob).expect("decode and area")
+    }
+
+    fn poly_count(blob: &[u8]) -> u32 {
+        // Both Polygon and MultiPolygon: decode then count outer rings.
+        let (g, _) = parse_ewkb(blob).expect("decode");
+        match g {
+            Geometry::Polygon(_) => 1,
+            Geometry::MultiPolygon(mp) => mp.0.len() as u32,
+            other => panic!("expected Polygon or MultiPolygon, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn concat_two_polygons_no_srid_yields_multipolygon() {
+        let a = geom_from_text("POLYGON((0 0,1 0,1 1,0 1,0 0))", None).unwrap();
+        let b = geom_from_text("POLYGON((10 10,11 10,11 11,10 11,10 10))", None).unwrap();
+        let combined = concat_multipolygon_bodies(&a, &b).unwrap();
+        let hdr = parse_ewkb_header(&combined).unwrap();
+        assert_eq!(hdr.geom_type, WKB_MULTIPOLYGON);
+        assert_eq!(hdr.srid, None);
+        assert_eq!(poly_count(&combined), 2);
+        assert!((area_round_trip(&combined) - 2.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn concat_two_polygons_with_srid_preserves_srid() {
+        let a = geom_from_text("POLYGON((0 0,1 0,1 1,0 1,0 0))", Some(4326)).unwrap();
+        let b = geom_from_text("POLYGON((10 10,11 10,11 11,10 11,10 10))", Some(4326)).unwrap();
+        let combined = concat_multipolygon_bodies(&a, &b).unwrap();
+        let hdr = parse_ewkb_header(&combined).unwrap();
+        assert_eq!(hdr.geom_type, WKB_MULTIPOLYGON);
+        assert_eq!(hdr.srid, Some(4326));
+        assert_eq!(poly_count(&combined), 2);
+    }
+
+    #[test]
+    fn concat_polygon_with_multipolygon_combines_counts() {
+        let a = geom_from_text("POLYGON((0 0,1 0,1 1,0 1,0 0))", None).unwrap();
+        let b = geom_from_text(
+            "MULTIPOLYGON(((10 10,11 10,11 11,10 11,10 10)),((20 20,21 20,21 21,20 21,20 20)))",
+            None,
+        )
+        .unwrap();
+        let combined = concat_multipolygon_bodies(&a, &b).unwrap();
+        assert_eq!(poly_count(&combined), 3);
+        assert!((area_round_trip(&combined) - 3.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn concat_two_multipolygons_combines_counts() {
+        let a = geom_from_text(
+            "MULTIPOLYGON(((0 0,1 0,1 1,0 1,0 0)),((2 0,3 0,3 1,2 1,2 0)))",
+            None,
+        )
+        .unwrap();
+        let b = geom_from_text(
+            "MULTIPOLYGON(((10 10,11 10,11 11,10 11,10 10)),((20 20,21 20,21 21,20 21,20 20)))",
+            None,
+        )
+        .unwrap();
+        let combined = concat_multipolygon_bodies(&a, &b).unwrap();
+        assert_eq!(poly_count(&combined), 4);
+        assert!((area_round_trip(&combined) - 4.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn concat_empty_multipolygon_with_polygon_yields_single_polygon_multipoly() {
+        let a = geom_from_text("MULTIPOLYGON EMPTY", None).unwrap();
+        let b = geom_from_text("POLYGON((0 0,1 0,1 1,0 1,0 0))", None).unwrap();
+        let combined = concat_multipolygon_bodies(&a, &b).unwrap();
+        assert_eq!(poly_count(&combined), 1);
+        assert!((area_round_trip(&combined) - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn concat_rejects_srid_mismatch() {
+        let a = geom_from_text("POLYGON((0 0,1 0,1 1,0 1,0 0))", Some(4326)).unwrap();
+        let b = geom_from_text("POLYGON((10 10,11 10,11 11,10 11,10 10))", Some(3857)).unwrap();
+        assert!(concat_multipolygon_bodies(&a, &b).is_err());
+    }
+
+    #[test]
+    fn concat_rejects_non_polygon_input() {
+        let a = geom_from_text("LINESTRING(0 0,1 1)", None).unwrap();
+        let b = geom_from_text("POLYGON((0 0,1 0,1 1,0 1,0 0))", None).unwrap();
+        assert!(concat_multipolygon_bodies(&a, &b).is_err());
     }
 }
